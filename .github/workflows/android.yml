@@ -43,6 +43,21 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
+      - name: Detect connection configuration
+        id: connection
+        shell: bash
+        env:
+          FN_CONNECT_API_KEY: ${{ secrets.FN_CONNECT_API_KEY }}
+          FN_CONNECT_AUTHX_PREFIX: ${{ secrets.FN_CONNECT_AUTHX_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$FN_CONNECT_API_KEY" && -n "$FN_CONNECT_AUTHX_PREFIX" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::FN Connect secrets are not configured; this release ships with FNID login unavailable."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Prepare release notes
         if: steps.version.outputs.publish == 'true'
         id: release_notes
@@ -58,6 +73,9 @@ jobs:
             found { print }
           ' CHANGELOG.md > "$notes"
           test -s "$notes"
+          if [[ "${{ steps.connection.outputs.configured }}" != "true" ]]; then
+            printf '\n> 本版本未内置 FNID 连接配置：FNID 方式登录不可用，请使用 NAS 地址直连。\n' >> "$notes"
+          fi
           echo "path=$notes" >> "$GITHUB_OUTPUT"
 
       - name: Set up JDK 21
@@ -99,20 +117,25 @@ jobs:
           FN_MUSIC_UPDATE_MANIFEST_URL: ${{ vars.FN_MUSIC_UPDATE_MANIFEST_URL }}
         run: |
           set -euo pipefail
-          test -n "$FN_CONNECT_API_KEY"
-          test -n "$FN_CONNECT_AUTHX_PREFIX"
-          test -n "$FN_MUSIC_UPDATE_MANIFEST_URL"
-          echo "::add-mask::$FN_CONNECT_API_KEY"
-          echo "::add-mask::$FN_CONNECT_AUTHX_PREFIX"
-          if git grep -F -q -- "$FN_CONNECT_API_KEY" || git grep -F -q -- "$FN_CONNECT_AUTHX_PREFIX"; then
-            echo "::error::Tracked source contains plaintext release connection configuration."
-            exit 1
+          gradle_flags=(--no-daemon --stacktrace
+            --no-build-cache
+            "-PfnMusicReleaseStoreFile=${{ steps.signing.outputs.keystore }}")
+          if [[ "${{ steps.connection.outputs.configured }}" == "true" ]]; then
+            test -n "$FN_CONNECT_API_KEY"
+            test -n "$FN_CONNECT_AUTHX_PREFIX"
+            test -n "$FN_MUSIC_UPDATE_MANIFEST_URL"
+            echo "::add-mask::$FN_CONNECT_API_KEY"
+            echo "::add-mask::$FN_CONNECT_AUTHX_PREFIX"
+            if git grep -F -q -- "$FN_CONNECT_API_KEY" || git grep -F -q -- "$FN_CONNECT_AUTHX_PREFIX"; then
+              echo "::error::Tracked source contains plaintext release connection configuration."
+              exit 1
+            fi
+            gradle_flags+=("-PfnMusicUpdateManifestUrl=$FN_MUSIC_UPDATE_MANIFEST_URL")
+            export FN_CONNECT_API_KEY FN_CONNECT_AUTHX_PREFIX
+          else
+            gradle_flags+=("-PallowUnsignedRelease=true")
           fi
-          ./gradlew --no-daemon --stacktrace \
-            --no-build-cache \
-            -PfnMusicReleaseStoreFile="${{ steps.signing.outputs.keystore }}" \
-            -PfnMusicUpdateManifestUrl="$FN_MUSIC_UPDATE_MANIFEST_URL" \
-            :app:assembleSideloadRelease
+          ./gradlew "${gradle_flags[@]}" :app:assembleSideloadRelease
 
       - name: Verify and stage universal APK
         id: artifact
@@ -124,17 +147,17 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           set -euo pipefail
-          echo "::add-mask::$FN_CONNECT_API_KEY"
-          echo "::add-mask::$FN_CONNECT_AUTHX_PREFIX"
           source_apk="app/build/outputs/apk/sideload/release/fn-music-tv-$VERSION_NAME-sideload-release.apk"
           test -f "$source_apk"
 
-          scan_dir="$(mktemp -d "$RUNNER_TEMP/apk-plaintext-scan.XXXXXX")"
-          unzip -q "$source_apk" -d "$scan_dir"
-          if grep -R -a -F -q -- "$FN_CONNECT_API_KEY" "$scan_dir" || \
-             grep -R -a -F -q -- "$FN_CONNECT_AUTHX_PREFIX" "$scan_dir"; then
-            echo "::error::Release package contains plaintext connection configuration."
-            exit 1
+          if [[ -n "$FN_CONNECT_API_KEY" && -n "$FN_CONNECT_AUTHX_PREFIX" ]]; then
+            scan_dir="$(mktemp -d "$RUNNER_TEMP/apk-plaintext-scan.XXXXXX")"
+            unzip -q "$source_apk" -d "$scan_dir"
+            if grep -R -a -F -q -- "$FN_CONNECT_API_KEY" "$scan_dir" || \
+               grep -R -a -F -q -- "$FN_CONNECT_AUTHX_PREFIX" "$scan_dir"; then
+              echo "::error::Release package contains plaintext connection configuration."
+              exit 1
+            fi
           fi
 
           aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
