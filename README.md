@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" width="108" height="108" alt="回声台 Logo">
+  <img src="docs/assets/logo.svg" width="108" height="108" alt="飞牛音乐 Logo">
 </p>
 
-<h1 align="center">回声台</h1>
+<h1 align="center">飞牛音乐</h1>
 
 <p align="center">面向 Android TV 与 Android 投影设备，也可侧载至普通安卓车机的飞牛音乐第三方客户端</p>
 
@@ -77,11 +77,13 @@ adb install fn-music-tv-<version>-universal.apk
 | 连接方式 | 填写示例 | HTTPS 开关 |
 | --- | --- | --- |
 | 局域网 HTTP | `192.168.1.10:5666` | 关闭 |
-| HTTPS 域名 | `nas.example.com` | 打开 |
+| HTTPS 域名 | `nas.example.com:5667` | 打开 |
 | 完整 URL | `http://nas.example.com:5666` 或 `https://nas.example.com` | 会根据 URL 自动切换 |
 | FNID | `yourfnid` | 无需设置，应用会自动探测直连与中继 |
 
-1. 填写 NAS 地址、域名或 FNID。使用自定义端口时，请把端口一并写入地址。
+1. 填写 NAS 地址、域名或 FNID。使用自定义端口时，请把端口一并写入地址。开启 HTTPS 开关时，
+   裸地址或 IP 默认使用 5667 端口；证书签发域名与 IP 不一致的场景（家用 NAS 常见）App 会自动
+   接受，域名访问仍按严格校验。
 2. 输入飞牛音乐账号和密码。
 3. 如果飞牛 NAS 开启了外网访问码，请在“安全码”中填写该访问码；未启用时留空。
 4. 需要下次自动恢复会话时，保留“保持登录”。

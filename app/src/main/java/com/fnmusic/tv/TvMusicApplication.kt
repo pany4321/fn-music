@@ -19,6 +19,13 @@ class TvMusicApplication : Application(), PlaybackServiceDependencies {
 
     override fun onCreate() {
         super.onCreate()
+        // Player streams go through HttpsURLConnection (Media3 DefaultHttpDataSource):
+        // tolerate certificate hostname mismatch for raw-IP NAS targets, matching the
+        // API client policy. Domain targets keep strict verification.
+        val platformVerifier = javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier()
+        javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(
+            com.fnmusic.tv.core.data.api.NasHostnameVerifier(platformVerifier),
+        )
         container.startPlaybackRuntime()
     }
 }

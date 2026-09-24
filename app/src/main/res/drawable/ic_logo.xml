@@ -3,21 +3,34 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Charcoal rounded square -->
     <path
         android:fillColor="#111315"
-        android:pathData="M22,0H86C98.15,0 108,9.85 108,22V86C108,98.15 98.15,108 86,108H22C9.85,108 0,98.15 0,86V22C0,9.85 9.85,0 22,0Z" />
+        android:pathData="M22,0 H86 C98.15,0 108,9.85 108,22 V86 C108,98.15 98.15,108 86,108 H22 C9.85,108 0,98.15 0,86 V22 C0,9.85 9.85,0 22,0 Z" />
+    <!-- Coral record -->
+    <path
+        android:fillColor="#FF684D"
+        android:pathData="M24,54 a30,30 0 1 1 60,0 a30,30 0 1 1 -60,0 Z" />
+    <!-- Inner groove -->
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M15.19,52.95C23.2,52.95 24.47,30.16 36.07,30.16C48.09,30.16 48.73,76.36 60.54,76.36C72.56,76.36 72.77,34.38 84.38,34.38C90.28,34.38 91.34,45.35 92.81,51.89"
-        android:strokeColor="#FF684D"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="7.8" />
+        android:strokeColor="#111315"
+        android:strokeAlpha="0.22"
+        android:strokeWidth="1.5"
+        android:pathData="M33.5,54 a20.5,20.5 0 1 1 41.0,0 a20.5,20.5 0 1 1 -41.0,0 Z" />
+    <!-- Warm edge light -->
     <path
         android:fillColor="@android:color/transparent"
-        android:pathData="M20.67,62.23C29.74,62.23 31.22,44.72 41.13,44.72C51.26,44.72 51.68,63.49 60.96,63.49C70.88,63.49 71.93,48.3 81.21,48.3C85.43,48.3 87.96,50.41 89.65,52.95"
         android:strokeColor="#F5F1E8"
+        android:strokeAlpha="0.3"
+        android:strokeWidth="1.7"
+        android:pathData="M24,54 a30,30 0 1 1 60,0 a30,30 0 1 1 -60,0 Z" />
+    <!-- Sound wave pressed into the record -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#111315"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="4.43" />
+        android:strokeWidth="6.2"
+        android:pathData="M30,54 Q38.0,41.0 46.0,54 Q54.0,67.0 62.0,54 Q70.0,41.0 78.0,54" />
 </vector>

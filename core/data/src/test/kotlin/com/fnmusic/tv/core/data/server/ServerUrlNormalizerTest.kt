@@ -16,7 +16,7 @@ class ServerUrlNormalizerTest {
         assertEquals("https://nas.local/music/api/v1/", web.server.apiBase.toString())
         assertTrue(web.server.useHttps)
         val toggledHttps = ServerUrlNormalizer.normalize("nas.example.com", true) as ServerUrlResult.Valid
-        assertEquals("https://nas.example.com/music/api/v1/", toggledHttps.server.apiBase.toString())
+        assertEquals("https://nas.example.com:5667/music/api/v1/", toggledHttps.server.apiBase.toString())
         val customPort = ServerUrlNormalizer.normalize("nas.local:7443", true) as ServerUrlResult.Valid
         assertEquals("https://nas.local:7443/music/api/v1/", customPort.server.apiBase.toString())
         val explicitHttpPort = ServerUrlNormalizer.normalize("http://nas.local:80", false) as ServerUrlResult.Valid
@@ -132,7 +132,7 @@ class ServerUrlNormalizerTest {
             Triple(
                 "nas.example.com",
                 true,
-                "https://nas.example.com/music/api/v1/",
+                "https://nas.example.com:5667/music/api/v1/",
             ),
             Triple(
                 "nas.example.com:5443",

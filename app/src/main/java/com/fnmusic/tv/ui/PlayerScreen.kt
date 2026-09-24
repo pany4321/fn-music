@@ -11,6 +11,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -243,6 +249,7 @@ internal fun ImmersivePlayer(
     playback: PlaybackUiState,
     visualContinuity: PlayerVisualContinuity,
     onExitRoam: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val preferences by container.appPreferences.state.collectAsStateWithLifecycle()
     val nowPlayingPresentation by container.nowPlayingPresenter.state.collectAsStateWithLifecycle()
@@ -278,6 +285,8 @@ internal fun ImmersivePlayer(
     val queueFocus = remember { FocusRequester() }
     val exitRoamFocus = remember { FocusRequester() }
     val statusRetryFocus = remember { FocusRequester() }
+    val addToPlaylistFocus = remember { FocusRequester() }
+    var addToPlaylistVisible by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val roaming = playback.queueKind == QueueKind.Roam
     val playbackProgress = container.playbackController.progress.collectAsStateWithLifecycle()
@@ -424,6 +433,8 @@ internal fun ImmersivePlayer(
                     playFocus = playFocus,
                     nextFocus = nextFocus,
                     favoriteFocus = favoriteFocus,
+                    addToPlaylistFocus = addToPlaylistFocus,
+                    onAddToPlaylist = { addToPlaylistVisible = true },
                     modeFocus = modeFocus,
                     queueFocus = queueFocus,
                     exitRoamFocus = exitRoamFocus,
@@ -487,6 +498,27 @@ internal fun ImmersivePlayer(
                 onRemove = container.playbackController::removeQueueItem,
                 onInteraction = ::revealControls,
             )
+        }
+        if (addToPlaylistVisible) {
+            AddToPlaylistDialog(
+                container = container,
+                trackGuid = playback.mediaId,
+                onDismiss = { addToPlaylistVisible = false },
+            )
+        }
+        // Touch-first exit affordance for car units: always visible, out of the
+        // D-pad focus graph so the remote's layered Back behavior is unchanged.
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 20.dp, top = 14.dp)
+                .size(48.dp)
+                .background(Color(0xFF0E1314).copy(alpha = 0.72f), CircleShape)
+                .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("‹", fontSize = 30.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1418,6 +1450,7 @@ internal fun PlayerControlOverlay(
     playFocus: FocusRequester,
     nextFocus: FocusRequester,
     favoriteFocus: FocusRequester,
+    addToPlaylistFocus: FocusRequester,
     modeFocus: FocusRequester,
     queueFocus: FocusRequester,
     exitRoamFocus: FocusRequester,
@@ -1433,6 +1466,7 @@ internal fun PlayerControlOverlay(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onAddToPlaylist: () -> Unit,
     onCyclePlayMode: () -> Unit,
     onOpenQueue: () -> Unit,
     onExitRoam: () -> Unit,
@@ -1527,7 +1561,7 @@ internal fun PlayerControlOverlay(
                     focusRequester = favoriteFocus,
                     upFocus = progressFocus,
                     rightFocus = when {
-                        !roaming -> modeFocus
+                        !roaming -> addToPlaylistFocus
                         previousEnabled -> previousFocus
                         else -> playFocus
                     },
@@ -1538,6 +1572,21 @@ internal fun PlayerControlOverlay(
                         if (favoriteEnabled) onToggleFavorite()
                     },
                 )
+                if (!roaming) {
+                    PlayerSideActionButton(
+                        glyph = PlayerSideActionGlyph.AddToPlaylist,
+                        description = "添加到歌单",
+                        focusRequester = addToPlaylistFocus,
+                        upFocus = progressFocus,
+                        leftFocus = favoriteFocus,
+                        rightFocus = if (previousEnabled) previousFocus else playFocus,
+                        onFocus = onInteraction,
+                        onClick = {
+                            onInteraction()
+                            onAddToPlaylist()
+                        },
+                    )
+                }
                 if (!roaming) {
                     PlayerSideActionButton(
                         glyph = playModeGlyph(playMode),
@@ -1715,6 +1764,7 @@ private enum class PlayerSideActionGlyph {
     RepeatOne,
     Sequence,
     Queue,
+    AddToPlaylist,
 }
 
 private fun playModeGlyph(mode: PlayMode): PlayerSideActionGlyph = when (mode) {
@@ -1770,6 +1820,13 @@ private fun PlayerSideActionIcon(glyph: PlayerSideActionGlyph) {
                     line(0.49f, 0.44f, 0.56f, 0.39f)
                     line(0.56f, 0.39f, 0.56f, 0.61f)
                 }
+            }
+            PlayerSideActionGlyph.AddToPlaylist -> {
+                line(0.14f, 0.24f, 0.60f, 0.24f)
+                line(0.14f, 0.46f, 0.60f, 0.46f)
+                line(0.14f, 0.68f, 0.42f, 0.68f)
+                line(0.72f, 0.70f, 0.94f, 0.70f)
+                line(0.83f, 0.59f, 0.83f, 0.81f)
             }
             PlayerSideActionGlyph.Shuffle -> {
                 line(0.15f, 0.28f, 0.32f, 0.28f)
@@ -2224,3 +2281,101 @@ internal fun interpolatedLyricPosition(
 
 internal fun playerProgressFraction(positionMs: Long, durationMs: Long): Float =
     if (durationMs <= 0L) 0f else (positionMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
+
+@Composable
+private fun AddToPlaylistDialog(
+    container: AuthenticatedAppDependencies,
+    trackGuid: String,
+    onDismiss: () -> Unit,
+) {
+    val retainedStore = LocalLibraryRetainedState.current
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var pendingGuid by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        runCatching { container.musicRepository.playlists() }
+            .onSuccess { playlists = it }
+        loading = false
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .widthIn(max = 600.dp)
+                .fillMaxWidth(0.9f)
+                .background(FnColors.Surface, RoundedCornerShape(8.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+            when {
+                trackGuid.isBlank() -> Text(
+                    "当前没有正在播放的歌曲",
+                    color = FnColors.Muted,
+                    fontSize = 16.sp,
+                )
+                loading -> Text("正在加载歌单…", color = FnColors.Muted, fontSize = 16.sp)
+                playlists.isEmpty() -> Text("还没有歌单", color = FnColors.Muted, fontSize = 16.sp)
+                else -> Column(
+                    Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    playlists.forEach { playlist ->
+                        val adding = pendingGuid == playlist.guid.value
+                        Button(
+                            onClick = {
+                                if (pendingGuid != null) return@Button
+                                pendingGuid = playlist.guid.value
+                                scope.launch {
+                                    val result = runCatching {
+                                        container.musicRepository.addToPlaylist(playlist.guid.value, trackGuid)
+                                    }
+                                    pendingGuid = null
+                                    result
+                                        .onSuccess {
+                                            Toast.makeText(context, "已添加到「${playlist.name}」", Toast.LENGTH_SHORT).show()
+                                            onDismiss()
+                                        }
+                                        .onFailure {
+                                            Toast.makeText(context, "添加失败，请重试", Toast.LENGTH_SHORT).show()
+                                        }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            colors = ButtonDefaults.colors(
+                                containerColor = Color(0xFF1B201F),
+                                contentColor = FnColors.Text,
+                                focusedContainerColor = Color(0xFF303634),
+                                focusedContentColor = FnColors.Text,
+                            ),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Row(
+                                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    playlist.name,
+                                    fontSize = 18.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    if (adding) "添加中…" else "${playlist.trackCount ?: 0} 首",
+                                    color = FnColors.Muted,
+                                    fontSize = 13.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

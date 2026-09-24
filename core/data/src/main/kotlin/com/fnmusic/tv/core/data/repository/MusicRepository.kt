@@ -43,6 +43,9 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -203,6 +206,13 @@ class MusicRepository internal constructor(
     private val favoriteMutationMutex = Mutex()
     private val _favoriteState = MutableStateFlow(FavoriteLibraryState())
     val favoriteState: StateFlow<FavoriteLibraryState> = _favoriteState.asStateFlow()
+
+    // Derived playlist artwork: first-track cover ids per playlist guid, used when
+    // a playlist carries no cover of its own. Session-lifetime, cleared with the
+    // namespace.
+    private val _playlistCovers = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val playlistCovers: StateFlow<Map<String, List<String>>> = _playlistCovers.asStateFlow()
+    private val playlistCoverFetchInFlight = mutableSetOf<String>()
     private val artworkCache = ArtworkCache(
         root = context.cacheDir.resolve("artwork"),
         memoryCapacityBytes = ARTWORK_MEMORY_CAPACITY_BYTES,
@@ -231,6 +241,34 @@ class MusicRepository internal constructor(
         fetch = { session.authenticated { it.playlistTracks(guid, page) } },
     ) { it.toDomain() }.also(::observeFavoriteTracks)
 
+    /**
+     * Cover ids of the playlist's first tracks (at most [size]), for coverless
+     * playlist tiles. Failures settle to an empty list; both results are cached
+     * for the session and cleared with the namespace.
+     */
+    suspend fun playlistCoverCandidates(guid: String, size: Int = 3): List<String> {
+        _playlistCovers.value[guid]?.let { return it }
+        synchronized(playlistCoverFetchInFlight) {
+            if (guid in playlistCoverFetchInFlight) return _playlistCovers.value[guid].orEmpty()
+            playlistCoverFetchInFlight += guid
+        }
+        val covers = try {
+            session.authenticated { it.playlistTracks(guid, page = 1, size = size) }
+                .list
+                .mapNotNull { track -> track.coverId?.trim()?.takeIf(String::isNotEmpty) }
+                .distinct()
+                .take(size)
+        } catch (cause: CancellationException) {
+            synchronized(playlistCoverFetchInFlight) { playlistCoverFetchInFlight -= guid }
+            throw cause
+        } catch (_: Exception) {
+            emptyList()
+        }
+        synchronized(playlistCoverFetchInFlight) { playlistCoverFetchInFlight -= guid }
+        _playlistCovers.value = _playlistCovers.value + (guid to covers)
+        return covers
+    }
+
     suspend fun artists(page: Int, size: Int = 50) = cachedPage<ArtistDto, Artist>(
         sourceKey = sizedPageSourceKey("artists", size),
         page = page,
@@ -255,6 +293,25 @@ class MusicRepository internal constructor(
         fetch = { session.authenticated { it.artistAlbums(guid, page) } },
     ) { it.toDomain() }
 
+    /**
+     * Up to [count] albums sampled across the whole library: one probe call reads
+     * the total, then each album comes from a randomly picked server page so the
+     * set changes on every call.
+     */
+    suspend fun randomAlbums(count: Int = 12): List<Album> {
+        val probe = albums(page = 1, size = 1)
+        val total = probe.total ?: return probe.items.shuffled()
+        if (total <= count) {
+            return albums(page = 1, size = count).items.shuffled().take(count)
+        }
+        val lastPage = (total + count - 1) / count
+        val pages = (1..lastPage).shuffled().take(count)
+        val collected = coroutineScope {
+            pages.map { page -> async { albums(page = page, size = count).items } }.awaitAll().flatten()
+        }
+        return collected.shuffled().take(count)
+    }
+
     suspend fun albums(page: Int, size: Int = 50) = cachedPage<AlbumDto, Album>(
         sourceKey = sizedPageSourceKey("albums", size),
         page = page,
@@ -273,11 +330,31 @@ class MusicRepository internal constructor(
         fetch = { session.authenticated { it.albumTracks(guid, page) } },
     ) { it.toDomain() }.also(::observeFavoriteTracks)
 
-    suspend fun allTracks(page: Int) = cachedPage<TrackDto, Track>(
-        sourceKey = "all-tracks",
+    suspend fun allTracks(page: Int, size: Int = 50) = cachedPage<TrackDto, Track>(
+        sourceKey = sizedPageSourceKey("all-tracks", size),
         page = page,
-        fetch = { session.authenticated { it.allTracks(page) } },
+        pageSize = size,
+        fetch = { session.authenticated { it.allTracks(page, size) } },
     ) { it.toDomain() }.also(::observeFavoriteTracks)
+
+    /**
+     * Up to [count] tracks sampled across the whole library: one probe call reads
+     * the total, then each track comes from a randomly picked server page so the
+     * set changes on every call.
+     */
+    suspend fun randomTracks(count: Int = 12): List<Track> {
+        val probe = allTracks(page = 1, size = 1)
+        val total = probe.total ?: return probe.items.shuffled()
+        if (total <= count) {
+            return allTracks(page = 1, size = count).items.shuffled().take(count)
+        }
+        val lastPage = (total + count - 1) / count
+        val pages = (1..lastPage).shuffled().take(count)
+        val collected = coroutineScope {
+            pages.map { page -> async { allTracks(page = page, size = count).items } }.awaitAll().flatten()
+        }
+        return collected.shuffled().take(count)
+    }
 
     suspend fun favoriteTracks(page: Int): Page<Track> {
         val namespace = session.cacheNamespace()
@@ -291,6 +368,21 @@ class MusicRepository internal constructor(
         )
         observeFavoriteTracks(result, namespace)
         return result
+    }
+
+    suspend fun recentTracks(page: Int): Page<Track> {
+        val response = session.authenticated { it.playHistory(page, RECENT_PAGE_SIZE) }
+        return Page(
+            items = response.list.map(TrackDto::toDomain),
+            page = page,
+            pageSize = RECENT_PAGE_SIZE,
+            total = response.total,
+            sort = RECENT_SORT,
+        )
+    }
+
+    suspend fun addToPlaylist(playlistGuid: String, trackGuid: String) {
+        session.authenticated { it.addToPlaylist(playlistGuid, listOf(trackGuid)) }
     }
 
     suspend fun toggleFavorite(trackGuid: String, fallbackFavorite: Boolean): Result<Boolean> =
@@ -325,6 +417,7 @@ class MusicRepository internal constructor(
         is QueueSource.Album -> albumTracks(source.guid, page)
         is QueueSource.LibraryAllTracks -> allTracks(page)
         is QueueSource.Favorites -> favoriteTracks(page)
+        is QueueSource.Recent -> recentTracks(page)
     }
 
     suspend fun sharedLibraries(): List<SharedLibrary> = cachedIndex<List<SharedLibraryDto>, List<SharedLibrary>>(
@@ -424,6 +517,7 @@ class MusicRepository internal constructor(
         responses.invalidateNamespace(namespace)
         artworkCache.clearNamespace(namespace)
         localStore.clearNamespace(namespace, includeEssential)
+        _playlistCovers.value = emptyMap()
     }
 
     suspend fun clearLocalNamespace(includeEssential: Boolean) {
@@ -437,6 +531,7 @@ class MusicRepository internal constructor(
         responses.invalidateAll()
         artworkCache.clearAll()
         localStore.clearAllEvictable()
+        _playlistCovers.value = emptyMap()
     }
 
     suspend fun cacheUsage(): CacheUsage = CacheUsage(
@@ -630,6 +725,8 @@ class MusicRepository internal constructor(
         const val PAGE_SIZE = 50
         const val FAVORITE_PAGE_SIZE = 50
         const val FAVORITE_SORT = "favoriteAt,desc"
+        const val RECENT_SORT = "recent"
+        const val RECENT_PAGE_SIZE = 50
 
         fun defaultOnlineLyricsMatcher(): suspend (LyricsMatchRequest) -> LyricsMatchResult {
             val client = okhttp3.OkHttpClient.Builder()

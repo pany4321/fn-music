@@ -77,7 +77,7 @@ internal class UpdateCoordinator(
                 if (canRequestPackageInstalls()) {
                     prepareInstaller(current.manifest)
                 } else {
-                    finishInstallError("未允许回声台安装更新，请重新下载后再试", current.manifest)
+                    finishInstallError("未允许飞牛音乐安装更新，请重新下载后再试", current.manifest)
                 }
             }
             SystemHandoff.Installer -> {

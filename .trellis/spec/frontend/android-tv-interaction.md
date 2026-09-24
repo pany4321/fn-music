@@ -416,12 +416,13 @@ interface AuthenticatedAppActions {
   cross-module operations through `AuthenticatedAppActions`. Do not expose `AppContainer` to UI or
   duplicate logout/cache/playback ordering in a page callback. Playback error display may use the
   typed failure's display name, but behavior must use its typed properties.
-- The user-facing product name is `回声台`. `@string/app_name`, loading/login branding,
+- The user-facing product name is `飞牛音乐`. `@string/app_name`, loading/login branding,
   launcher label, baseline-profile selectors, README title, launcher icon, and TV banner must move
   together. The authenticated Home/My top bar keeps its left slot empty when no media is available;
-  it does not repeat the product name. The icon uses a charcoal background, a coral primary waveform, and a warm-white echo
-  waveform. Keep the same flat double-wave mark in both `ic_logo.xml` and `tv_banner.xml`; do not
-  add the retired teal node or play triangle. Internal package and command namespaces stay
+  it does not repeat the product name. The mark is a coral record with an inner groove and a charcoal sound wave pressed into it on a
+  charcoal rounded square, with a warm-white echo wave beside the record in `tv_banner.xml`. Keep
+  `ic_logo.xml`, `tv_banner.xml`, and `docs/assets/logo.svg` on the same geometry; do not reintroduce
+  the retired waveform-only mark, the teal node, or a play triangle. Internal package and command namespaces stay
   `com.fnmusic.tv` so a visual rebrand remains an in-place signed Android upgrade.
 - On the first entry to a grid, detail, song list, or settings route, wait until the relevant async
   content has reached a terminal initial-load state, then focus the first actionable item in reading
@@ -459,8 +460,14 @@ interface AuthenticatedAppActions {
   retained list. A successful initial load is not repeated on route re-entry. An empty failed list
   may retry on the next entry. The store is keyed by the signed-in user and must be discarded when
   the account changes.
-- Home's first content row is a fixed `Row` containing only Random Roam and Favorites. Playlists
-  begin in the second-row `LazyRow`, followed by All Playlists. The Favorites route reuses the
+- Home's content order is fixed: a `Row` of feature cards (Random Roam, Favorites, Recent), then a
+  `歌单` heading with the playlist `LazyRow` (up to 12 playlists plus the terminal All Playlists
+  entry), then a `随机专辑` heading with a 刷新 button and a 16-album row sampled by
+  `randomAlbums(16)`, then a `随机歌曲` heading with a 刷新 button and a 16-track row sampled by
+  `randomTracks(16)`. Both random rows load on entry and re-sample on their own refresh action;
+  tapping an album opens its detail route and tapping a song plays the sampled row as a fixed
+  (source-less) queue starting at that track. Refresh buttons are 88x38dp so they align with the
+  34sp headings. The Favorites route reuses the
   retained paged track collection under `favorites:tracks`; a successful favorite mutation revision
   refreshes that route so an unfavorited track cannot remain visible after returning from player.
 - Saveable and retained state have different ownership. Session summaries shared by Home/My/full
@@ -480,6 +487,14 @@ interface AuthenticatedAppActions {
   exact load fails, retain the real intermediate image. While neither variant is ready, render a
   neutral dark surface rather than a title or first-character card; remote input must never be
   required to make an already completed image load visible.
+- Coverless-playlist tiles follow the Favorites/Recent deck treatment: the repository
+  resolves up to three distinct first-track cover ids per playlist (`playlist/tracks`
+  `size=3`, session-cached and namespace-scoped) and the tile renders them as a horizontal
+  1-3 cover deck — this takes priority over the server-generated playlist cover; the server
+  cover remains the fallback when no track cover resolves, and the initial placeholder is
+  the final fallback. Fetching covers for a playlist must never block first paint.
+- The All Playlists grid carries the shared detail back button in its title row; Back or the
+  button both return to Home.
 - Missing and failed remote artwork uses the same media-specific fallback on cards and details.
   Favorites detail reuses the Home Favorites artwork; artists use the same circular first-character
   avatar at both sizes; tracks, playlists, and albums use the shared centered first-character
@@ -538,7 +553,7 @@ interface AuthenticatedAppActions {
 | Physical pointer taps an enabled Login action | Invoke its command exactly once; Login clears the submitted password and starts submission |
 | Physical pointer taps a disabled Login action | Do not invoke its command or create a focus target |
 | 1920x1080 login first frame | Show the complete Login button with no clipped bottom edge or overlapping control |
-| Launcher/app surface after rebrand | Display `回声台`; icon and TV banner share the coral/warm-white double-wave mark |
+| Launcher/app surface after rebrand | Display `飞牛音乐`; icon and TV banner share the coral record mark |
 | Existing signed installation receives the rebrand | Preserve `com.fnmusic.tv` and signer; increment managed version code |
 | New presentation identity/revision | Publish three `Loading` states and cancel the prior token |
 | Late resource result has an old namespace/media/revision/style | Ignore it; current UI state is unchanged |
@@ -614,7 +629,7 @@ interface AuthenticatedAppActions {
   12 seconds, and request a relative seek of about 78 seconds without changing TV focus contracts.
 - Good: render the same centered login form on TV and a smaller landscape device; the TV shows the
   complete form initially, while the smaller viewport scrolls the same tree to the Login button.
-- Good: install `回声台` over the previous signed package and preserve app data because the package
+- Good: install `飞牛音乐` over the previous signed package and preserve app data because the package
   name and signer are unchanged while the version code increases.
 - Good: switch A(rev 1) -> B(rev 2) -> A(rev 3), complete requests in reverse order, and display
   only A rev 3 metadata, artwork, and lyrics.
@@ -813,7 +828,7 @@ interface AuthenticatedAppActions {
   physical pixels of height at 320 dpi, and no lower title glyph is clipped at the configured font
   scale. Inspect rendered title pixels, not only semantic bounds.
 - Brand resource check: search user-facing sources for the retired product name, assert the merged
-  manifest label resolves to `回声台`, visually inspect the double-wave mark at launcher size, and
+  manifest label resolves to `飞牛音乐`, visually inspect the record mark at launcher size, and
   verify the newly versioned signed APK installs with replace over the prior package.
 - Home device test: focus the now-playing pill, press Center once, and assert the player title and
   progress semantics are present. Theme tests keep primary, muted, and status colors readable on
@@ -1011,11 +1026,11 @@ Button(
 
 ```xml
 <!-- Wrong: launcher text changes while in-app branding and upgrade identity drift. -->
-<string name="app_name">回声台</string>
+<string name="app_name">飞牛音乐</string>
 <!-- applicationId = "com.example.echostage" -->
 
 <!-- Correct: update all user-facing brand resources but preserve the installed identity. -->
-<string name="app_name">回声台</string>
+<string name="app_name">飞牛音乐</string>
 <!-- applicationId remains com.fnmusic.tv; versionCode increases for the formal release. -->
 ```
 

@@ -56,6 +56,8 @@ object ServerUrlNormalizer {
         var address = (if (scheme == null) value else value.substring(scheme.range.last + 1)).trimEnd('/')
         if (address.endsWith("/api/v1", ignoreCase = true)) address = address.dropLast(7).trimEnd('/')
         if (address.endsWith("/music", ignoreCase = true)) address = address.dropLast(6).trimEnd('/')
+        // Explicit https:// keeps standard-port display semantics; 5667 applies
+        // only to the bare-host + HTTPS-toggle path handled in normalize().
         val implicitPort = if (useHttps) HTTPS_PORT else DEFAULT_HTTP_PORT
         if (address.endsWith(":$implicitPort")) address = address.dropLast(implicitPort.toString().length + 1)
         return EditableServerInput(address, useHttps)
@@ -85,7 +87,10 @@ object ServerUrlNormalizer {
                 if (!hasExplicitPort) {
                     port(
                         when {
-                            schemeHttps -> HTTPS_PORT
+                            // Explicit scheme follows the standard ports.
+                            schemeHttps && explicitScheme != null -> HTTPS_PORT
+                            // Bare host follows the NAS service convention 5666/5667.
+                            explicitScheme == null && useHttps -> DEFAULT_HTTPS_PORT
                             explicitScheme != null -> HTTP_PORT
                             else -> DEFAULT_HTTP_PORT
                         },
@@ -108,6 +113,7 @@ object ServerUrlNormalizer {
     }
 
     private const val DEFAULT_HTTP_PORT = 5666
+    private const val DEFAULT_HTTPS_PORT = 5667
     private const val HTTP_PORT = 80
     private const val HTTPS_PORT = 443
 }

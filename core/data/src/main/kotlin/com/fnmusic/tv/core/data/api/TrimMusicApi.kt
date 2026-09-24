@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonElement
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
+import javax.net.ssl.HttpsURLConnection
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -85,6 +86,13 @@ class TrimMusicApi(
 
     suspend fun favoriteTracks(page: Int, size: Int = 50): PageListDto<TrackDto> =
         get("favorite-track/list", "page" to page, "size" to size, "sort" to "favoriteAt,desc")
+
+    suspend fun playHistory(page: Int, size: Int = 50): PageListDto<TrackDto> =
+        get("play-history/list", "page" to page, "size" to size)
+
+    suspend fun addToPlaylist(guid: String, trackGUIDs: List<String>) {
+        postUnit("playlist/add-track", PlaylistAddTrackRequest(guid, trackGUIDs))
+    }
 
     suspend fun createFavorite(trackGuid: String) {
         postUnit("favorite-track/create", FavoriteTrackRequest(trackGuid))
@@ -268,6 +276,7 @@ class TrimMusicApi(
             .followRedirects(false)
             .followSslRedirects(false)
             .retryOnConnectionFailure(false)
+            .hostnameVerifier(NasHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier()))
             .addNetworkInterceptor { chain ->
                 val request = if (chain.connection()?.protocol() == Protocol.HTTP_1_1) {
                     chain.request().newBuilder()

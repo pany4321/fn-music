@@ -28,6 +28,8 @@ data class SystemConfigDto(
 
 @Serializable data class PasswordLoginRequest(val username: String, val password: String, val deviceId: String)
 @Serializable data class FavoriteTrackRequest(val trackGUID: String)
+
+@Serializable data class PlaylistAddTrackRequest(val guid: String, val trackGUIDs: List<String>)
 @Serializable data class LoginResultDto(val userToken: String, val user: UserDto)
 
 @Serializable

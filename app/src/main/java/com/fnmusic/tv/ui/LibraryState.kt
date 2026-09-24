@@ -22,6 +22,7 @@ internal sealed interface LibraryRoute {
     data object Albums : LibraryRoute
     data object AllTracks : LibraryRoute
     data object Favorites : LibraryRoute
+    data object Recent : LibraryRoute
     data class ArtistDetail(val artist: Artist) : LibraryRoute
     data class AlbumDetail(val album: Album) : LibraryRoute
     data class Player(val track: Track?) : LibraryRoute
@@ -295,6 +296,7 @@ internal fun LibraryRoute.storageKey(): String = when (this) {
     LibraryRoute.Albums -> "albums"
     LibraryRoute.AllTracks -> "tracks"
     LibraryRoute.Favorites -> "favorites"
+    LibraryRoute.Recent -> "recent"
     is LibraryRoute.ArtistDetail -> "artist:${artist.guid.value}"
     is LibraryRoute.AlbumDetail -> "album:${album.guid.value}"
     is LibraryRoute.Player -> "player"
@@ -309,5 +311,6 @@ internal fun LibraryRoute.retainedStateKeys(): Set<String> = when (this) {
     )
     is LibraryRoute.AlbumDetail -> setOf("album:${album.guid.value}:tracks")
     LibraryRoute.Favorites -> setOf("favorites:tracks")
+    LibraryRoute.Recent -> setOf("recent:tracks")
     else -> emptySet()
 }

@@ -207,7 +207,7 @@ private fun BrandLoading() {
                 contentDescription = null,
                 modifier = Modifier.size(54.dp),
             )
-            Text("回声台", color = FnColors.Text, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+            Text("飞牛音乐", color = FnColors.Text, fontSize = 44.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(12.dp))
         Text("正在载入", color = FnColors.Muted, fontSize = 24.sp)
@@ -278,7 +278,7 @@ internal fun LoginScreen(
                 .semantics { contentDescription = "登录表单" },
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("回声台", color = FnColors.Teal, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("飞牛音乐", color = FnColors.Teal, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text("登录", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Row(
                 Modifier.fillMaxWidth(),

@@ -171,8 +171,13 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
   security config. The login UI must keep the visible unencrypted-connection warning whenever HTTP
   is selected; never silently downgrade an HTTPS input.
 - Canonical API base ends in `/music/api/v1/`; an explicit scheme also updates the HTTPS toggle.
-- A bare HTTP host or IP without an explicit port uses legacy port `5666`; explicit `http://` uses
-  standard port `80`, and HTTPS without a port uses `443`. Explicit ports are always preserved.
+- A bare host or IP without an explicit port follows the NAS service convention: `5666` with the
+  HTTP toggle, `5667` with the HTTPS toggle. Explicit `http://` uses standard port `80`, explicit
+  `https://` uses standard port `443`. Explicit ports are always preserved.
+- TLS hostname verification accepts raw-IP literal targets while still requiring a system-trusted
+  certificate chain (`NasHostnameVerifier` on the OkHttp client plus the process-wide
+  `HttpsURLConnection` default that covers Media3 streams); domain targets verify strictly. This is
+  also what lets FNID probing select `https://<ip>:5667` candidates.
   `editableInput` displays only the host when the canonical URL uses its implicit port and
   the standard music API path; custom ports remain visible.
 - A six-or-more-character alphanumeric/underscore/hyphen identifier with no URL punctuation is an
@@ -584,7 +589,9 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
 | Encrypted session payload is malformed or has an unknown version | Publish a generic recoverable signed-out error; never overwrite the ciphertext |
 | History reaches a sixth server/account profile | Evict the least-recently-used profile and all of its encrypted credentials |
 | User clears history while signed in | Clear persisted profiles and legacy recent servers; preserve the current in-memory session |
-| Bare host or IP | Add port `5666` and `/music/api/v1/` |
+| Bare host or IP, HTTP toggle | Add port `5666` and `/music/api/v1/` |
+| Bare host or IP, HTTPS toggle | Add port `5667` and `/music/api/v1/`; explicit `https://` keeps `443` |
+| HTTPS to a raw-IP host | Skip hostname verification only; the certificate chain must be system-trusted |
 | HTTPS input without a port | Use port `443`; never append `5666` |
 | Explicit `http://` without a port | Use port `80`; a bare HTTP host retains legacy `5666` |
 | Explicit port, including `80` | Preserve that port |

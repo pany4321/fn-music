@@ -77,6 +77,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
@@ -229,7 +230,9 @@ internal fun AuthenticatedApp(
             onMy = { root(LibraryRoute.My) },
             onPlaylist = { open(LibraryRoute.PlaylistDetail(it)) },
             onFavorites = { open(LibraryRoute.Favorites) },
+            onRecent = { open(LibraryRoute.Recent) },
             onAll = { open(LibraryRoute.AllPlaylists) },
+            onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
             onPlayer = { open(LibraryRoute.Player(null)) },
         )
         LibraryRoute.My -> BrowseMy(
@@ -245,7 +248,7 @@ internal fun AuthenticatedApp(
             onSettings = { open(LibraryRoute.Settings) },
             onPlayer = { open(LibraryRoute.Player(null)) },
         )
-        LibraryRoute.AllPlaylists -> AllPlaylists(container, onOpen = { open(LibraryRoute.PlaylistDetail(it)) })
+        LibraryRoute.AllPlaylists -> AllPlaylists(container, onBack = back, onOpen = { open(LibraryRoute.PlaylistDetail(it)) })
         is LibraryRoute.PlaylistDetail -> TrackCollection(
             container = container,
             stateKey = "playlist:${route.playlist.guid.value}:tracks",
@@ -297,6 +300,20 @@ internal fun AuthenticatedApp(
                 emptyMessage = "还没有收藏歌曲",
             )
         }
+        LibraryRoute.Recent -> TrackCollection(
+            container = container,
+            stateKey = "recent:tracks",
+            title = "最近播放",
+            loader = container.musicRepository::recentTracks,
+            queueSource = QueueSource::Recent,
+            onPlayer = { open(LibraryRoute.Player(it)) },
+            detailHeader = TrackDetailHeader(
+                kind = "最近播放",
+                artworkFallback = CollectionArtworkFallback.Collection,
+                onBack = back,
+            ),
+            emptyMessage = "还没有播放记录",
+        )
         is LibraryRoute.ArtistDetail -> ArtistDetail(
             container = container,
             artist = route.artist,
@@ -333,6 +350,7 @@ internal fun AuthenticatedApp(
                     }
                 }
             },
+            onBack = back,
         )
                 LibraryRoute.Settings -> SettingsScreen(container)
             }
@@ -587,13 +605,16 @@ private fun BrowseHome(
     onMy: () -> Unit,
     onPlaylist: (Playlist) -> Unit,
     onFavorites: () -> Unit,
+    onRecent: () -> Unit,
     onAll: () -> Unit,
+    onAlbum: (Album) -> Unit,
     onPlayer: () -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val playlistState = retainedStore.list<Playlist>("playlists")
     val albumState = retainedStore.paged<Album>("grid:albums")
     val favoritePreviewState = retainedStore.paged<Track>("home:favorites-preview")
+    val recentPreviewState = retainedStore.paged<Track>("home:recent-preview")
     val favoriteLibraryState by container.musicRepository.favoriteState.collectAsStateWithLifecycle()
     val playlistSnapshot = playlistState.snapshot
     val playlists = playlistSnapshot.entries
@@ -607,9 +628,68 @@ private fun BrowseHome(
         )
     }
     val favoriteArtwork = remember(favoriteTracks) {
-        featureArtworkSlots(
-            primary = favoriteTracks.map { FeatureArtworkItem(it.title, it.coverId) },
-        )
+        featureArtworkSlots(primary = favoriteTracks.map { FeatureArtworkItem(it.title, it.coverId) })
+    }
+    val recentTracksPreview = recentPreviewState.snapshot.entries
+    val recentArtwork = remember(recentTracksPreview) {
+        featureArtworkSlots(primary = recentTracksPreview.map { FeatureArtworkItem(it.title, it.coverId) })
+    }
+    var randomAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var randomAlbumsLoading by remember { mutableStateOf(false) }
+    fun refreshRandomAlbums() {
+        if (randomAlbumsLoading) return
+        randomAlbumsLoading = true
+        retainedStore.scope.launch {
+            runCatching { container.musicRepository.randomAlbums(16) }
+                .onSuccess { randomAlbums = it }
+            randomAlbumsLoading = false
+        }
+    }
+    var randomSongs by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var randomSongsLoading by remember { mutableStateOf(false) }
+    val randomSongScope = rememberCoroutineScope()
+    fun refreshRandomSongs() {
+        if (randomSongsLoading) return
+        randomSongsLoading = true
+        randomSongScope.launch {
+            runCatching { container.musicRepository.randomTracks(16) }
+                .onSuccess { randomSongs = it }
+            randomSongsLoading = false
+        }
+    }
+    fun openRandomSong(track: Track) {
+        randomSongScope.launch {
+            val prepared = runCatching { container.musicRepository.prepareQueue(randomSongs) }
+                .getOrDefault(emptyList())
+            val startIndex = prepared.indexOfFirst { it.track.guid == track.guid }
+            if (startIndex < 0) return@launch
+            runCatching {
+                container.playbackController.playQueue(
+                    tracks = prepared,
+                    startIndex = startIndex,
+                    source = null,
+                )
+            }.onSuccess { onPlayer() }
+        }
+    }
+    LaunchedEffect(Unit) {
+        retainedStore.scope.launch {
+            runCatching { container.musicRepository.recentTracks(1) }.onSuccess { page ->
+                recentPreviewState.snapshot = retainLoadedPage(recentPreviewState.snapshot, page) { it.guid.value }
+            }
+        }
+        refreshRandomAlbums()
+        refreshRandomSongs()
+    }
+    val playlistCovers by container.musicRepository.playlistCovers.collectAsStateWithLifecycle()
+    LaunchedEffect(playlists) {
+        playlists.take(12).forEach { playlist ->
+            if ((playlist.trackCount ?: 0) > 0) {
+                retainedStore.scope.launch {
+                    container.musicRepository.playlistCoverCandidates(playlist.guid.value)
+                }
+            }
+        }
     }
     var actionError by remember { mutableStateOf<AppError?>(null) }
     var roamActionRunning by remember { mutableStateOf(false) }
@@ -621,7 +701,9 @@ private fun BrowseHome(
     val myTabFocus = remember { FocusRequester() }
     val roamFocus = remember { FocusRequester() }
     val favoritesFocus = remember { FocusRequester() }
+    val recentFocus = remember { FocusRequester() }
     val playlistRowFocus = remember { FocusRequester() }
+    val albumRowState = rememberLazyListState()
     val rowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
@@ -644,6 +726,7 @@ private fun BrowseHome(
         val availableKeys = buildList {
             add("roam")
             add("favorites")
+            add("recent")
             if (playlistsLoaded) {
                 addAll(playlists.take(12).map { "playlist:${it.guid.value}" })
                 add("all-playlists")
@@ -661,14 +744,13 @@ private fun BrowseHome(
     Column(
         Modifier
             .fillMaxSize()
-            // Short car viewports scroll the fixed home stack; TV content fits
-            // and never scrolls.
-            .verticalScroll(rememberScrollState())
             .padding(
                 horizontal = window.horizontalMargin,
                 vertical = if (window.shortHeight) 12.dp else 24.dp,
             ),
     ) {
+        // The tab bar stays pinned outside the scroll container: short car
+        // viewports scroll the content beneath it, never the tabs themselves.
         LibraryTopBar(
             playback = playback,
             selectedHome = true,
@@ -686,6 +768,14 @@ private fun BrowseHome(
             myTabFocus = myTabFocus,
             contentDownFocus = roamFocus,
         )
+        Box(Modifier.fillMaxSize().weight(1f)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                // Short car viewports scroll the fixed home stack; TV content fits
+                // and never scrolls.
+                .verticalScroll(rememberScrollState())
+        ) {
         Spacer(Modifier.height(12.dp))
         Text("听点什么", fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
@@ -735,7 +825,7 @@ private fun BrowseHome(
                     .focusProperties {
                         up = myTabFocus
                         left = roamFocus
-                        right = FocusRequester.Cancel
+                        right = recentFocus
                         down = playlistRowFocus
                     }
                     .focusRequester(favoritesFocus)
@@ -746,7 +836,29 @@ private fun BrowseHome(
                     onFavorites()
                 },
             )
+            HomeFeatureCard(
+                title = "最近播放",
+                kind = HomeArtworkKind.Recent,
+                artwork = recentArtwork,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusProperties {
+                        up = myTabFocus
+                        left = favoritesFocus
+                        right = FocusRequester.Cancel
+                        down = playlistRowFocus
+                    }
+                    .focusRequester(recentFocus)
+                    .then(if (focusedKey == "recent") Modifier.focusRequester(contentFocus) else Modifier)
+                    .onFocusChanged { if (it.isFocused) focusedKey = "recent" },
+                onClick = {
+                    focusedKey = "recent"
+                    onRecent()
+                },
+            )
         }
+        Spacer(Modifier.height(18.dp))
+        Text("歌单", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp))
         LazyRow(
             state = rowState,
@@ -759,6 +871,7 @@ private fun BrowseHome(
                     title = playlist.name,
                     subtitle = "歌单",
                     coverId = playlist.coverId,
+                    derivedCovers = playlistCovers[playlist.guid.value].orEmpty(),
                     modifier = Modifier
                         .focusProperties { up = if (index == 0) roamFocus else favoritesFocus }
                         .then(if (index == 0) Modifier.focusRequester(playlistRowFocus) else Modifier)
@@ -788,7 +901,78 @@ private fun BrowseHome(
                 )
             }
         }
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("随机专辑", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(14.dp))
+            Button(
+                onClick = { refreshRandomAlbums() },
+                enabled = !randomAlbumsLoading,
+                modifier = Modifier.size(width = 88.dp, height = 38.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (randomAlbumsLoading) "刷新中…" else "刷新",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LazyRow(
+            state = albumRowState,
+            contentPadding = PaddingValues(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            items(randomAlbums, key = { "rand-album:${it.guid.value}" }) { album ->
+                AlbumLockup(
+                    title = album.name,
+                    subtitle = album.artistName.orEmpty(),
+                    coverId = album.coverId,
+                    modifier = Modifier.focusProperties { up = playlistRowFocus },
+                    onClick = { onAlbum(album) },
+                )
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("随机歌曲", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(14.dp))
+            Button(
+                onClick = { refreshRandomSongs() },
+                enabled = !randomSongsLoading,
+                modifier = Modifier.size(width = 88.dp, height = 38.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (randomSongsLoading) "刷新中…" else "刷新",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LazyRow(
+            contentPadding = PaddingValues(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            items(randomSongs, key = { "rand-song:${it.guid.value}" }) { track ->
+                TrackLockup(
+                    title = track.title,
+                    subtitle = track.artistName.orEmpty(),
+                    coverId = track.coverId,
+                    modifier = Modifier.focusProperties { down = FocusRequester.Cancel },
+                    onClick = { openRandomSong(track) },
+                )
+            }
+        }
         (actionError ?: playlistSnapshot.error)?.let { InlineError(it) }
+        }
+        }
     }
 }
 
@@ -825,6 +1009,7 @@ private fun HomeFeatureCard(
     val background = when (kind) {
         HomeArtworkKind.Roam -> Brush.horizontalGradient(listOf(Color(0xFF071D19), Color(0xFF102823)))
         HomeArtworkKind.Favorites -> Brush.horizontalGradient(listOf(Color(0xFF1C1110), Color(0xFF2A1615)))
+        HomeArtworkKind.Recent -> Brush.horizontalGradient(listOf(Color(0xFF10151C), Color(0xFF1A2330)))
         HomeArtworkKind.Collection,
         HomeArtworkKind.PlaylistGrid,
         -> Brush.horizontalGradient(listOf(Color(0xFF17201E), Color(0xFF22302D)))
@@ -962,6 +1147,19 @@ private fun deckPlacements(kind: HomeArtworkKind, artworkCount: Int): List<DeckP
             )
             else -> emptyList()
         }
+        HomeArtworkKind.Recent -> when (artworkCount.coerceAtMost(3)) {
+            1 -> listOf(DeckPlacement(0, -72f, 0f, 0f))
+            2 -> listOf(
+                DeckPlacement(0, -118f, 7f, -6f),
+                DeckPlacement(1, -24f, 7f, 6f),
+            )
+            3 -> listOf(
+                DeckPlacement(0, -140f, 8f, -7f),
+                DeckPlacement(2, -8f, 8f, 7f),
+                DeckPlacement(1, -72f, 0f, 0f),
+            )
+            else -> emptyList()
+        }
         HomeArtworkKind.Collection,
         HomeArtworkKind.PlaylistGrid,
         -> emptyList()
@@ -976,7 +1174,11 @@ private data class DeckPlacement(
 
 @Composable
 private fun FeatureGlyph(kind: HomeArtworkKind, modifier: Modifier = Modifier) {
-    val accent = if (kind == HomeArtworkKind.Roam) FnColors.Teal else FnColors.Coral
+    val accent = when (kind) {
+        HomeArtworkKind.Roam -> FnColors.Teal
+        HomeArtworkKind.Recent -> FnColors.Warning
+        else -> FnColors.Coral
+    }
     Box(
         modifier
             .background(Color(0xFF0E1314).copy(alpha = 0.92f), CircleShape)
@@ -984,7 +1186,11 @@ private fun FeatureGlyph(kind: HomeArtworkKind, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(25.dp)) {
-            if (kind == HomeArtworkKind.Favorites) {
+            if (kind == HomeArtworkKind.Recent) {
+                drawCircle(accent, radius = size.minDimension * 0.36f, style = Stroke(2.2.dp.toPx()))
+                drawLine(accent, center, androidx.compose.ui.geometry.Offset(center.x, center.y - size.height * 0.22f), 2.2.dp.toPx(), StrokeCap.Round)
+                drawLine(accent, center, androidx.compose.ui.geometry.Offset(center.x + size.width * 0.16f, center.y + size.height * 0.06f), 2.2.dp.toPx(), StrokeCap.Round)
+            } else if (kind == HomeArtworkKind.Favorites) {
                 drawPath(heartPath(size), color = accent, style = Stroke(width = 2.2.dp.toPx()))
             } else {
                 val stroke = 2.1.dp.toPx()
@@ -1013,6 +1219,7 @@ private fun HomePlaylistLockup(
     coverId: String?,
     modifier: Modifier = Modifier,
     fallback: HomeArtworkKind? = null,
+    derivedCovers: List<String> = emptyList(),
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1048,6 +1255,7 @@ private fun HomePlaylistLockup(
                     accent = FnColors.Coral,
                     modifier = Modifier.fillMaxSize(),
                     featureArtwork = fallback,
+                    derivedCovers = derivedCovers,
                 )
             }
             Spacer(Modifier.height(7.dp))
@@ -1591,15 +1799,32 @@ private fun MyLibraryLockup(
 }
 
 @Composable
-private fun AllPlaylists(container: AuthenticatedAppDependencies, onOpen: (Playlist) -> Unit) {
+private fun AllPlaylists(container: AuthenticatedAppDependencies, onBack: () -> Unit, onOpen: (Playlist) -> Unit) {
     val retainedStore = LocalLibraryRetainedState.current
     val playlistState = retainedStore.list<Playlist>("playlists")
     val playlists = playlistState.snapshot.entries
+    val playlistCovers by container.musicRepository.playlistCovers.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
         retainedStore.loadListOnce(playlistState, container.musicRepository::playlists)
     }
-    GridPage("全部歌单", playlists, { it.guid.value }) { playlist, modifier ->
-        PlaylistTile(playlist.name, "歌单", playlist.coverId, FnColors.Coral, modifier = modifier) { onOpen(playlist) }
+    LaunchedEffect(playlists) {
+        playlists.forEach { playlist ->
+            if ((playlist.trackCount ?: 0) > 0) {
+                retainedStore.scope.launch {
+                    container.musicRepository.playlistCoverCandidates(playlist.guid.value)
+                }
+            }
+        }
+    }
+    GridPage("全部歌单", playlists, { it.guid.value }, onBack = onBack) { playlist, modifier ->
+        PlaylistTile(
+            playlist.name,
+            "歌单",
+            playlist.coverId,
+            FnColors.Coral,
+            derivedCovers = playlistCovers[playlist.guid.value].orEmpty(),
+            modifier = modifier,
+        ) { onOpen(playlist) }
     }
 }
 
@@ -1878,6 +2103,7 @@ private fun <T> GridPage(
     title: String,
     entries: List<T>,
     key: (T) -> String,
+    onBack: (() -> Unit)? = null,
     item: @Composable (T, Modifier) -> Unit,
 ) {
     var focusedKey by rememberSaveable(title) { mutableStateOf<String?>(null) }
@@ -1899,7 +2125,13 @@ private fun <T> GridPage(
             vertical = if (window.shortHeight) 16.dp else 44.dp,
         ),
     ) {
-        Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) {
+                DetailBackButton(onClick = onBack)
+                Spacer(Modifier.width(16.dp))
+            }
+            Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        }
         Spacer(Modifier.height(20.dp))
         LazyVerticalGrid(
             state = gridState,
@@ -2838,6 +3070,7 @@ private fun PlaylistTile(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     featureArtwork: HomeArtworkKind? = null,
+    derivedCovers: List<String> = emptyList(),
     onClick: () -> Unit,
 ) {
     val cardShape = RoundedCornerShape(8.dp)
@@ -2868,6 +3101,7 @@ private fun PlaylistTile(
                 accent = accent,
                 modifier = Modifier.fillMaxWidth().height(108.dp),
                 featureArtwork = featureArtwork,
+                derivedCovers = derivedCovers,
             )
             Row(
                 Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 9.dp, vertical = 2.dp),
@@ -2897,11 +3131,14 @@ private fun PlaylistTileArtwork(
     accent: Color,
     modifier: Modifier = Modifier,
     featureArtwork: HomeArtworkKind? = null,
+    derivedCovers: List<String> = emptyList(),
 ) {
     val container = LocalAuthenticatedDependencies.current
     val shape = RectangleShape
     if (featureArtwork != null) {
         HomeFeatureArtwork(featureArtwork, modifier)
+    } else if (derivedCovers.isNotEmpty()) {
+        PlaylistCoverDeck(derivedCovers, title, accent, modifier)
     } else if (coverId != null) {
         RemoteArtwork(
             container = container,
@@ -2919,7 +3156,62 @@ private fun PlaylistTileArtwork(
     }
 }
 
-private enum class HomeArtworkKind { Roam, Favorites, Collection, PlaylistGrid }
+/** Horizontal 1-3 cover deck for coverless playlists, mirroring the Favorites deck. */
+@Composable
+private fun PlaylistCoverDeck(
+    covers: List<String>,
+    title: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val container = LocalAuthenticatedDependencies.current
+    val deckShape = RoundedCornerShape(6.dp)
+    val count = covers.size.coerceIn(1, 3)
+    val coverSize = when (count) {
+        1 -> 84.dp
+        2 -> 78.dp
+        else -> 64.dp
+    }
+    val spacing = when (count) {
+        1 -> 0.dp
+        2 -> (-12).dp
+        else -> (-14).dp
+    }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            covers.take(count).forEachIndexed { index, coverId ->
+                Box(
+                    Modifier
+                        .zIndex((count - index).toFloat())
+                        .graphicsLayer {
+                            rotationZ = when {
+                                count < 3 -> 0f
+                                index == 0 -> -5f
+                                index == 1 -> 0f
+                                else -> 5f
+                            }
+                        }
+                        .border(0.5.dp, Color.White.copy(alpha = 0.22f), deckShape),
+                ) {
+                    RemoteArtwork(
+                        container = container,
+                        coverId = coverId,
+                        variant = CoverVariant.Grid,
+                        fallbackVariant = CoverVariant.Compact,
+                        modifier = Modifier.size(coverSize),
+                        shape = deckShape,
+                        contentScale = ContentScale.Crop,
+                        placeholderContent = {
+                            Box(Modifier.size(coverSize).background(Color(0xFF242927), deckShape))
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class HomeArtworkKind { Roam, Favorites, Recent, Collection, PlaylistGrid }
 
 @Composable
 private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
@@ -2954,6 +3246,50 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
         }
 
         when (kind) {
+            HomeArtworkKind.Recent -> {
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFF101820), Color(0xFF1B2733)),
+                        start = point(0.08f, 0f),
+                        end = point(0.94f, 1f),
+                    ),
+                )
+                // Large clock face: rim, hands, center pin.
+                val clockCenter = point(0.66f, 0.5f)
+                val clockRadius = shortEdge * 0.34f
+                drawCircle(Color(0xFF0D1114).copy(alpha = 0.9f), clockRadius, clockCenter)
+                drawCircle(
+                    Color.White.copy(alpha = 0.16f),
+                    clockRadius,
+                    clockCenter,
+                    style = Stroke(shortEdge * 0.012f),
+                )
+                val handStroke = shortEdge * 0.022f
+                drawLine(
+                    FnColors.Warning,
+                    clockCenter,
+                    clockCenter + androidx.compose.ui.geometry.Offset(0f, -clockRadius * 0.62f),
+                    handStroke,
+                    StrokeCap.Round,
+                )
+                drawLine(
+                    FnColors.Warning,
+                    clockCenter,
+                    clockCenter + androidx.compose.ui.geometry.Offset(clockRadius * 0.42f, clockRadius * 0.12f),
+                    handStroke,
+                    StrokeCap.Round,
+                )
+                drawCircle(FnColors.Warning, clockRadius * 0.07f, clockCenter)
+                // Trailing tick marks on the right edge.
+                listOf(0.16f, 0.32f, 0.48f).forEach { y ->
+                    drawLine(
+                        Color.White.copy(alpha = 0.10f),
+                        point(0.92f, y),
+                        point(0.98f, y),
+                        shortEdge * 0.008f,
+                    )
+                }
+            }
             HomeArtworkKind.Roam -> {
                 drawRect(
                     brush = Brush.linearGradient(
@@ -3145,28 +3481,47 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                         ),
                     ),
                 )
-                val cellSize = shortEdge * 0.15f
-                val gap = shortEdge * 0.055f
-                val gridWidth = cellSize * 2f + gap
-                val gridHeight = cellSize * 2f + gap
-                val gridOrigin = androidx.compose.ui.geometry.Offset(
-                    (size.width - gridWidth) / 2f,
-                    (size.height - gridHeight) / 2f,
+                // Centered playlist glyph: three lines plus an eighth note.
+                val glyphEdge = shortEdge * 0.42f
+                val glyphOrigin = androidx.compose.ui.geometry.Offset(
+                    (size.width - glyphEdge) / 2f,
+                    (size.height - glyphEdge) / 2f,
                 )
-                repeat(2) { row ->
-                    repeat(2) { column ->
-                        drawRoundRect(
-                            color = Color(0xFF858B8E),
-                            topLeft = androidx.compose.ui.geometry.Offset(
-                                gridOrigin.x + column * (cellSize + gap),
-                                gridOrigin.y + row * (cellSize + gap),
-                            ),
-                            size = androidx.compose.ui.geometry.Size(cellSize, cellSize),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(shortEdge * 0.035f),
-                            style = Stroke(width = 2.dp.toPx()),
-                        )
-                    }
+                fun glyphPoint(x: Float, y: Float) =
+                    glyphOrigin + androidx.compose.ui.geometry.Offset(x * glyphEdge, y * glyphEdge)
+                val glyphStroke = 2.4.dp.toPx()
+                val glyphColor = FnColors.Coral
+                val lineSpans = listOf(0.60f, 0.60f, 0.34f)
+                lineSpans.forEachIndexed { index, endX ->
+                    val y = 0.20f + index * 0.25f
+                    drawLine(
+                        glyphColor,
+                        glyphPoint(0.06f, y),
+                        glyphPoint(endX, y),
+                        glyphStroke,
+                        StrokeCap.Round,
+                    )
                 }
+                drawLine(
+                    glyphColor,
+                    glyphPoint(0.84f, 0.16f),
+                    glyphPoint(0.84f, 0.70f),
+                    glyphStroke,
+                    StrokeCap.Round,
+                )
+                drawCircle(
+                    glyphColor,
+                    radius = glyphEdge * 0.09f,
+                    center = glyphPoint(0.71f, 0.74f),
+                    style = Stroke(glyphStroke),
+                )
+                drawLine(
+                    glyphColor,
+                    glyphPoint(0.84f, 0.16f),
+                    glyphPoint(0.97f, 0.31f),
+                    glyphStroke,
+                    StrokeCap.Round,
+                )
             }
         }
     }
@@ -3237,6 +3592,21 @@ private fun ArtistAvatarPlaceholder(
         )
     }
 }
+
+@Composable
+private fun TrackLockup(
+    title: String,
+    subtitle: String,
+    coverId: String?,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) = AlbumLockup(
+    title = title,
+    subtitle = subtitle,
+    coverId = coverId,
+    modifier = modifier,
+    onClick = onClick,
+)
 
 @Composable
 private fun AlbumLockup(

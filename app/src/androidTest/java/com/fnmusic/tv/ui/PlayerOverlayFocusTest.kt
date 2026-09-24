@@ -742,6 +742,7 @@ private fun PlayerControlHarness(
     val playFocus = remember { FocusRequester() }
     val nextFocus = remember { FocusRequester() }
     val favoriteFocus = remember { FocusRequester() }
+    val addToPlaylistFocus = remember { FocusRequester() }
     val modeFocus = remember { FocusRequester() }
     val queueFocus = remember { FocusRequester() }
     val exitRoamFocus = remember { FocusRequester() }
@@ -768,6 +769,7 @@ private fun PlayerControlHarness(
             playFocus = playFocus,
             nextFocus = nextFocus,
             favoriteFocus = favoriteFocus,
+            addToPlaylistFocus = addToPlaylistFocus,
             modeFocus = modeFocus,
             queueFocus = queueFocus,
             exitRoamFocus = exitRoamFocus,
@@ -783,6 +785,7 @@ private fun PlayerControlHarness(
             onPlayPause = onPlayPause,
             onNext = {},
             onToggleFavorite = {},
+            onAddToPlaylist = {},
             onCyclePlayMode = {
                 playMode = playMode.next()
                 onCycleMode()
@@ -837,6 +840,7 @@ private fun PlayerRetryHarness(
             playFocus = playFocus,
             nextFocus = nextFocus,
             favoriteFocus = favoriteFocus,
+            addToPlaylistFocus = remember { FocusRequester() },
             modeFocus = modeFocus,
             queueFocus = queueFocus,
             exitRoamFocus = exitRoamFocus,
@@ -852,6 +856,7 @@ private fun PlayerRetryHarness(
             onPlayPause = {},
             onNext = {},
             onToggleFavorite = {},
+            onAddToPlaylist = {},
             onCyclePlayMode = {},
             onOpenQueue = {},
             onExitRoam = {},
