@@ -23,6 +23,13 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -122,6 +129,7 @@ import com.fnmusic.tv.NowPlayingResourceState
 import com.fnmusic.tv.decodeArtwork
 import com.fnmusic.tv.core.data.repository.CurrentLyrics
 import com.fnmusic.tv.core.data.repository.SessionState
+import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.Album
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
@@ -142,6 +150,8 @@ import com.fnmusic.tv.core.model.playback.QueuePageSegment
 import com.fnmusic.tv.core.model.playback.boundedQueueWindow
 import com.fnmusic.tv.core.playback.PlaybackUiState
 import com.fnmusic.tv.core.playback.PlaybackProgressState
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -249,6 +259,29 @@ internal fun AuthenticatedApp(
             onPlayer = { open(LibraryRoute.Player(null)) },
         )
         LibraryRoute.AllPlaylists -> AllPlaylists(container, onBack = back, onOpen = { open(LibraryRoute.PlaylistDetail(it)) })
+        LibraryRoute.Genres -> Genres(container, onBack = back, onGenre = { open(LibraryRoute.GenreDetail(it)) })
+        is LibraryRoute.GenreDetail -> TrackCollection(
+            container = container,
+            stateKey = "genre:" + route.genre.guid.value + ":tracks",
+            title = route.genre.name,
+            subtitle = "风格",
+            loader = { container.musicRepository.genreTracks(route.genre.guid.value, it) },
+            queueSource = { sort -> QueueSource.Genre(route.genre.guid.value, sort) },
+            onPlayer = { open(LibraryRoute.Player(it)) },
+            detailHeader = TrackDetailHeader(
+                kind = "风格",
+                declaredTrackCount = route.genre.trackCount,
+                onBack = back,
+            ),
+            emptyMessage = "该风格暂无歌曲",
+        )
+        LibraryRoute.Search -> SearchRoute(
+            container = container,
+            onBack = back,
+            onArtist = { open(LibraryRoute.ArtistDetail(it)) },
+            onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
+            onPlayer = { open(LibraryRoute.Player(it)) },
+        )
         is LibraryRoute.PlaylistDetail -> TrackCollection(
             container = container,
             stateKey = "playlist:${route.playlist.guid.value}:tracks",
@@ -678,8 +711,18 @@ private fun BrowseHome(
                 recentPreviewState.snapshot = retainLoadedPage(recentPreviewState.snapshot, page) { it.guid.value }
             }
         }
-        refreshRandomAlbums()
-        refreshRandomSongs()
+        if (randomAlbums.isEmpty()) refreshRandomAlbums()
+        if (randomSongs.isEmpty()) refreshRandomSongs()
+    }
+    val recentlyAddedState = retainedStore.list<Track>("recently-added")
+    val recentlyAdded = recentlyAddedState.snapshot.entries
+    LaunchedEffect(Unit) {
+        if (recentlyAdded.isEmpty()) {
+            retainedStore.scope.launch {
+                runCatching { container.musicRepository.recentlyAddedTracks(16) }
+                    .onSuccess { recentlyAddedState.snapshot = retainLoadedList(recentlyAddedState.snapshot, it.items) }
+            }
+        }
     }
     val playlistCovers by container.musicRepository.playlistCovers.collectAsStateWithLifecycle()
     LaunchedEffect(playlists) {
@@ -961,6 +1004,25 @@ private fun BrowseHome(
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             items(randomSongs, key = { "rand-song:${it.guid.value}" }) { track ->
+                TrackLockup(
+                    title = track.title,
+                    subtitle = track.artistName.orEmpty(),
+                    coverId = track.coverId,
+                    modifier = Modifier.focusProperties { down = FocusRequester.Cancel },
+                    onClick = { openRandomSong(track) },
+                )
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("最近添加", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(14.dp))
+        LazyRow(
+            contentPadding = PaddingValues(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            items(recentlyAdded, key = { "recently-added:" + it.guid.value }) { track ->
                 TrackLockup(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
@@ -3899,4 +3961,235 @@ internal fun appErrorMessage(error: AppError): String = when (error) {
 internal fun formatDuration(ms: Long): String {
     val totalSeconds = (ms / 1_000).coerceAtLeast(0)
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
+}
+
+
+@Composable
+private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, onGenre: (Genre) -> Unit) {
+    val retainedStore = LocalLibraryRetainedState.current
+    val genreState = retainedStore.list<Genre>("genres")
+    val genres = genreState.snapshot.entries
+    LaunchedEffect(Unit) {
+        retainedStore.loadListOnce(genreState) { container.musicRepository.genres() }
+    }
+    GridPage("全部风格", genres, { it.guid.value }, onBack = onBack) { genre, modifier ->
+        AlbumLockup(
+            title = genre.name,
+            subtitle = (genre.trackCount ?: 0).toString() + " 首歌曲",
+            coverId = null,
+            modifier = modifier,
+            onClick = { onGenre(genre) },
+        )
+    }
+}
+
+@Composable
+private fun SearchRoute(
+    container: AuthenticatedAppDependencies,
+    onBack: () -> Unit,
+    onArtist: (Artist) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onPlayer: (Track) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf("") }
+    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var artists by remember { mutableStateOf<List<Artist>>(emptyList()) }
+    var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    val fieldFocus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    LaunchedEffect(query) {
+        kotlinx.coroutines.delay(500)
+        val q = query.trim()
+        if (q.isEmpty()) {
+            tracks = emptyList(); artists = emptyList(); albums = emptyList()
+        } else {
+            loading = true
+            val t = async { runCatching { container.musicRepository.searchTracks(q) }.getOrNull() }
+            val a = async { runCatching { container.musicRepository.searchArtists(q) }.getOrNull() }
+            val al = async { runCatching { container.musicRepository.searchAlbums(q) }.getOrNull() }
+            tracks = t.await()?.items ?: emptyList()
+            artists = a.await()?.items ?: emptyList()
+            albums = al.await()?.items ?: emptyList()
+            loading = false
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(FnColors.Background)
+            .padding(horizontal = 42.dp, vertical = 24.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DetailBackButton(onClick = onBack)
+            Spacer(Modifier.width(16.dp))
+            Text("搜索", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(18.dp))
+        val fieldShape = RoundedCornerShape(27.dp)
+        var fieldFocused by remember { mutableStateOf(false) }
+        BasicTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            textStyle = TextStyle(color = FnColors.Text, fontSize = 22.sp),
+            cursorBrush = SolidColor(FnColors.Coral),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .focusRequester(fieldFocus)
+                .focusProperties { down = FocusRequester.Cancel }
+                .onFocusChanged { state -> fieldFocused = state.isFocused }
+                .background(Color(0xFF1B201F), fieldShape)
+                .border(
+                    if (fieldFocused) 1.5.dp else 0.5.dp,
+                    if (fieldFocused) FnColors.Coral else Color(0xFF454A50),
+                    fieldShape,
+                )
+                .padding(horizontal = 20.dp),
+            decorationBox = { inner ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🔍", fontSize = 18.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.weight(1f)) {
+                        if (query.isEmpty()) {
+                            Text("搜索歌手、专辑、歌曲", color = FnColors.Muted, fontSize = 20.sp)
+                        }
+                        inner()
+                    }
+                }
+            },
+        )
+        Spacer(Modifier.height(18.dp))
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            when {
+                loading -> Text("正在搜索…", color = FnColors.Muted, fontSize = 16.sp)
+                query.isBlank() -> Text("输入关键词开始搜索", color = FnColors.Muted, fontSize = 16.sp)
+                tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() ->
+                    Text("没有找到与「" + searched + "」匹配的内容", color = FnColors.Muted, fontSize = 16.sp)
+                else -> {
+                    if (artists.isNotEmpty()) {
+                        Text("歌手", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            items(artists, key = { "s-artist:" + it.guid.value }) { artist ->
+                                AlbumLockup(
+                                    title = artist.name,
+                                    subtitle = (artist.trackCount ?: 0).toString() + " 首歌曲",
+                                    coverId = artist.coverId,
+                                    modifier = Modifier,
+                                    onClick = { onArtist(artist) },
+                                )
+                            }
+                        }
+                    }
+                    if (albums.isNotEmpty()) {
+                        Text("专辑", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            items(albums, key = { "s-album:" + it.guid.value }) { album ->
+                                AlbumLockup(
+                                    title = album.name,
+                                    subtitle = album.artistName.orEmpty(),
+                                    coverId = album.coverId,
+                                    modifier = Modifier,
+                                    onClick = { onAlbum(album) },
+                                )
+                            }
+                        }
+                    }
+                    if (tracks.isNotEmpty()) {
+                        Text("歌曲", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        tracks.forEachIndexed { index, track ->
+                            TrackResultRow(
+                                index = index + 1,
+                                title = track.title,
+                                subtitle = track.artistName.orEmpty(),
+                                coverId = track.coverId,
+                                onClick = {
+                                    scope.launch {
+                                        val prepared = runCatching { container.musicRepository.prepareQueue(tracks) }
+                                            .getOrDefault(emptyList())
+                                        val start = prepared.indexOfFirst { it.track.guid == track.guid }
+                                        if (start >= 0) {
+                                            runCatching {
+                                                container.playbackController.playQueue(
+                                                    tracks = prepared,
+                                                    startIndex = start,
+                                                    source = null,
+                                                )
+                                            }.onSuccess { onPlayer(track) }
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackResultRow(
+    index: Int,
+    title: String,
+    subtitle: String,
+    coverId: String?,
+    onClick: () -> Unit,
+) {
+    val container = LocalAuthenticatedDependencies.current
+    val artworkShape = RoundedCornerShape(6.dp)
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(74.dp),
+        colors = ButtonDefaults.colors(
+            containerColor = Color(0xFF1B201F),
+            contentColor = FnColors.Text,
+            focusedContainerColor = Color(0xFF303634),
+            focusedContentColor = FnColors.Text,
+        ),
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(index.toString(), color = FnColors.Muted, fontSize = 15.sp, modifier = Modifier.width(30.dp))
+            if (coverId != null) {
+                RemoteArtwork(
+                    container = container,
+                    coverId = coverId,
+                    variant = CoverVariant.Compact,
+                    modifier = Modifier.size(52.dp),
+                    shape = artworkShape,
+                    contentScale = ContentScale.Crop,
+                    placeholderContent = {
+                        InitialArtworkPlaceholder(title, FnColors.Coral, Modifier.size(52.dp), artworkShape)
+                    },
+                )
+            } else {
+                InitialArtworkPlaceholder(title, FnColors.Coral, Modifier.size(52.dp), artworkShape)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    subtitle.ifBlank { "未知演唱者" },
+                    color = FnColors.Muted,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }

@@ -69,6 +69,7 @@ sealed interface QueueSource {
     data class LibraryAllTracks(override val sort: String) : QueueSource
     data class Favorites(override val sort: String) : QueueSource
     data class Recent(override val sort: String) : QueueSource
+    data class Genre(val guid: String, override val sort: String) : QueueSource
 }
 
 data class QueueCursor(

@@ -1560,11 +1560,7 @@ internal fun PlayerControlOverlay(
                     description = if (favorite) "取消收藏当前歌曲" else "收藏当前歌曲",
                     focusRequester = favoriteFocus,
                     upFocus = progressFocus,
-                    rightFocus = when {
-                        !roaming -> addToPlaylistFocus
-                        previousEnabled -> previousFocus
-                        else -> playFocus
-                    },
+                    rightFocus = addToPlaylistFocus,
                     selected = favorite,
                     onFocus = onInteraction,
                     onClick = {
@@ -1572,28 +1568,26 @@ internal fun PlayerControlOverlay(
                         if (favoriteEnabled) onToggleFavorite()
                     },
                 )
-                if (!roaming) {
-                    PlayerSideActionButton(
-                        glyph = PlayerSideActionGlyph.AddToPlaylist,
-                        description = "添加到歌单",
-                        focusRequester = addToPlaylistFocus,
-                        upFocus = progressFocus,
-                        leftFocus = favoriteFocus,
-                        rightFocus = if (previousEnabled) previousFocus else playFocus,
-                        onFocus = onInteraction,
-                        onClick = {
-                            onInteraction()
-                            onAddToPlaylist()
-                        },
-                    )
-                }
+                PlayerSideActionButton(
+                    glyph = PlayerSideActionGlyph.AddToPlaylist,
+                    description = "添加到歌单",
+                    focusRequester = addToPlaylistFocus,
+                    upFocus = progressFocus,
+                    leftFocus = favoriteFocus,
+                    rightFocus = if (previousEnabled) previousFocus else playFocus,
+                    onFocus = onInteraction,
+                    onClick = {
+                        onInteraction()
+                        onAddToPlaylist()
+                    },
+                )
                 if (!roaming) {
                     PlayerSideActionButton(
                         glyph = playModeGlyph(playMode),
                         description = "播放模式：${playModeLabel(playMode)}",
                         focusRequester = modeFocus,
                         upFocus = progressFocus,
-                        leftFocus = favoriteFocus,
+                        leftFocus = addToPlaylistFocus,
                         rightFocus = if (previousEnabled) previousFocus else playFocus,
                         onFocus = onInteraction,
                         onClick = {

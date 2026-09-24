@@ -90,6 +90,33 @@ class TrimMusicApi(
     suspend fun playHistory(page: Int, size: Int = 50): PageListDto<TrackDto> =
         get("play-history/list", "page" to page, "size" to size)
 
+    suspend fun recentlyAddedTracks(page: Int, size: Int = 50): SortedPageListDto<TrackDto> =
+        get("track/list", "page" to page, "size" to size, "sort" to "createdAt,desc")
+
+    suspend fun genres(page: Int, size: Int = 50): PageListDto<GenreDto> =
+        get("genre/list", "page" to page, "size" to size)
+
+    suspend fun genreTracks(guid: String, page: Int, size: Int = 50): SortedPageListDto<TrackDto> =
+        get(
+            "track/genre-detail/list",
+            "genreGUID" to guid,
+            "page" to page,
+            "size" to size,
+            "sort" to "title,asc",
+        )
+
+    suspend fun playlistBatchDetail(guids: List<String>): List<PlaylistDetailDto> =
+        get("playlist/batch-detail", "guids" to guids.joinToString(","))
+
+    suspend fun searchTracks(query: String, page: Int, size: Int = 20): SortedPageListDto<TrackDto> =
+        get("search/track", "q" to query, "page" to page, "size" to size)
+
+    suspend fun searchArtists(query: String, page: Int, size: Int = 20): SortedPageListDto<ArtistDto> =
+        get("search/artist", "q" to query, "page" to page, "size" to size)
+
+    suspend fun searchAlbums(query: String, page: Int, size: Int = 20): SortedPageListDto<AlbumDto> =
+        get("search/album", "q" to query, "page" to page, "size" to size)
+
     suspend fun addToPlaylist(guid: String, trackGUIDs: List<String>) {
         postUnit("playlist/add-track", PlaylistAddTrackRequest(guid, trackGUIDs))
     }

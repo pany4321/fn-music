@@ -42,6 +42,12 @@ data class Album(
     val releaseDate: String? = null,
 )
 
+data class Genre(
+    val guid: CollectionGuid,
+    val name: String,
+    val trackCount: Int?,
+)
+
 data class Track(
     val guid: TrackGuid,
     val title: String,

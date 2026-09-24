@@ -3,6 +3,7 @@ package com.fnmusic.tv.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.Album
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
@@ -23,6 +24,9 @@ internal sealed interface LibraryRoute {
     data object AllTracks : LibraryRoute
     data object Favorites : LibraryRoute
     data object Recent : LibraryRoute
+    data object Search : LibraryRoute
+    data object Genres : LibraryRoute
+    data class GenreDetail(val genre: Genre) : LibraryRoute
     data class ArtistDetail(val artist: Artist) : LibraryRoute
     data class AlbumDetail(val album: Album) : LibraryRoute
     data class Player(val track: Track?) : LibraryRoute
@@ -297,6 +301,9 @@ internal fun LibraryRoute.storageKey(): String = when (this) {
     LibraryRoute.AllTracks -> "tracks"
     LibraryRoute.Favorites -> "favorites"
     LibraryRoute.Recent -> "recent"
+    LibraryRoute.Search -> "search"
+    LibraryRoute.Genres -> "genres"
+    is LibraryRoute.GenreDetail -> "genre:${genre.guid.value}"
     is LibraryRoute.ArtistDetail -> "artist:${artist.guid.value}"
     is LibraryRoute.AlbumDetail -> "album:${album.guid.value}"
     is LibraryRoute.Player -> "player"
@@ -312,5 +319,6 @@ internal fun LibraryRoute.retainedStateKeys(): Set<String> = when (this) {
     is LibraryRoute.AlbumDetail -> setOf("album:${album.guid.value}:tracks")
     LibraryRoute.Favorites -> setOf("favorites:tracks")
     LibraryRoute.Recent -> setOf("recent:tracks")
+    is LibraryRoute.GenreDetail -> setOf("genre:${genre.guid.value}:tracks")
     else -> emptySet()
 }

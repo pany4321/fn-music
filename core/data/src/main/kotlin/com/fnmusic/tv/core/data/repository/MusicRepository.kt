@@ -3,6 +3,7 @@ package com.fnmusic.tv.core.data.repository
 import android.content.Context
 import android.graphics.BitmapFactory
 import com.fnmusic.tv.core.data.api.AlbumDto
+import com.fnmusic.tv.core.data.api.GenreDto
 import com.fnmusic.tv.core.data.api.ApiDecoder
 import com.fnmusic.tv.core.data.api.ArtistDto
 import com.fnmusic.tv.core.data.api.LyricListDto
@@ -18,6 +19,8 @@ import com.fnmusic.tv.core.data.local.CachedLyricEntity
 import com.fnmusic.tv.core.data.local.CachedPageEntity
 import com.fnmusic.tv.core.data.local.LocalStore
 import com.fnmusic.tv.core.data.preferences.AppPreferences
+import com.fnmusic.tv.core.model.CollectionGuid
+import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.Album
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
@@ -253,11 +256,14 @@ class MusicRepository internal constructor(
             playlistCoverFetchInFlight += guid
         }
         val covers = try {
-            session.authenticated { it.playlistTracks(guid, page = 1, size = size) }
+            session.authenticated { it.playlistTracks(guid, page = 1, size = 50) }
                 .list
+                .asSequence()
                 .mapNotNull { track -> track.coverId?.trim()?.takeIf(String::isNotEmpty) }
                 .distinct()
+                .shuffled()
                 .take(size)
+                .toList()
         } catch (cause: CancellationException) {
             synchronized(playlistCoverFetchInFlight) { playlistCoverFetchInFlight -= guid }
             throw cause
@@ -356,6 +362,65 @@ class MusicRepository internal constructor(
         return collected.shuffled().take(count)
     }
 
+    suspend fun recentlyAddedTracks(page: Int, size: Int = 16) = cachedPage<TrackDto, Track>(
+        sourceKey = sizedPageSourceKey("recently-added", size),
+        page = page,
+        pageSize = size,
+        fetch = { session.authenticated { it.recentlyAddedTracks(page, size) } },
+    ) { it.toDomain() }.also(::observeFavoriteTracks)
+
+    suspend fun genres(): List<Genre> = cachedIndex<List<GenreDto>, List<Genre>>(
+        key = "genres",
+        fetch = { session.authenticated { it.genres(page = 1, size = 500).list } },
+    ) { list -> list.map { Genre(CollectionGuid(it.guid), it.name, it.trackCount) } }
+
+    suspend fun genreTracks(guid: String, page: Int) = cachedPage<TrackDto, Track>(
+        sourceKey = "genre-tracks:$guid",
+        page = page,
+        fetch = { session.authenticated { it.genreTracks(guid, page) } },
+    ) { it.toDomain() }.also(::observeFavoriteTracks)
+
+    suspend fun searchTracks(query: String, page: Int = 1, size: Int = 20): Page<Track> {
+        val response = session.authenticated { it.searchTracks(query, page, size) }
+        return Page(
+            items = response.list.map(TrackDto::toDomain),
+            page = page,
+            pageSize = size,
+            total = response.total,
+            sort = "relevance",
+        )
+    }
+
+    suspend fun searchArtists(query: String, page: Int = 1, size: Int = 20): Page<Artist> {
+        val response = session.authenticated { it.searchArtists(query, page, size) }
+        return Page(
+            items = response.list.map(ArtistDto::toDomain),
+            page = page,
+            pageSize = size,
+            total = response.total,
+            sort = "relevance",
+        )
+    }
+
+    suspend fun searchAlbums(query: String, page: Int = 1, size: Int = 20): Page<Album> {
+        val response = session.authenticated { it.searchAlbums(query, page, size) }
+        return Page(
+            items = response.list.map(AlbumDto::toDomain),
+            page = page,
+            pageSize = size,
+            total = response.total,
+            sort = "relevance",
+        )
+    }
+
+    suspend fun playlistTrackCounts(guids: List<String>): Map<String, Int> {
+        if (guids.isEmpty()) return emptyMap()
+        return runCatching {
+            session.authenticated { it.playlistBatchDetail(guids) }
+                .associate { dto -> dto.guid to dto.trackCount }
+        }.getOrDefault(emptyMap())
+    }
+
     suspend fun favoriteTracks(page: Int): Page<Track> {
         val namespace = session.cacheNamespace()
         val response = session.authenticated { it.favoriteTracks(page, FAVORITE_PAGE_SIZE) }
@@ -418,6 +483,7 @@ class MusicRepository internal constructor(
         is QueueSource.LibraryAllTracks -> allTracks(page)
         is QueueSource.Favorites -> favoriteTracks(page)
         is QueueSource.Recent -> recentTracks(page)
+        is QueueSource.Genre -> genreTracks(source.guid, page)
     }
 
     suspend fun sharedLibraries(): List<SharedLibrary> = cachedIndex<List<SharedLibraryDto>, List<SharedLibrary>>(

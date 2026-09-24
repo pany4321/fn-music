@@ -1,5 +1,6 @@
 package com.fnmusic.tv.core.data.api
 
+import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.CollectionGuid
 import com.fnmusic.tv.core.model.Album
 import com.fnmusic.tv.core.model.Artist
@@ -42,8 +43,7 @@ data class PlaylistDto(val guid: String, val name: String, val coverId: String? 
     fun toDomain() = Playlist(CollectionGuid(guid), name, coverId)
 }
 
-@Serializable
-data class PlaylistDetailDto(
+@Serializable data class PlaylistDetailDto(
     val guid: String,
     val name: String,
     val coverId: String? = null,
@@ -51,6 +51,16 @@ data class PlaylistDetailDto(
 ) {
     fun toDomain() = Playlist(CollectionGuid(guid), name, coverId, trackCount)
 }
+
+@Serializable data class GenreDto(
+    val guid: String,
+    val name: String,
+    val coverId: String? = null,
+    val trackCount: Int = 0,
+)
+
+fun GenreDto.toDomain() = Genre(CollectionGuid(guid), name, trackCount)
+
 
 @Serializable
 data class ArtistDto(
