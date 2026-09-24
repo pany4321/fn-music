@@ -184,7 +184,9 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
   task emits randomized encrypted byte payloads below `core/data/build/generated`; tracked source,
   Android resources, manifests, `BuildConfig` strings, workflow arguments, and logs never contain
   the plaintext values. Debug and test compilation may use an explicitly unconfigured generated
-  provider, while Release compilation fails closed when either variable is absent.
+  provider, while Release compilation fails closed when either variable is absent — except the
+  `-PallowUnsignedRelease=true` local verification opt-in, which runs the unconfigured provider
+  (`isConfigured=false`, FNID lookup fails closed at runtime).
 - The generated decoder is static-analysis resistance, not a trust boundary: it reconstructs
   temporary byte arrays only for the existing MD5 request-signing input, and the signer clears those
   arrays in `finally`. The request path, nonce range, millisecond timestamp, body digest, separators,
@@ -517,9 +519,11 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
   available from the default protected directory, Gradle properties, or
   `FN_MUSIC_RELEASE_PASSWORD`; signed sideload packaging additionally requires the HTTPS
   `fnMusicUpdateManifestUrl`. Keystores and passwords never enter Git. Any machine — developer
-  workstation or CI — may opt into unsigned Release compilation only with explicit
-  `-PallowUnsignedRelease=true`, which also skips the sideload update-manifest check; those
-  unsigned APKs are verification and device-testing artifacts and must never be distributed as
+  workstation or CI — may opt into local verification Release builds only with explicit
+  `-PallowUnsignedRelease=true`: the update-manifest check and the FN Connect release-configuration
+  check are skipped, and the release build type falls back to the debug keystore so the APK
+  installs for device testing. Those artifacts use a non-official signer (they cannot update an
+  official installation and FNID lookup fails closed at runtime) and must never be distributed as
   formal updates.
 - Media3 unstable APIs require `androidx.annotation.OptIn(UnstableApi::class)` at the implementation
   boundary so lint accepts usage without making callers opt in.
@@ -627,8 +631,8 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
 | DB payload or physical budget exceeded | LRU batch eviction, checkpoint, incremental vacuum |
 | CI produces no APK | Artifact upload fails the job |
 | Release merged art profile contains no `Lcom/fnmusic/tv` rule | Profile wiring is incomplete; fail performance acceptance |
-| Release packaging has no fixed key/password without `allowUnsignedRelease=true` | Fail before packaging; never silently emit a formal unsigned APK |
-| Local or CI explicitly sets `allowUnsignedRelease=true` | Permit unsigned Release compile/package verification only; artifacts are never distributable updates |
+| Release packaging has no fixed key/password and no `allowUnsignedRelease=true` | Fail before packaging; never silently emit a formal unsigned APK |
+| Local or CI explicitly sets `allowUnsignedRelease=true` | Verification Release only: skip FN Connect and update-manifest checks, sign with the debug keystore; never distributable as official updates |
 | `allowUnsignedRelease=true` sideload Release without an update manifest URL | Skip the manifest check; signed releases still require it |
 | Later formal version does not increase `VERSION_CODE` | Android may reject the update; release is invalid |
 

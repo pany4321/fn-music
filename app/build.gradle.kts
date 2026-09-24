@@ -100,7 +100,14 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            // Signed identity when available; otherwise the verification opt-in
+            // falls back to the debug keystore so the build installs for device
+            // testing, and without the opt-in packaging keeps failing closed.
+            signingConfig = when {
+                releaseSigningReady -> signingConfigs.getByName("release")
+                allowUnsignedRelease -> signingConfigs.getByName("debug")
+                else -> signingConfigs.getByName("release")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

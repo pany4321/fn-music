@@ -151,15 +151,17 @@ app/build/outputs/apk/sideload/debug/
 
 ### 本地 Release 验证构建
 
-没有签名密钥时，可以显式跳过签名与更新清单校验，编译未签名的 Release 验证包（仅用于本地
-编译验证与真机测试，不可作为正式更新分发）：
+没有正式签名密钥时，可以显式开启本地验证模式编译 Release 包：跳过签名密钥、更新清单与
+FN Connect 配置校验，改用 debug 密钥签名，可直接安装到设备做真机测试（R8 混淆等 Release
+行为与正式包一致）：
 
 ```sh
 ./gradlew -PallowUnsignedRelease=true :app:assembleSideloadRelease
 ```
 
-产物位于 `app/build/outputs/apk/sideload/release/`（`*-unsigned.apk`）。正式发布包仍需固定
-签名密钥与更新清单地址，由 CI 完成构建与发布。
+产物位于 `app/build/outputs/apk/sideload/release/`。注意：此类包与正式包签名不同，无法覆盖
+安装正式版，FNID 登录不可用（直连 IP/域名不受影响），且不得作为正式更新分发。正式发布包
+仍由 CI 使用固定签名密钥构建与发布。
 
 ## 项目结构
 
