@@ -418,6 +418,12 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
   header plus optional access-code headers and relay token/mode cookies, and records the signed-in
   api base; `ClearAuth` removes all request properties and the recorded base. Neither command
   changes repository caches.
+- Playback transport is driven by the platform media session: `RoutingPlayer` forwards
+  play/pause to ExoPlayer and routes next/previous through `PlaybackTransportBridge`, so roam
+  playback advances its own window while normal playback keeps the 3-second restart-then-step
+  convention for previous. The manifest declares `androidx.media3.session.MediaButtonReceiver`
+  for `ACTION_MEDIA_BUTTON` so a steering-wheel or headset key wakes the service after process
+  death; the session then serves `onPlaybackResumption` with the persisted queue.
 - The service wraps its HTTP data sources in `ResolvingDataSource` with an api-base rewriter
   (`rebaseApiUri`): queued stream URIs carry absolute origins, so after the session re-homes the
   service rewrites same-app `/music/api/v1/` request URIs onto the newest base (path and query
@@ -611,7 +617,10 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
 | Playback fails with a non-network code (401, 404, decode, DRM) | No playback retry; existing typed-failure behavior applies |
 | Session re-homes while a queue was installed against the old origin | The service rebases same-app API URIs onto the new base at open time; timeline is unchanged |
 | Re-home finds no reachable candidate | Return false; state, credentials, and current binding stay untouched |
-| Media play button arrives after process death | `onPlaybackResumption` returns the persisted snapshot plus remembered auth; with nothing persisted it reports unresumable |
+| Media play button arrives after process death | `MediaButtonReceiver` starts the service, then `onPlaybackResumption` returns the persisted snapshot plus remembered auth; with nothing persisted it reports unresumable |
+| Media play/pause, next, or previous arrives during playback | The media session applies it; next/previous route through the roam-aware transport bridge |
+| Media previous within 3 seconds of the current track | Step to the previous track |
+| Media previous after 3 seconds | Restart the current track from the beginning |
 | Server input contains full-width punctuation or alphanumerics | `normalizeWide` converts them before validation; FNID detection applies the same fold |
 | Login address fails validation | The login form shows `NAS 地址格式不正确`; the submit control stays disabled |
 | Shuffle acknowledgement is stale or no longer matches the queue | Controller ignores it and applies the declared fallback mode |

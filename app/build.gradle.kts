@@ -231,6 +231,9 @@ dependencies {
     implementation(project(":core:lyrics"))
     implementation(project(":core:data"))
     implementation(project(":core:playback"))
+    // Manifest-declared MediaButtonReceiver: the app references the media3 session
+    // component directly, so it needs the class on its own compile classpath.
+    implementation(libs.androidx.media3.session)
     implementation(files(flacDecoderAar))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core.ktx)
