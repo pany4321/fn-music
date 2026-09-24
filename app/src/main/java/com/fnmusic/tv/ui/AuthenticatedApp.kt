@@ -150,6 +150,8 @@ import com.fnmusic.tv.core.model.playback.QueuePageSegment
 import com.fnmusic.tv.core.model.playback.boundedQueueWindow
 import com.fnmusic.tv.core.playback.PlaybackUiState
 import com.fnmusic.tv.core.playback.PlaybackProgressState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CoroutineScope
@@ -250,6 +252,9 @@ internal fun AuthenticatedApp(
             session,
             playback,
             onHome = { root(LibraryRoute.Home) },
+            onSearch = { open(LibraryRoute.Search) },
+            onGenres = { open(LibraryRoute.Genres) },
+            onGenre = { open(LibraryRoute.GenreDetail(it)) },
             onArtists = { open(LibraryRoute.Artists) },
             onAlbums = { open(LibraryRoute.Albums) },
             onAllTracks = { open(LibraryRoute.AllTracks) },
@@ -1341,6 +1346,9 @@ private fun BrowseMy(
     session: SessionState.SignedIn,
     playback: PlaybackUiState,
     onHome: () -> Unit,
+    onSearch: () -> Unit,
+    onGenres: () -> Unit,
+    onGenre: (Genre) -> Unit,
     onArtists: () -> Unit,
     onAlbums: () -> Unit,
     onAllTracks: () -> Unit,
@@ -1366,7 +1374,13 @@ private fun BrowseMy(
     val switchAccountFocus = remember { FocusRequester() }
     val artistRowFocus = remember { FocusRequester() }
     val albumRowFocus = remember { FocusRequester() }
+    val genreRowFocus = remember { FocusRequester() }
     val libraryRowFocus = remember { FocusRequester() }
+    val genreState = retainedStore.list<Genre>("genres")
+    val genres = genreState.snapshot.entries
+    LaunchedEffect(Unit) {
+        retainedStore.loadListOnce(genreState) { container.musicRepository.genres() }
+    }
     val listState = rememberLazyListState()
     val scope = retainedStore.scope
     LaunchedEffect(Unit) {
@@ -1429,6 +1443,24 @@ private fun BrowseMy(
             contentDownFocus = settingsFocus,
         )
         Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onSearch,
+            modifier = Modifier.fillMaxWidth().height(54.dp),
+            colors = ButtonDefaults.colors(
+                containerColor = Color(0xFF1B201F),
+                contentColor = FnColors.Muted,
+                focusedContainerColor = Color(0xFF303634),
+                focusedContentColor = FnColors.Text,
+            ),
+            contentPadding = PaddingValues(start = 20.dp),
+        ) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                Text("🔍", fontSize = 18.sp)
+                Spacer(Modifier.width(10.dp))
+                Text("搜索歌手、专辑、歌曲", fontSize = 17.sp)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
         ProfileStrip(
             username = session.user.username,
             serverName = session.server.name,
@@ -1491,6 +1523,28 @@ private fun BrowseMy(
                     contentFocus,
                     rowFocusRequester = albumRowFocus,
                     upFocusRequester = artistRowFocus,
+                    downFocusRequester = genreRowFocus,
+                    onFocused = { focusedKey = it },
+                )
+            }
+            item {
+                MediaBand(
+                    "风格",
+                    genres.take(8).map { genre ->
+                        val key = "genre:" + genre.guid.value
+                        BandEntry(genre.name, "风格", genre.coverId, BandKind.Album, key) {
+                            focusedKey = key
+                            onGenre(genre)
+                        }
+                    },
+                    BandEntry("全部风格", "按风格筛选歌曲", null, BandKind.Album, "all-genres") {
+                        focusedKey = "all-genres"
+                        onGenres()
+                    },
+                    focusedKey,
+                    contentFocus,
+                    rowFocusRequester = genreRowFocus,
+                    upFocusRequester = albumRowFocus,
                     downFocusRequester = libraryRowFocus,
                     onFocused = { focusedKey = it },
                 )
@@ -1506,7 +1560,7 @@ private fun BrowseMy(
                     focusedKey,
                     contentFocus,
                     rowFocusRequester = libraryRowFocus,
-                    upFocusRequester = albumRowFocus,
+                    upFocusRequester = genreRowFocus,
                     downFocusRequester = FocusRequester.Cancel,
                     onFocused = { focusedKey = it },
                 )
@@ -3992,9 +4046,10 @@ private fun SearchRoute(
     onPlayer: (Track) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
-    var searched by remember { mutableStateOf("") }
+    var searched by rememberSaveable { mutableStateOf("") }
+    var pending by remember { mutableStateOf<String?>(null) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var artists by remember { mutableStateOf<List<Artist>>(emptyList()) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
@@ -4006,16 +4061,23 @@ private fun SearchRoute(
         val q = query.trim()
         if (q.isEmpty()) {
             tracks = emptyList(); artists = emptyList(); albums = emptyList()
-        } else {
-            loading = true
-            val t = async { runCatching { container.musicRepository.searchTracks(q) }.getOrNull() }
-            val a = async { runCatching { container.musicRepository.searchArtists(q) }.getOrNull() }
-            val al = async { runCatching { container.musicRepository.searchAlbums(q) }.getOrNull() }
-            tracks = t.await()?.items ?: emptyList()
-            artists = a.await()?.items ?: emptyList()
-            albums = al.await()?.items ?: emptyList()
-            loading = false
+            return@LaunchedEffect
         }
+        loading = true
+        try {
+            coroutineScope {
+                val t = async { runCatching { container.musicRepository.searchTracks(q) }.getOrNull() }
+                val a = async { runCatching { container.musicRepository.searchArtists(q) }.getOrNull() }
+                val al = async { runCatching { container.musicRepository.searchAlbums(q) }.getOrNull() }
+                tracks = t.await()?.items ?: emptyList()
+                artists = a.await()?.items ?: emptyList()
+                albums = al.await()?.items ?: emptyList()
+            }
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (_: Exception) {
+        }
+        loading = false
     }
 
     Column(
@@ -4086,7 +4148,22 @@ private fun SearchRoute(
                                     subtitle = (artist.trackCount ?: 0).toString() + " 首歌曲",
                                     coverId = artist.coverId,
                                     modifier = Modifier,
-                                    onClick = { onArtist(artist) },
+                                    onClick = {
+                                        scope.launch {
+                                            val page = runCatching {
+                                                container.musicRepository.artistTracks(artist.guid.value, 1)
+                                            }.getOrNull() ?: return@launch
+                                            val prepared = container.musicRepository.prepareQueue(page.items)
+                                            if (prepared.isEmpty()) return@launch
+                                            runCatching {
+                                                container.playbackController.playQueue(
+                                                    tracks = prepared,
+                                                    startIndex = 0,
+                                                    source = null,
+                                                )
+                                            }.onSuccess { onPlayer(prepared[0].track) }
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -4100,7 +4177,22 @@ private fun SearchRoute(
                                     subtitle = album.artistName.orEmpty(),
                                     coverId = album.coverId,
                                     modifier = Modifier,
-                                    onClick = { onAlbum(album) },
+                                    onClick = {
+                                        scope.launch {
+                                            val page = runCatching {
+                                                container.musicRepository.albumTracks(album.guid.value, 1)
+                                            }.getOrNull() ?: return@launch
+                                            val prepared = container.musicRepository.prepareQueue(page.items)
+                                            if (prepared.isEmpty()) return@launch
+                                            runCatching {
+                                                container.playbackController.playQueue(
+                                                    tracks = prepared,
+                                                    startIndex = 0,
+                                                    source = null,
+                                                )
+                                            }.onSuccess { onPlayer(prepared[0].track) }
+                                        }
+                                    },
                                 )
                             }
                         }

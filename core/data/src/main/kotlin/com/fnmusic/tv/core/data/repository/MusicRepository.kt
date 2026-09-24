@@ -372,7 +372,7 @@ class MusicRepository internal constructor(
     suspend fun genres(): List<Genre> = cachedIndex<List<GenreDto>, List<Genre>>(
         key = "genres",
         fetch = { session.authenticated { it.genres(page = 1, size = 500).list } },
-    ) { list -> list.map { Genre(CollectionGuid(it.guid), it.name, it.trackCount) } }
+    ) { list -> list.map { Genre(CollectionGuid(it.guid), it.name, it.coverId, it.trackCount) } }
 
     suspend fun genreTracks(guid: String, page: Int) = cachedPage<TrackDto, Track>(
         sourceKey = "genre-tracks:$guid",

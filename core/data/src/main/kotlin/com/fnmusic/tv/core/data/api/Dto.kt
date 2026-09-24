@@ -59,7 +59,7 @@ data class PlaylistDto(val guid: String, val name: String, val coverId: String? 
     val trackCount: Int = 0,
 )
 
-fun GenreDto.toDomain() = Genre(CollectionGuid(guid), name, trackCount)
+fun GenreDto.toDomain() = Genre(CollectionGuid(guid), name, coverId, trackCount)
 
 
 @Serializable
