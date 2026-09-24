@@ -1,0 +1,198 @@
+name: Android Package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build signed universal APK
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Read package version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source version.properties
+          [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tag="v$VERSION_NAME"
+          publish=true
+          if gh release view "$tag" >/dev/null 2>&1; then
+            publish=false
+          fi
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release notes
+        if: steps.version.outputs.publish == 'true'
+        id: release_notes
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          awk -v version="$VERSION_NAME" '
+            $0 == "## " version || index($0, "## " version " - ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$notes"
+          test -s "$notes"
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
+
+      - name: Restore release signing identity
+        id: signing
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.FN_MUSIC_RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_PASSWORD: ${{ secrets.FN_MUSIC_RELEASE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_KEYSTORE_BASE64"
+          test -n "$RELEASE_PASSWORD"
+          keystore="$RUNNER_TEMP/fn-music-tv-release.jks"
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          echo "keystore=$keystore" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed universal APK
+        env:
+          FN_CONNECT_API_KEY: ${{ secrets.FN_CONNECT_API_KEY }}
+          FN_CONNECT_AUTHX_PREFIX: ${{ secrets.FN_CONNECT_AUTHX_PREFIX }}
+          FN_MUSIC_RELEASE_PASSWORD: ${{ secrets.FN_MUSIC_RELEASE_PASSWORD }}
+          FN_MUSIC_UPDATE_MANIFEST_URL: ${{ vars.FN_MUSIC_UPDATE_MANIFEST_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$FN_CONNECT_API_KEY"
+          test -n "$FN_CONNECT_AUTHX_PREFIX"
+          test -n "$FN_MUSIC_UPDATE_MANIFEST_URL"
+          echo "::add-mask::$FN_CONNECT_API_KEY"
+          echo "::add-mask::$FN_CONNECT_AUTHX_PREFIX"
+          if git grep -F -q -- "$FN_CONNECT_API_KEY" || git grep -F -q -- "$FN_CONNECT_AUTHX_PREFIX"; then
+            echo "::error::Tracked source contains plaintext release connection configuration."
+            exit 1
+          fi
+          ./gradlew --no-daemon --stacktrace \
+            --no-build-cache \
+            -PfnMusicReleaseStoreFile="${{ steps.signing.outputs.keystore }}" \
+            -PfnMusicUpdateManifestUrl="$FN_MUSIC_UPDATE_MANIFEST_URL" \
+            :app:assembleSideloadRelease
+
+      - name: Verify and stage universal APK
+        id: artifact
+        shell: bash
+        env:
+          FN_CONNECT_API_KEY: ${{ secrets.FN_CONNECT_API_KEY }}
+          FN_CONNECT_AUTHX_PREFIX: ${{ secrets.FN_CONNECT_AUTHX_PREFIX }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$FN_CONNECT_API_KEY"
+          echo "::add-mask::$FN_CONNECT_AUTHX_PREFIX"
+          source_apk="app/build/outputs/apk/sideload/release/fn-music-tv-$VERSION_NAME-sideload-release.apk"
+          test -f "$source_apk"
+
+          scan_dir="$(mktemp -d "$RUNNER_TEMP/apk-plaintext-scan.XXXXXX")"
+          unzip -q "$source_apk" -d "$scan_dir"
+          if grep -R -a -F -q -- "$FN_CONNECT_API_KEY" "$scan_dir" || \
+             grep -R -a -F -q -- "$FN_CONNECT_AUTHX_PREFIX" "$scan_dir"; then
+            echo "::error::Release package contains plaintext connection configuration."
+            exit 1
+          fi
+
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          badging="$("$aapt" dump badging "$source_apk")"
+          grep -F "package: name='com.fnmusic.tv' versionCode='$VERSION_CODE' versionName='$VERSION_NAME'" <<< "$badging"
+          grep -F "sdkVersion:'23'" <<< "$badging"
+          grep -F "targetSdkVersion:'36'" <<< "$badging"
+          grep -F "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'" <<< "$badging"
+          signer_output=$("$apksigner" verify --verbose --print-certs "$source_apk")
+          printf '%s\n' "$signer_output"
+          signer_sha=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<< "$signer_output" | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
+          [[ "$signer_sha" =~ ^[0-9a-f]{64}$ ]]
+          compatibility_signer_output=$("$apksigner" verify --min-sdk-version 21 --verbose "$source_apk")
+          grep -F "Verified using v1 scheme (JAR signing): true" <<< "$compatibility_signer_output"
+          grep -F "Verified using v2 scheme (APK Signature Scheme v2): true" <<< "$compatibility_signer_output"
+
+          mkdir -p dist
+          release_apk="dist/fn-music-tv-$VERSION_NAME-universal.apk"
+          cp "$source_apk" "$release_apk"
+          sha256sum "$release_apk" > "$release_apk.sha256"
+          metadata="dist/release-metadata.json"
+          ./tool/release-metadata/generate-release-metadata.sh \
+            "$release_apk" \
+            "$signer_sha" \
+            "$GITHUB_SHA" \
+            "$metadata"
+          echo "apk=$release_apk" >> "$GITHUB_OUTPUT"
+          echo "checksum=$release_apk.sha256" >> "$GITHUB_OUTPUT"
+          echo "metadata=$metadata" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: fn-music-tv-${{ steps.version.outputs.name }}-universal
+          path: |
+            ${{ steps.artifact.outputs.apk }}
+            ${{ steps.artifact.outputs.checksum }}
+            ${{ steps.artifact.outputs.metadata }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create tag and GitHub Release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          RELEASE_APK: ${{ steps.artifact.outputs.apk }}
+          RELEASE_CHECKSUM: ${{ steps.artifact.outputs.checksum }}
+          RELEASE_METADATA: ${{ steps.artifact.outputs.metadata }}
+          RELEASE_NOTES: ${{ steps.release_notes.outputs.path }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "$RELEASE_APK#Android 6.0+ universal APK" \
+            "$RELEASE_CHECKSUM#SHA-256 checksum" \
+            "$RELEASE_METADATA#Machine-readable release metadata" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG" \
+            --notes "$(cat "$RELEASE_NOTES")" \
+            --generate-notes
