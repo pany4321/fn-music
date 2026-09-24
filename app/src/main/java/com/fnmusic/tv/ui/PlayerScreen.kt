@@ -1112,6 +1112,7 @@ internal fun TvLyrics(
                             fontWeight = FontWeight.SemiBold,
                         ),
                         textColor = FnColors.Text,
+                        activeTextColor = FnColors.Coral,
                         blendMode = BlendMode.SrcOver,
                         useBlurEffect = false,
                         showTranslation = true,

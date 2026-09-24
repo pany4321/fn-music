@@ -450,6 +450,10 @@ class MusicRepository internal constructor(
         session.authenticated { it.addToPlaylist(playlistGuid, listOf(trackGuid)) }
     }
 
+    suspend fun removeFromPlaylist(playlistGuid: String, trackGuid: String) {
+        session.authenticated { it.removeFromPlaylist(playlistGuid, listOf(trackGuid)) }
+    }
+
     suspend fun toggleFavorite(trackGuid: String, fallbackFavorite: Boolean): Result<Boolean> =
         favoriteMutationMutex.withLock {
             val namespace = session.cacheNamespace()

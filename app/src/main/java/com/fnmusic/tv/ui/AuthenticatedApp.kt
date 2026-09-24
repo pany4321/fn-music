@@ -14,6 +14,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -77,6 +78,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -287,20 +291,33 @@ internal fun AuthenticatedApp(
             onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
             onPlayer = { open(LibraryRoute.Player(it)) },
         )
-        is LibraryRoute.PlaylistDetail -> TrackCollection(
-            container = container,
-            stateKey = "playlist:${route.playlist.guid.value}:tracks",
-            title = route.playlist.name,
-            coverId = route.playlist.coverId,
-            loader = { container.musicRepository.playlistTracks(route.playlist.guid.value, it) },
-            queueSource = { sort -> QueueSource.Playlist(route.playlist.guid.value, sort) },
-            onPlayer = { open(LibraryRoute.Player(it)) },
-            detailHeader = TrackDetailHeader(
-                kind = "歌单",
-                declaredTrackCount = route.playlist.trackCount,
-                onBack = back,
-            ),
-        )
+        is LibraryRoute.PlaylistDetail -> {
+            var playlistContentRevision by remember { mutableStateOf(0L) }
+            val retainedScope = rememberCoroutineScope()
+            TrackCollection(
+                container = container,
+                stateKey = "playlist:${route.playlist.guid.value}:tracks",
+                title = route.playlist.name,
+                coverId = route.playlist.coverId,
+                loader = { container.musicRepository.playlistTracks(route.playlist.guid.value, it) },
+                queueSource = { sort -> QueueSource.Playlist(route.playlist.guid.value, sort) },
+                onPlayer = { open(LibraryRoute.Player(it)) },
+                detailHeader = TrackDetailHeader(
+                    kind = "歌单",
+                    declaredTrackCount = route.playlist.trackCount,
+                    onBack = back,
+                ),
+                contentRevision = playlistContentRevision,
+                canRemoveTrack = true,
+                onRemoveTrack = { track ->
+                    retainedScope.launch {
+                        runCatching {
+                            container.musicRepository.removeFromPlaylist(route.playlist.guid.value, track.guid.value)
+                        }.onSuccess { playlistContentRevision++ }
+                    }
+                },
+            )
+        }
         LibraryRoute.Artists -> ArtistGrid(container, onOpen = { open(LibraryRoute.ArtistDetail(it)) })
         LibraryRoute.Albums -> AlbumGrid(container, onOpen = { open(LibraryRoute.AlbumDetail(it)) })
         LibraryRoute.AllTracks -> TrackCollection(
@@ -1977,6 +1994,7 @@ private fun <T> PagedCatalogPage(
     totalLabel: (Int) -> String,
     loader: suspend (Int) -> Page<T>,
     key: (T) -> String,
+    onBack: (() -> Unit)? = null,
     item: @Composable (T, Modifier) -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
@@ -2123,6 +2141,10 @@ private fun <T> PagedCatalogPage(
                 .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                onBack?.let { onBack ->
+                    DetailBackButton(onClick = onBack)
+                    Spacer(Modifier.width(16.dp))
+                }
                 Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
                 snapshot.total?.let { total ->
                     Spacer(Modifier.width(14.dp))
@@ -2563,6 +2585,8 @@ private fun TrackCollection(
     alternateContent: @Composable () -> Unit = {},
     contentRevision: Long = 0L,
     emptyMessage: String = "暂无歌曲",
+    canRemoveTrack: Boolean = false,
+    onRemoveTrack: (Track) -> Unit = {},
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val retained = retainedStore.tracks(stateKey)
@@ -2747,6 +2771,8 @@ private fun TrackCollection(
         onLoadMore = { load(page + 1) },
         alternateContent = alternateContent,
         emptyMessage = emptyMessage,
+        canRemoveTrack = canRemoveTrack,
+        onRemoveTrack = onRemoveTrack,
     )
 }
 
@@ -2773,7 +2799,9 @@ private fun DetailTrackCollection(
     onTrackFocused: (Int, String) -> Unit,
     onTrack: (Int) -> Unit,
     onLoadMore: () -> Unit,
-    alternateContent: @Composable () -> Unit,
+    canRemoveTrack: Boolean = false,
+    onRemoveTrack: (Track) -> Unit = {},
+    alternateContent: @Composable () -> Unit = {},
     emptyMessage: String,
 ) {
     val window = LocalAdaptiveWindow.current
@@ -2905,6 +2933,8 @@ private fun DetailTrackCollection(
                         index = index,
                         track = track,
                         enabled = isTrackPlayable(track),
+                        canRemove = canRemoveTrack,
+                        onRemove = { onRemoveTrack(track) },
                         modifier = Modifier
                             .then(if (focusedKey == track.guid.value) Modifier.focusRequester(restoredFocus) else Modifier)
                             .onFocusChanged { if (it.isFocused) onTrackFocused(index, track.guid.value) },
@@ -3047,6 +3077,8 @@ private fun DetailTrackRow(
     track: Track,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    canRemove: Boolean = false,
+    onRemove: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(5.dp)
@@ -3102,6 +3134,17 @@ private fun DetailTrackRow(
                 textAlign = TextAlign.End,
                 modifier = Modifier.width(70.dp),
             )
+            if (canRemove) {
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clickable(onClick = onRemove),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("✕", color = contentColor.copy(alpha = 0.66f), fontSize = 15.sp)
+                }
+            }
         }
     }
 }
@@ -3580,64 +3623,45 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
             }
 
             HomeArtworkKind.PlaylistGrid -> {
-                drawRect(Color(0xFF171C1F))
-                val borderInset = shortEdge * 0.012f
-                drawRoundRect(
-                    color = Color.White.copy(alpha = 0.13f),
-                    topLeft = androidx.compose.ui.geometry.Offset(borderInset, borderInset),
-                    size = androidx.compose.ui.geometry.Size(
-                        size.width - borderInset * 2f,
-                        size.height - borderInset * 2f,
-                    ),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(shortEdge * 0.07f),
-                    style = Stroke(
-                        width = 1.dp.toPx(),
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                            floatArrayOf(4.dp.toPx(), 4.dp.toPx()),
+                // 彩色拼贴：四段渐变底 + 三张错位彩色封面片 + 白色音符
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF2B1B3D),
+                            Color(0xFF173F4E),
+                            Color(0xFF4E2317),
+                            Color(0xFF1F3A2A),
                         ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height),
                     ),
                 )
-                // Centered playlist glyph: three lines plus an eighth note.
-                val glyphEdge = shortEdge * 0.42f
-                val glyphOrigin = androidx.compose.ui.geometry.Offset(
-                    (size.width - glyphEdge) / 2f,
-                    (size.height - glyphEdge) / 2f,
+                val tileColors = listOf(
+                    Color(0xFFF6C445),
+                    Color(0xFF4FC3F7),
+                    Color(0xFFBA68C8),
                 )
-                fun glyphPoint(x: Float, y: Float) =
-                    glyphOrigin + androidx.compose.ui.geometry.Offset(x * glyphEdge, y * glyphEdge)
-                val glyphStroke = 2.4.dp.toPx()
-                val glyphColor = FnColors.Coral
-                val lineSpans = listOf(0.60f, 0.60f, 0.34f)
-                lineSpans.forEachIndexed { index, endX ->
-                    val y = 0.20f + index * 0.25f
-                    drawLine(
-                        glyphColor,
-                        glyphPoint(0.06f, y),
-                        glyphPoint(endX, y),
-                        glyphStroke,
-                        StrokeCap.Round,
+                val tileEdge = size.height * 0.52f
+                tileColors.forEachIndexed { index, color ->
+                    val topLeft = Offset(size.width * (0.20f + index * 0.17f), size.height * (0.30f + (index % 2) * 0.10f))
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(color.copy(alpha = 0.95f), color.copy(alpha = 0.55f)),
+                            start = topLeft,
+                            end = topLeft + Offset(tileEdge, tileEdge),
+                        ),
+                        topLeft = topLeft,
+                        size = Size(tileEdge, tileEdge),
+                        cornerRadius = CornerRadius(shortEdge * 0.05f),
                     )
                 }
-                drawLine(
-                    glyphColor,
-                    glyphPoint(0.84f, 0.16f),
-                    glyphPoint(0.84f, 0.70f),
-                    glyphStroke,
-                    StrokeCap.Round,
-                )
-                drawCircle(
-                    glyphColor,
-                    radius = glyphEdge * 0.09f,
-                    center = glyphPoint(0.71f, 0.74f),
-                    style = Stroke(glyphStroke),
-                )
-                drawLine(
-                    glyphColor,
-                    glyphPoint(0.84f, 0.16f),
-                    glyphPoint(0.97f, 0.31f),
-                    glyphStroke,
-                    StrokeCap.Round,
-                )
+                val noteStroke = shortEdge * 0.016f
+                val noteColor = Color.White.copy(alpha = 0.92f)
+                drawCircle(noteColor, radius = shortEdge * 0.030f, center = Offset(size.width * 0.575f, size.height * 0.615f))
+                drawLine(noteColor, Offset(size.width * 0.598f, size.height * 0.595f), Offset(size.width * 0.598f, size.height * 0.315f), noteStroke, StrokeCap.Round)
+                drawLine(noteColor, Offset(size.width * 0.40f, size.height * 0.345f), Offset(size.width * 0.598f, size.height * 0.315f), noteStroke, StrokeCap.Round)
+                drawCircle(noteColor, radius = shortEdge * 0.030f, center = Offset(size.width * 0.378f, size.height * 0.385f))
+                drawLine(noteColor, Offset(size.width * 0.400f, size.height * 0.365f), Offset(size.width * 0.400f, size.height * 0.665f), noteStroke, StrokeCap.Round)
             }
         }
     }

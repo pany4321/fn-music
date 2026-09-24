@@ -117,6 +117,10 @@ class TrimMusicApi(
     suspend fun searchAlbums(query: String, page: Int, size: Int = 20): SortedPageListDto<AlbumDto> =
         get("search/album", "q" to query, "page" to page, "size" to size)
 
+    suspend fun removeFromPlaylist(guid: String, trackGUIDs: List<String>) {
+        postUnit("playlist/remove-track", PlaylistAddTrackRequest(guid, trackGUIDs))
+    }
+
     suspend fun addToPlaylist(guid: String, trackGUIDs: List<String>) {
         postUnit("playlist/add-track", PlaylistAddTrackRequest(guid, trackGUIDs))
     }
