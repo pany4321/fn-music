@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.LocalTextStyle
@@ -305,20 +307,39 @@ fun KaraokeLyricsView(
     ) {
         androidx.compose.runtime.snapshotFlow { lyricsFocusState.firstIndex }
             .collect { firstIndex ->
-                if (!scrollInCode.value) {
-                    val items = listState.layoutInfo.visibleItemsInfo
-                    val targetItem = items.firstOrNull { it.index == firstIndex }
-                    val scrollOffset =
-                        (targetItem?.offset?.minus(listState.layoutInfo.viewportStartOffset + stableOffsetPx + keepAliveZonePx))
+                if (!scrollInCode.value && !isManualScrolling) {
+                    scrollInCode.value = true
                     try {
-                        scrollInCode.value = true
-                        if (scrollOffset != null) {
-                            listState.scrollBy(scrollOffset.toFloat())
-                        } else {
-                            listState.animateScrollToItem(
-                                firstIndex,
-                                (-stableOffsetPx - keepAliveZonePx).toInt()
+                        val layoutInfo = listState.layoutInfo
+                        val viewportCenter =
+                            (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+                        val target = layoutInfo.visibleItemsInfo
+                            .firstOrNull { it.index == firstIndex }
+                        if (target != null) {
+                            // 活动行平滑滚动至区域垂直中心
+                            val delta = (target.offset + target.size / 2) - viewportCenter
+                            listState.animateScrollBy(
+                                delta.toFloat(),
+                                androidx.compose.animation.core.tween(
+                                    380,
+                                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                )
                             )
+                        } else {
+                            // 远端条目：先定位，再按实际位置居中
+                            listState.scrollToItem(firstIndex)
+                            val info = listState.layoutInfo.visibleItemsInfo
+                                .firstOrNull { it.index == firstIndex }
+                            if (info != null) {
+                                val delta = (info.offset + info.size / 2) - viewportCenter
+                                listState.animateScrollBy(
+                                    delta.toFloat(),
+                                    androidx.compose.animation.core.tween(
+                                        250,
+                                        easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                    )
+                                )
+                            }
                         }
                     } catch (_: Exception) {
                     } finally {
@@ -496,6 +517,7 @@ fun KaraokeLyricsView(
                                             showTranslation = showTranslation,
                                             isActive = isCurrentFocusLine,
                                             activeTextColor = activeTextColor,
+                                            currentPositionMs = currentPosition,
                                         )
                                     }
                                 }
