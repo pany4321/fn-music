@@ -843,7 +843,9 @@ private fun BrowseHome(
     val favoritesFocus = remember { FocusRequester() }
     val recentFocus = remember { FocusRequester() }
     val playlistRowFocus = remember { FocusRequester() }
+    val refreshAlbumsFocus = remember { FocusRequester() }
     val randomAlbumsRowFocus = remember { FocusRequester() }
+    val refreshSongsFocus = remember { FocusRequester() }
     val randomSongsRowFocus = remember { FocusRequester() }
     val recentlyAddedRowFocus = remember { FocusRequester() }
     val albumRowState = rememberLazyListState()
@@ -966,7 +968,7 @@ private fun BrowseHome(
                 modifier = Modifier
                     .weight(1f)
                     .focusProperties {
-                        up = myTabFocus
+                        up = if (playback.hasMedia) nowPlayingFocus else homeTabFocus
                         left = roamFocus
                         right = recentFocus
                         down = playlistRowFocus
@@ -986,7 +988,7 @@ private fun BrowseHome(
                 modifier = Modifier
                     .weight(1f)
                     .focusProperties {
-                        up = myTabFocus
+                        up = if (playback.hasMedia) nowPlayingFocus else homeTabFocus
                         left = favoritesFocus
                         right = FocusRequester.Cancel
                         down = playlistRowFocus
@@ -1057,7 +1059,15 @@ private fun BrowseHome(
             Button(
                 onClick = { refreshRandomAlbums() },
                 enabled = !randomAlbumsLoading,
-                modifier = Modifier.size(width = 88.dp, height = 38.dp),
+                modifier = Modifier
+                    .size(width = 88.dp, height = 38.dp)
+                    .focusRequester(refreshAlbumsFocus)
+                    .focusProperties {
+                        up = playlistRowFocus
+                        down = randomAlbumsRowFocus
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    },
                 contentPadding = PaddingValues(0.dp),
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1083,7 +1093,7 @@ private fun BrowseHome(
                     modifier = Modifier
                         .then(if (index == 0) Modifier.focusRequester(randomAlbumsRowFocus) else Modifier)
                         .focusProperties {
-                            up = playlistRowFocus
+                            up = refreshAlbumsFocus
                             right = FocusRequester.Cancel
                         },
                     onClick = { onAlbum(album) },
@@ -1097,7 +1107,15 @@ private fun BrowseHome(
             Button(
                 onClick = { refreshRandomSongs() },
                 enabled = !randomSongsLoading,
-                modifier = Modifier.size(width = 88.dp, height = 38.dp),
+                modifier = Modifier
+                    .size(width = 88.dp, height = 38.dp)
+                    .focusRequester(refreshSongsFocus)
+                    .focusProperties {
+                        up = randomAlbumsRowFocus
+                        down = randomSongsRowFocus
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    },
                 contentPadding = PaddingValues(0.dp),
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1122,7 +1140,7 @@ private fun BrowseHome(
                     modifier = Modifier
                         .then(if (index == 0) Modifier.focusRequester(randomSongsRowFocus) else Modifier)
                         .focusProperties {
-                            up = randomAlbumsRowFocus
+                            up = refreshSongsFocus
                             right = FocusRequester.Cancel
                         },
                     onClick = { openSampledTrack(randomSongs, track) },
@@ -1146,7 +1164,8 @@ private fun BrowseHome(
                     modifier = Modifier
                         .then(if (index == 0) Modifier.focusRequester(recentlyAddedRowFocus) else Modifier)
                         .focusProperties {
-                            up = randomSongsRowFocus
+                            // 随机歌曲行可能为空（未加载完成或曲库过小），此时上键显式取消。
+                            up = if (randomSongs.isNotEmpty()) randomSongsRowFocus else FocusRequester.Cancel
                             right = FocusRequester.Cancel
                         },
                     onClick = { openSampledTrack(recentlyAdded, track) },
@@ -2727,9 +2746,11 @@ private fun TrackCollection(
     var loadedContentRevision by rememberSaveable(stateKey) { mutableStateOf<Long?>(null) }
     var pendingRemoveTrack by remember(stateKey) { mutableStateOf<Track?>(null) }
     var removingTrack by remember(stateKey) { mutableStateOf(false) }
+    var removeMessage by remember(stateKey) { mutableStateOf<String?>(null) }
 
     fun requestRemove(track: Track) {
         if (removingTrack || removeTrack == null) return
+        removeMessage = null
         pendingRemoveTrack = track
     }
 
@@ -2737,12 +2758,17 @@ private fun TrackCollection(
         val remove = removeTrack ?: return
         if (removingTrack) return
         removingTrack = true
-        pendingRemoveTrack = null
+        removeMessage = null
         actionScope.launch {
             val succeeded = runCatching { remove(track) }.getOrDefault(false)
             removingTrack = false
-            if (!succeeded) return@launch
+            if (!succeeded) {
+                // 删除失败：对话框保持打开并给出提示，列表保持原状。
+                removeMessage = "删除失败，请检查网络后重试"
+                return@launch
+            }
             // 就地移除，不回源、不重置页码，焦点落到相邻歌曲上。
+            pendingRemoveTrack = null
             val before = retained.snapshot
             val removedIndex = before.tracks.indexOfFirst { it.guid == track.guid }
             retained.snapshot = removeTrackFromCollection(before, track.guid)
@@ -2948,6 +2974,9 @@ private fun TrackCollection(
                 if (removingTrack) {
                     Text("正在删除…", color = FnColors.Muted, fontSize = 14.sp)
                 } else {
+                    removeMessage?.let {
+                        Text(it, color = FnColors.Warning, fontSize = 14.sp)
+                    }
                     val dialogShape = RoundedCornerShape(24.dp)
                     val dialogScale = ButtonDefaults.scale(focusedScale = 1.05f)
                     Row(
@@ -3295,7 +3324,7 @@ private fun DetailTrackColumnHeader(withRemoveColumn: Boolean = false) {
         Text("时长", color = FnColors.Muted, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(70.dp))
         // 与数据行的删除按钮占同宽，保证“时长”列与时间数值纵向对齐。
         if (withRemoveColumn) {
-            Spacer(Modifier.width(12.dp + 40.dp))
+            Spacer(Modifier.width(12.dp + 44.dp))
         }
     }
 }
@@ -3370,14 +3399,14 @@ private fun DetailTrackRow(
                 )
             }
         }
-        if (canRemove) {
-            Spacer(Modifier.width(12.dp))
-            val removeShape = CircleShape
-            Button(
-                onClick = onRemove,
-                modifier = Modifier
-                    .size(40.dp)
-                    .semantics { contentDescription = "删除" + track.title },
+            if (canRemove) {
+                Spacer(Modifier.width(12.dp))
+                val removeShape = CircleShape
+                Button(
+                    onClick = onRemove,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .semantics { contentDescription = "删除" + track.title },
                 shape = ButtonDefaults.shape(removeShape, removeShape, removeShape, removeShape, removeShape),
                 scale = ButtonDefaults.scale(focusedScale = 1.1f),
                 colors = ButtonDefaults.colors(
@@ -4455,6 +4484,8 @@ private fun SearchRoute(
         Spacer(Modifier.height(18.dp))
         val fieldShape = RoundedCornerShape(27.dp)
         var fieldFocused by remember { mutableStateOf(false) }
+        // 无结果时向下不指向任何目标，显式取消，避免焦点搜索落到未挂载的 FocusRequester。
+        val hasResults = artists.isNotEmpty() || albums.isNotEmpty() || tracks.isNotEmpty()
         BasicTextField(
             value = query,
             onValueChange = { query = it },
@@ -4465,7 +4496,7 @@ private fun SearchRoute(
                 .fillMaxWidth()
                 .height(56.dp)
                 .focusRequester(fieldFocus)
-                .focusProperties { down = resultsFocus }
+                .focusProperties { down = if (hasResults) resultsFocus else FocusRequester.Cancel }
                 .onFocusChanged { state -> fieldFocused = state.isFocused }
                 .background(Color(0xFF1B201F), fieldShape)
                 .border(

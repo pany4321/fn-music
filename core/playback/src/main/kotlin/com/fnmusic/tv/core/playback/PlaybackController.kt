@@ -131,7 +131,9 @@ class PlaybackController(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             val player = controller ?: return
-            if (playbackState == Player.STATE_READY) consecutiveDecodeFailures = 0
+            // 注意：不在 STATE_READY 处复位连续解码失败计数——容器可解析但解码
+            // 失败的文件会先 READY 再报错，逐首复位会让“全队列不支持”的上限
+            // 失效。复位依据是真实播放进度（见 startTicker）。
             if (playbackState == Player.STATE_ENDED && queueKind == QueueKind.Roam) {
                 if (autoAdvanceGate.tryConsume(generation, player.currentMediaItem?.mediaId)) {
                     advanceRoam(RoamDirection.Next)
@@ -1138,6 +1140,10 @@ class PlaybackController(
                 controller?.let { player ->
                     updateProgress(player)
                     checkpointSnapshot(player)
+                    // 连续解码失败计数的复位依据：当前曲目真实播放超过 1 秒。
+                    if (player.currentPosition > 1_000L) {
+                        consecutiveDecodeFailures = 0
+                    }
                 }
                 delay(PROGRESS_TICK_MS)
             }

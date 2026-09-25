@@ -12,7 +12,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -1275,16 +1274,13 @@ internal fun PlaybackQueueOverlay(
         }
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.34f))) {
-        // 点击窗口外的暗色区域即关闭；面板自身拦截点击，避免误关。
-        Box(Modifier.matchParentSize().clickable(onClick = onClose))
+        // 点击窗口外的暗色区域即关闭；pointerInput 不参与 D-pad 焦点搜索，
+        // 避免全屏遮罩成为可聚焦的“幽灵焦点”。面板自身拦截触摸防误关。
+        Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures { onClose() } })
         Column(
             Modifier.fillMaxHeight().fillMaxWidth(0.43f).align(Alignment.CenterEnd)
                 .background(Color(0xF3121717))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                )
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(horizontal = 24.dp, vertical = 28.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1629,6 +1625,22 @@ internal fun PlayerControlOverlay(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 左移链与视觉顺序一致：…添加到歌单 → 收藏 → 播放模式（最左）。
+                if (!roaming) {
+                    PlayerSideActionButton(
+                        glyph = playModeGlyph(playMode),
+                        description = "播放模式：${playModeLabel(playMode)}",
+                        focusRequester = modeFocus,
+                        upFocus = progressFocus,
+                        leftFocus = null,
+                        rightFocus = favoriteFocus,
+                        onFocus = onInteraction,
+                        onClick = {
+                            onInteraction()
+                            onCyclePlayMode()
+                        },
+                    )
+                }
                 PlayerSideActionButton(
                     glyph = if (favorite) PlayerSideActionGlyph.HeartFilled else PlayerSideActionGlyph.HeartOutline,
                     description = if (favorite) "取消收藏当前歌曲" else "收藏当前歌曲",
@@ -1656,21 +1668,6 @@ internal fun PlayerControlOverlay(
                         onAddToPlaylist()
                     },
                 )
-                if (!roaming) {
-                    PlayerSideActionButton(
-                        glyph = playModeGlyph(playMode),
-                        description = "播放模式：${playModeLabel(playMode)}",
-                        focusRequester = modeFocus,
-                        upFocus = progressFocus,
-                        leftFocus = favoriteFocus,
-                        rightFocus = favoriteFocus,
-                        onFocus = onInteraction,
-                        onClick = {
-                            onInteraction()
-                            onCyclePlayMode()
-                        },
-                    )
-                }
             }
             Row(
                 Modifier.align(Alignment.Center),
@@ -2415,7 +2412,15 @@ private fun AddToPlaylistDialog(
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        playlists.forEach { playlist ->
+                        // TV：列表就绪后把初始焦点交给第一个歌单，避免遥控器“无响应”。
+                        val firstPlaylistFocus = remember(playlists) { FocusRequester() }
+                        LaunchedEffect(loading, playlists) {
+                            if (!loading && playlists.isNotEmpty()) {
+                                yield()
+                                runCatching { firstPlaylistFocus.requestFocus() }
+                            }
+                        }
+                        playlists.forEachIndexed { index, playlist ->
                         val adding = pendingGuid == playlist.guid.value
                         Button(
                             onClick = {
@@ -2438,7 +2443,16 @@ private fun AddToPlaylistDialog(
                                         }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp)
+                                .then(
+                                    if (index == 0) {
+                                        Modifier.focusRequester(firstPlaylistFocus)
+                                    } else {
+                                        Modifier
+                                    }
+                                ),
                             colors = ButtonDefaults.colors(
                                 containerColor = Color(0xFF1B201F),
                                 contentColor = FnColors.Text,
