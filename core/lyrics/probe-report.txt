@@ -1,7 +1,0 @@
-start=0 end=500 text=歌曲名：六有六无
-start=500 end=1000 text=歌手：Test
-start=1000 end=1500 text=作词：A
-start=1500 end=2000 text=作曲：B
-start=2000 end=15300 text=编曲：C
-start=15300 end=20800 text=第一句歌词
-start=20800 end=2147483647 text=第二句歌词
