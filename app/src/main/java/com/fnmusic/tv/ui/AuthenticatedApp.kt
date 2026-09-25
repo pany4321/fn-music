@@ -303,6 +303,11 @@ internal fun AuthenticatedApp(
             onPlayer = { open(LibraryRoute.Player(it)) },
         )
         is LibraryRoute.PlaylistDetail -> {
+            // 封面与首页歌单卡片同源：会话级拼排缓存（3 首随机歌曲封面）。
+            val playlistCovers by container.musicRepository.playlistCovers.collectAsStateWithLifecycle()
+            LaunchedEffect(route.playlist.guid.value) {
+                container.musicRepository.playlistCoverCandidates(route.playlist.guid.value)
+            }
             TrackCollection(
                 container = container,
                 stateKey = "playlist:${route.playlist.guid.value}:tracks",
@@ -314,6 +319,7 @@ internal fun AuthenticatedApp(
                 detailHeader = TrackDetailHeader(
                     kind = "歌单",
                     declaredTrackCount = route.playlist.trackCount,
+                    deckCovers = playlistCovers[route.playlist.guid.value].orEmpty(),
                     onBack = back,
                 ),
                 contentRevision = 0L,
@@ -345,6 +351,11 @@ internal fun AuthenticatedApp(
         )
         LibraryRoute.Favorites -> {
             val favoriteState by container.musicRepository.favoriteState.collectAsStateWithLifecycle()
+            // 封面与首页“收藏”卡片同源：会话级封面组（covers:favorites）。
+            val favoritesDeck = LocalLibraryRetainedState.current
+                .list<FeatureArtworkItem>("covers:favorites")
+                .snapshot.entries
+                .mapNotNull { it.coverId }
             TrackCollection(
                 container = container,
                 stateKey = "favorites:tracks",
@@ -355,27 +366,36 @@ internal fun AuthenticatedApp(
                 detailHeader = TrackDetailHeader(
                     kind = "收藏",
                     artworkFallback = CollectionArtworkFallback.Favorites,
+                    deckCovers = favoritesDeck,
                     onBack = back,
                 ),
                 contentRevision = favoriteState.revision,
                 emptyMessage = "还没有收藏歌曲",
             )
         }
-        LibraryRoute.Recent -> TrackCollection(
-            container = container,
-            stateKey = "recent:tracks",
-            title = "最近播放",
-            loader = container.musicRepository::recentTracks,
-            queueSource = QueueSource::Recent,
-            onPlayer = { open(LibraryRoute.Player(it)) },
-            detailHeader = TrackDetailHeader(
-                kind = "最近播放",
-                artworkFallback = CollectionArtworkFallback.Collection,
-                onBack = back,
-            ),
-            contentRevision = recentContentTick,
-            emptyMessage = "还没有播放记录",
-        )
+        LibraryRoute.Recent -> {
+            // 封面与首页“最近播放”卡片同源：会话级封面组（covers:recent）。
+            val recentDeck = LocalLibraryRetainedState.current
+                .list<FeatureArtworkItem>("covers:recent")
+                .snapshot.entries
+                .mapNotNull { it.coverId }
+            TrackCollection(
+                container = container,
+                stateKey = "recent:tracks",
+                title = "最近播放",
+                loader = container.musicRepository::recentTracks,
+                queueSource = QueueSource::Recent,
+                onPlayer = { open(LibraryRoute.Player(it)) },
+                detailHeader = TrackDetailHeader(
+                    kind = "最近播放",
+                    artworkFallback = CollectionArtworkFallback.Collection,
+                    deckCovers = recentDeck,
+                    onBack = back,
+                ),
+                contentRevision = recentContentTick,
+                emptyMessage = "还没有播放记录",
+            )
+        }
         is LibraryRoute.ArtistDetail -> ArtistDetail(
             container = container,
             artist = route.artist,
@@ -1620,7 +1640,7 @@ private fun BrowseMy(
                             onAlbum(it)
                         }
                     },
-                    BandEntry("全部专辑", "浏览完整列表", null, BandKind.Album, "all-albums") {
+                    BandEntry("全部专辑", "浏览完整列表", null, BandKind.Album, "all-albums", artworkRes = R.drawable.cover_all_albums) {
                         focusedKey = "all-albums"
                         onAlbums()
                     },
@@ -1878,6 +1898,8 @@ private data class BandEntry(
     val coverId: String?,
     val kind: BandKind,
     val focusKey: String,
+    /** 终端卡片的静态封面资源（如“全部专辑”），优先于 coverId/占位图。 */
+    val artworkRes: Int? = null,
     val action: (() -> Unit)?,
 )
 
@@ -1977,6 +1999,7 @@ private fun BandLockup(entry: BandEntry, modifier: Modifier = Modifier) {
             entry.coverId,
             modifier = modifier,
             enabled = entry.action != null,
+            artworkRes = entry.artworkRes,
         ) { entry.action?.invoke() }
         BandKind.Genre -> GenreLockup(
             entry.title,
@@ -2403,6 +2426,8 @@ private data class TrackDetailHeader(
     val extraMetadata: String? = null,
     val artworkFallback: CollectionArtworkFallback = CollectionArtworkFallback.Initial,
     val tabs: List<TrackDetailTab> = emptyList(),
+    /** 与首页对应卡片同一来源的封面拼排；非空时优先于单张封面。 */
+    val deckCovers: List<String> = emptyList(),
     val onBack: () -> Unit,
 )
 
@@ -3017,6 +3042,7 @@ private fun DetailTrackCollection(
                 fallback = header.artworkFallback,
                 modifier = Modifier.size(184.dp),
                 shape = artworkShape,
+                deckCovers = header.deckCovers,
             )
             Spacer(Modifier.width(24.dp))
             Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -3157,9 +3183,18 @@ private fun CollectionArtwork(
     fallback: CollectionArtworkFallback,
     modifier: Modifier,
     shape: Shape,
+    deckCovers: List<String> = emptyList(),
 ) {
     val resolvedShape = if (fallback == CollectionArtworkFallback.Artist) CircleShape else shape
-    if (coverId != null) {
+    // 与首页卡片一致：有封面拼排时优先展示（歌单/收藏/最近播放详情页）。
+    if (deckCovers.isNotEmpty()) {
+        PlaylistCoverDeck(
+            covers = deckCovers.take(3),
+            title = title,
+            accent = FnColors.Coral,
+            modifier = modifier,
+        )
+    } else if (coverId != null) {
         RemoteArtwork(
             container = container,
             coverId = coverId,
@@ -3975,6 +4010,7 @@ private fun AlbumLockup(
     coverId: String?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    artworkRes: Int? = null,
     onClick: () -> Unit,
 ) {
     val container = LocalAuthenticatedDependencies.current
@@ -3997,8 +4033,16 @@ private fun AlbumLockup(
         contentPadding = PaddingValues(7.dp),
     ) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            if (coverId != null) {
-                RemoteArtwork(
+            when {
+                artworkRes != null -> Image(
+                    painter = painterResource(artworkRes),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(73.dp)
+                        .clip(artworkShape),
+                )
+                coverId != null -> RemoteArtwork(
                     container = container,
                     coverId = coverId,
                     variant = CoverVariant.Compact,
@@ -4009,8 +4053,7 @@ private fun AlbumLockup(
                         InitialArtworkPlaceholder(title, FnColors.Coral, Modifier.fillMaxSize(), artworkShape)
                     },
                 )
-            } else {
-                InitialArtworkPlaceholder(title, FnColors.Coral, Modifier.size(73.dp), artworkShape)
+                else -> InitialArtworkPlaceholder(title, FnColors.Coral, Modifier.size(73.dp), artworkShape)
             }
             Spacer(Modifier.width(9.dp))
             LockupLabels(title, subtitle, Modifier.weight(1f))
