@@ -676,19 +676,38 @@ private fun BrowseHome(
     val playlistsLoaded = playlistSnapshot.initialLoadCompleted
     val albums = albumState.snapshot.entries
     val favoriteTracks = favoritePreviewState.snapshot.entries
-    val roamArtwork = remember(albums, playlists) {
-        featureArtworkSlots(
-            primary = albums.map { FeatureArtworkItem(it.name, it.coverId) },
-            fallback = playlists.map { FeatureArtworkItem(it.name, it.coverId) },
-        )
+    val roamCoverState = retainedStore.list<FeatureArtworkItem>("covers:roam")
+    LaunchedEffect(albums, playlists) {
+        if ((albums.isNotEmpty() || playlists.isNotEmpty()) && !roamCoverState.snapshot.initialLoadCompleted) {
+            val deck = featureArtworkSlots(
+                primary = albums.map { FeatureArtworkItem(it.name, it.coverId) },
+                fallback = playlists.map { FeatureArtworkItem(it.name, it.coverId) },
+            )
+            if (deck.isNotEmpty()) roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
+        }
     }
-    val favoriteArtwork = remember(favoriteTracks) {
-        featureArtworkSlots(primary = favoriteTracks.map { FeatureArtworkItem(it.title, it.coverId) })
+    val roamArtwork = roamCoverState.snapshot.entries
+    val favoriteCoverState = retainedStore.list<FeatureArtworkItem>("covers:favorites")
+    LaunchedEffect(favoriteTracks) {
+        if (favoriteTracks.isNotEmpty() && !favoriteCoverState.snapshot.initialLoadCompleted) {
+            val deck = featureArtworkSlots(
+                primary = favoriteTracks.shuffled().map { FeatureArtworkItem(it.title, it.coverId) },
+            )
+            if (deck.isNotEmpty()) favoriteCoverState.snapshot = retainLoadedList(favoriteCoverState.snapshot, deck)
+        }
     }
+    val favoriteArtwork = favoriteCoverState.snapshot.entries
     val recentTracksPreview = recentPreviewState.snapshot.entries
-    val recentArtwork = remember(recentTracksPreview) {
-        featureArtworkSlots(primary = recentTracksPreview.map { FeatureArtworkItem(it.title, it.coverId) })
+    val recentCoverState = retainedStore.list<FeatureArtworkItem>("covers:recent")
+    LaunchedEffect(recentTracksPreview) {
+        if (recentTracksPreview.isNotEmpty() && !recentCoverState.snapshot.initialLoadCompleted) {
+            val deck = featureArtworkSlots(
+                primary = recentTracksPreview.shuffled().map { FeatureArtworkItem(it.title, it.coverId) },
+            )
+            if (deck.isNotEmpty()) recentCoverState.snapshot = retainLoadedList(recentCoverState.snapshot, deck)
+        }
     }
+    val recentArtwork = recentCoverState.snapshot.entries
     var randomAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var randomAlbumsLoading by remember { mutableStateOf(false) }
     fun refreshRandomAlbums() {
