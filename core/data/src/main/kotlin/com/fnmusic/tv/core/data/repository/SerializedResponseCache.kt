@@ -98,6 +98,29 @@ internal class SerializedResponseCache(
         canceled.forEach { it.cancel(CancellationException("Response cache namespace was invalidated")) }
     }
 
+    /** Drops one source's pages (e.g. after a mutation changed its content on the NAS). */
+    suspend fun invalidateSource(namespace: String, businessKey: String) {
+        val canceled = acceptanceMutex.withLock {
+            mutex.withLock {
+                val iterator = entries.iterator()
+                while (iterator.hasNext()) {
+                    val (key, value) = iterator.next()
+                    if (key.namespace == namespace && key.businessKey == businessKey) {
+                        retainedBytes -= value.sizeBytes
+                        iterator.remove()
+                    }
+                }
+                flights.entries
+                    .filter { it.key.namespace == namespace && it.key.businessKey == businessKey }
+                    .map { (key, value) ->
+                        flights.remove(key)
+                        value.deferred
+                    }
+            }
+        }
+        canceled.forEach { it.cancel(CancellationException("Response cache source was invalidated")) }
+    }
+
     suspend fun invalidateAll() {
         val canceled = acceptanceMutex.withLock {
             mutex.withLock {

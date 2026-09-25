@@ -12,6 +12,14 @@
 > 本项目为第三方客户端，与飞牛官方无关。使用前请确保已经部署可访问的飞牛音乐服务，
 > 并遵守相关服务条款。
 
+## 项目归属
+
+- 本仓库是 [QiaoKes/fn-music-tv](https://github.com/QiaoKes/fn-music-tv) 的改进分支，
+  原始项目与设计由 **QiaoKes（Tag mig hånden）** 完成，衷心感谢原作者的出色工作。
+- 本分支由 **大南瓜** 维护，重点增强车机与触屏体验、播放容错与歌单管理能力，
+  并在本仓库发布独立的编译版本。
+- 上游与本分支的已知差异会随迭代变化；如需上游的原始版本，请访问原仓库。
+
 ## 主要功能
 
 - **电视端原生体验**：适配 Android TV 启动器、横屏显示与 D-pad 遥控器焦点操作。
@@ -43,19 +51,11 @@
   <img src="docs/images/full-screen-play.png" alt="大海报播放器">
 </p>
 
-## 爱发电
-
-<a href="https://afdian.com/a/qiaoke" target="_blank">
-  <img src="docs/images/support_aifadian.svg" alt="support_aifadian">
-</a>
-
-如果这个项目对你有所帮助，欢迎留下 Star 或通过爱发电支持项目。您的每一份认可，都会成为我持续完善体验的动力。
-
 ## 安装
 
 ### 下载预编译版本
 
-前往 [Releases](https://github.com/QiaoKes/fn-music-tv/releases) 下载最新版通用 APK：
+前往 [Releases](https://github.com/pany4321/fn-music/releases) 下载最新版通用 APK：
 
 ```text
 fn-music-tv-<version>-universal.apk
@@ -128,8 +128,8 @@ adb install fn-music-tv-<version>-universal.apk
 克隆项目并构建侧载调试包：
 
 ```sh
-git clone https://github.com/QiaoKes/fn-music-tv.git
-cd fn-music-tv
+git clone https://github.com/pany4321/fn-music.git
+cd fn-music
 ./gradlew :app:assembleSideloadDebug
 ```
 
@@ -188,6 +188,9 @@ baselineprofile/ 基准配置生成模块
 
 ## 特别感谢
 
+- [QiaoKes/fn-music-tv](https://github.com/QiaoKes/fn-music-tv) —— 本项目的上游，
+  感谢原作者 QiaoKes（Tag mig hånden）的原创设计与持续开发；欢迎前往原仓库支持作者
+  （[爱发电](https://afdian.com/a/qiaoke)）。
 - [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) 提供 YRC、KRC 等同步歌词格式的解析与统一歌词模型。
 - [Accompanist Lyrics UI](https://github.com/6xingyv/Accompanist) 提供逐字高亮、双语展示与自动滚动歌词组件。
 - [LDDC](https://github.com/chenmozhijin/LDDC) 提供了多歌词源检索、匹配策略与歌词格式处理方面的实现参考。

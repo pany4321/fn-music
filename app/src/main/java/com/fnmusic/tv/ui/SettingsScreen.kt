@@ -68,7 +68,7 @@ private val SettingsBorderColor = Color(0xFF303735)
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-internal fun SettingsScreen(container: AuthenticatedAppDependencies) {
+internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
     val preferences by container.appPreferences.state.collectAsStateWithLifecycle()
     val updateState by container.updateController.state.collectAsStateWithLifecycle()
     val scope = LocalLibraryRetainedState.current.scope
@@ -121,7 +121,11 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies) {
                     vertical = if (window.shortHeight) 12.dp else 28.dp,
                 ),
         ) {
-            Text("设置", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DetailBackButton(onClick = onBack)
+                Spacer(Modifier.width(16.dp))
+                Text("设置", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+            }
             Spacer(Modifier.height(8.dp))
             Text("播放与歌词", fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
@@ -148,7 +152,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies) {
                             .focusRequester(coverStyleFocus),
                     )
                     SettingsChoiceButton(
-                        label = "大海报模式",
+                        label = "海报模式",
                         selected = preferences.playerStyle == PlayerStyle.Poster,
                         onClick = { container.appPreferences.setPlayerStyle(PlayerStyle.Poster) },
                         modifier = Modifier
@@ -301,7 +305,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies) {
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("飞牛音乐", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "Android TV 飞牛音乐第三方客户端",
+                            "Android TV / 车机 飞牛音乐第三方客户端",
                             color = FnColors.Muted,
                             fontSize = 10.sp,
                             lineHeight = 12.sp,
@@ -318,8 +322,8 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     AboutValue("版本", "${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
-                    AboutValue("作者", "Tag mig hånden")
-                    AboutValue("GitHub", "github.com/QiaoKes/fn-music-tv")
+                    AboutValue("作者", "大南瓜")
+                    AboutValue("GitHub", "github.com/pany4321/fn-music")
                 }
                 if (container.updateController.enabled) {
                     AboutDivider()

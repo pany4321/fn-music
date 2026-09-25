@@ -407,7 +407,7 @@ internal fun AuthenticatedApp(
             },
             onBack = back,
         )
-                LibraryRoute.Settings -> SettingsScreen(container)
+                LibraryRoute.Settings -> SettingsScreen(container, onBack = back)
             }
         }
     }
@@ -731,9 +731,9 @@ private fun BrowseHome(
             randomSongsLoading = false
         }
     }
-    fun openRandomSong(track: Track) {
+    fun openSampledTrack(source: List<Track>, track: Track) {
         randomSongScope.launch {
-            val prepared = runCatching { container.musicRepository.prepareQueue(randomSongs) }
+            val prepared = runCatching { container.musicRepository.prepareQueue(source) }
                 .getOrDefault(emptyList())
             val startIndex = prepared.indexOfFirst { it.track.guid == track.guid }
             if (startIndex < 0) return@launch
@@ -745,6 +745,10 @@ private fun BrowseHome(
                 )
             }.onSuccess { onPlayer() }
         }
+    }
+
+    fun openRandomSong(track: Track) {
+        openSampledTrack(randomSongs, track)
     }
     LaunchedEffect(Unit) {
         retainedStore.scope.launch {
@@ -1069,7 +1073,7 @@ private fun BrowseHome(
                     subtitle = track.artistName.orEmpty(),
                     coverId = track.coverId,
                     modifier = Modifier.focusProperties { down = FocusRequester.Cancel },
-                    onClick = { openRandomSong(track) },
+                    onClick = { openSampledTrack(recentlyAdded, track) },
                 )
             }
         }
@@ -3034,7 +3038,7 @@ private fun CollectionArtworkFallbackContent(
 }
 
 @Composable
-private fun DetailBackButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun DetailBackButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     val shape = CircleShape
     Button(
         onClick = onClick,
@@ -3154,7 +3158,7 @@ private fun DetailTrackRow(
                 modifier = Modifier.width(70.dp),
             )
             if (canRemove) {
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(26.dp))
                 Box(
                     Modifier
                         .size(36.dp)

@@ -231,6 +231,43 @@ class SerializedResponseCacheTest {
         assertTrue(cache.retainedKeys().isEmpty())
     }
 
+    @Test fun `invalidateSource drops only the mutated source entries`() = runBlocking {
+        val cache = SerializedResponseCache(1024, scope)
+        val playlistKey = ResponseCacheKey("server:user", "page", "playlist:guid-1", 1)
+        val otherKey = ResponseCacheKey("server:user", "page", "playlist:guid-2", 1)
+        val indexKey = ResponseCacheKey("server:user", "index", "playlist:guid-1")
+        cache.getOrFetch(playlistKey) { "page-1" }
+        cache.getOrFetch(otherKey) { "other" }
+        cache.getOrFetch(indexKey) { "detail" }
+
+        cache.invalidateSource("server:user", "playlist:guid-1")
+
+        val fetched = mutableListOf<String>()
+        assertEquals("refetched page", cache.getOrFetch(playlistKey) { fetched += "page"; "refetched page" })
+        assertEquals("other", cache.getOrFetch(otherKey) { fetched += "other"; "other" })
+        assertEquals("refetched detail", cache.getOrFetch(indexKey) { fetched += "detail"; "refetched detail" })
+        assertEquals(listOf("page", "detail"), fetched)
+    }
+
+    @Test fun `invalidateSource cancels an in-flight fetch of that source only`() = runBlocking {
+        val cache = SerializedResponseCache(1024, scope)
+        val key = ResponseCacheKey("server:user", "page", "playlist:guid-1", 1)
+        val release = CompletableDeferred<Unit>()
+        val waiter = async {
+            cache.getOrFetch(key) {
+                release.await()
+                "stale"
+            }
+        }
+        awaitWaiters(cache, key, 1)
+
+        cache.invalidateSource("server:user", "playlist:guid-1")
+        release.complete(Unit)
+        waiter.cancelAndJoin()
+
+        assertEquals("fresh", cache.getOrFetch(key) { "fresh" })
+    }
+
     private suspend fun awaitWaiters(
         cache: SerializedResponseCache,
         key: ResponseCacheKey,

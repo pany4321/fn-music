@@ -448,10 +448,17 @@ class MusicRepository internal constructor(
 
     suspend fun addToPlaylist(playlistGuid: String, trackGuid: String) {
         session.authenticated { it.addToPlaylist(playlistGuid, listOf(trackGuid)) }
+        invalidatePlaylistPages(playlistGuid)
     }
 
     suspend fun removeFromPlaylist(playlistGuid: String, trackGuid: String) {
         session.authenticated { it.removeFromPlaylist(playlistGuid, listOf(trackGuid)) }
+        invalidatePlaylistPages(playlistGuid)
+    }
+
+    /** 歌单内容在 NAS 上已变化，丢弃该歌单的缓存页，让下一次加载直接回源。 */
+    private suspend fun invalidatePlaylistPages(playlistGuid: String) {
+        runCatching { responses.invalidateSource(session.cacheNamespace(), "playlist:$playlistGuid") }
     }
 
     suspend fun toggleFavorite(trackGuid: String, fallbackFavorite: Boolean): Result<Boolean> =

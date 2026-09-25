@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionResult
@@ -132,6 +133,21 @@ class PlaybackController(
             if (playbackState == Player.STATE_ENDED && queueKind == QueueKind.Roam) {
                 if (autoAdvanceGate.tryConsume(generation, player.currentMediaItem?.mediaId)) {
                     advanceRoam(RoamDirection.Next)
+                }
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            if (error.errorCode !in AUTO_SKIP_ERROR_CODES) return
+            controller?.let { player ->
+                if (queueKind == QueueKind.Roam) {
+                    if (autoAdvanceGate.tryConsume(generation, player.currentMediaItem?.mediaId)) {
+                        advanceRoam(RoamDirection.Next)
+                    }
+                } else if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    player.play()
                 }
             }
         }
@@ -1329,6 +1345,13 @@ class PlaybackController(
         const val SNAPSHOT_INTERVAL_MS = 5_000L
         const val PREVIOUS_RESTART_THRESHOLD_MS = 3_000L
         val QUEUE_RETRY_DELAYS = longArrayOf(500L, 1_000L, 2_000L)
+
+        /** 设备解码器无法处理的编码格式：自动跳下一首而不是停住。 */
+        val AUTO_SKIP_ERROR_CODES = setOf(
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+        )
     }
 }
 
