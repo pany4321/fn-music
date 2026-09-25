@@ -1146,11 +1146,13 @@ internal fun TvLyrics(
                         useBlurEffect = false,
                         showTranslation = true,
                         showPhonetic = false,
-                        // 列表上下留白 = 半个视口：让第一行/最后一行也能滚动到
-                        // 视口垂直中心，否则首行顶死在上沿、第二句开始才突然
-                        // 进入居中滚动，观感不协调。
-                        offset = defaultLyricsViewportHeight(poster, controlsVisible) / 2,
+                        // 列表上下留白 = 全屏视口高度的一半，且为固定值（不随控制栏
+                        // 显隐变化，避免控制栏出现时歌词内容被向下推）。首行——包括
+                        // 歌名/作词/作曲等元信息行——因此从居中位置开始依次展示。
+                        offset = if (poster) 150.dp else 144.dp,
                         keepAliveZone = 0.dp,
+                        // 超长逐字行不换行，随演唱进度向左平滑滚动。
+                        horizontalScrollWhenActive = true,
                         breathingDotsDefaults = KaraokeBreathingDotsDefaults(
                             number = 1,
                             size = 0.dp,

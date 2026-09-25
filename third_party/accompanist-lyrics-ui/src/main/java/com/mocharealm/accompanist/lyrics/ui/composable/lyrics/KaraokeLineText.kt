@@ -2,6 +2,8 @@ package com.mocharealm.accompanist.lyrics.ui.composable.lyrics
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -13,6 +15,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -57,6 +61,7 @@ import com.mocharealm.accompanist.lyrics.ui.utils.easing.DipAndRise
 import com.mocharealm.accompanist.lyrics.ui.utils.easing.Swell
 import com.mocharealm.accompanist.lyrics.ui.utils.isPunctuation
 import com.mocharealm.accompanist.lyrics.ui.utils.isRtl
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 private const val FixedSimpleAnimationDurationMs = 700f
@@ -425,7 +430,9 @@ fun KaraokeLineText(
     showPhonetic: Boolean = true,
     precalculatedLayouts: List<SyllableLayout>? = null,
     isDuoView: Boolean = false,
-    textMeasurer: TextMeasurer = rememberTextMeasurer()
+    textMeasurer: TextMeasurer = rememberTextMeasurer(),
+    /** 超长行不换行：整行排成单行，随演唱进度向左平滑滚动露出完整内容。 */
+    horizontalScrollWhenActive: Boolean = false,
 ) {
     val isLineRtl = remember(line.syllables) { line.syllables.any { it.content.isRtl() } }
 
@@ -503,7 +510,8 @@ fun KaraokeLineText(
                         showDebugRectangles = showDebugRectangles,
                         showTranslation = showTranslation,
                         showPhonetic = showPhonetic,
-                        textMeasurer = textMeasurer
+                        textMeasurer = textMeasurer,
+                        horizontalScrollWhenActive = horizontalScrollWhenActive
                     )
                 }
             }
@@ -556,14 +564,19 @@ fun KaraokeLineText(
                 }
             }
 
-            val wrappedLines by remember {
+            val wrappedLines by remember(horizontalScrollWhenActive) {
                 derivedStateOf {
-                    calculateBalancedLines(
-                        syllableLayouts = initialLayouts,
-                        availableWidthPx = availableWidthPx,
-                        textMeasurer = textMeasurer,
-                        style = textStyle
-                    )
+                    if (horizontalScrollWhenActive) {
+                        // 单行不换行：所有音节排进同一行，超宽部分靠横向滚动露出。
+                        listOf(trimDisplayLineTrailingSpaces(initialLayouts, textMeasurer, textStyle))
+                    } else {
+                        calculateBalancedLines(
+                            syllableLayouts = initialLayouts,
+                            availableWidthPx = availableWidthPx,
+                            textMeasurer = textMeasurer,
+                            style = textStyle
+                        )
+                    }
                 }
             }
 
@@ -608,17 +621,51 @@ fun KaraokeLineText(
                 height
             }
 
-            Canvas(modifier = Modifier.size(maxWidth, (totalHeight.roundToInt() + 8).toDp())) {
-                val time = currentTimeProvider()
-                drawLyricsLine(
-                    rowRenderData = rowRenderData,
-                    currentTimeMs = time,
-                    color = activeColor,
-                    blendMode = blendMode,
-                    isRtl = isLineRtl,
-                    showDebugRectangles = showDebugRectangles,
-                    showPhonetic = showPhonetic
-                )
+            // 超长单行横向滚动：画布放宽到整行宽度，随进度向左平移。
+            val singleRowWidth = wrappedLines.firstOrNull()?.totalWidth ?: 0f
+            val overflowPx = if (horizontalScrollWhenActive) {
+                (singleRowWidth - availableWidthPx).coerceAtLeast(0f)
+            } else 0f
+            val canvasWidthPx = max(availableWidthPx, singleRowWidth)
+            val lineProgress by derivedStateOf {
+                if (overflowPx <= 0f) 0f
+                else {
+                    val t = currentTimeProvider()
+                    val span = (line.end - line.start).coerceAtLeast(1)
+                    ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
+                }
+            }
+            val lineScrollX by animateFloatAsState(
+                targetValue = -overflowPx * lineProgress,
+                animationSpec = tween(200, easing = LinearEasing),
+                label = "karaokeLineHScroll",
+            )
+            val canvasWidthDp = with(density) { canvasWidthPx.toDp() }
+            val canvasHeightDp = with(density) { (totalHeight.roundToInt() + 8).toDp() }
+            val slotWidthDp = maxWidth
+
+            Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                Canvas(
+                    modifier = Modifier
+                        .size(
+                            width = if (horizontalScrollWhenActive) canvasWidthDp else slotWidthDp,
+                            height = canvasHeightDp,
+                        )
+                        .graphicsLayer {
+                            if (horizontalScrollWhenActive) translationX = lineScrollX
+                        },
+                ) {
+                    val time = currentTimeProvider()
+                    drawLyricsLine(
+                        rowRenderData = rowRenderData,
+                        currentTimeMs = time,
+                        color = activeColor,
+                        blendMode = blendMode,
+                        isRtl = isLineRtl,
+                        showDebugRectangles = showDebugRectangles,
+                        showPhonetic = showPhonetic
+                    )
+                }
             }
         }
 

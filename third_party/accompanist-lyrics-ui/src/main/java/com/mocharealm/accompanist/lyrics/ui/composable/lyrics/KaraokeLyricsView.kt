@@ -134,6 +134,8 @@ fun KaraokeLyricsView(
     offset: Dp = 32.dp,
     keepAliveZone: Dp = 100.dp,
     blurDelta: Float = 3f,
+    /** 超长逐字行不换行，随演唱进度向左平滑滚动露出完整内容。 */
+    horizontalScrollWhenActive: Boolean = false,
     showDebugRectangles: Boolean = false
 ) {
     val density = LocalDensity.current
@@ -316,29 +318,34 @@ fun KaraokeLyricsView(
                         val target = layoutInfo.visibleItemsInfo
                             .firstOrNull { it.index == firstIndex }
                         if (target != null) {
-                            // 活动行平滑滚动至区域垂直中心
+                            // 活动行平滑滚动至区域垂直中心；不向后滚（delta<0 时原地不动），
+                            // 保证歌词推进过程中内容只向上走。
                             val delta = (target.offset + target.size / 2) - viewportCenter
-                            listState.animateScrollBy(
-                                delta.toFloat(),
-                                androidx.compose.animation.core.tween(
-                                    380,
-                                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                            if (delta > 0) {
+                                listState.animateScrollBy(
+                                    delta.toFloat(),
+                                    androidx.compose.animation.core.tween(
+                                        380,
+                                        easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                    )
                                 )
-                            )
+                            }
                         } else {
-                            // 远端条目：先定位，再按实际位置居中
+                            // 远端条目：先定位，再按实际位置居中（同样不向后滚）
                             listState.scrollToItem(firstIndex)
                             val info = listState.layoutInfo.visibleItemsInfo
                                 .firstOrNull { it.index == firstIndex }
                             if (info != null) {
                                 val delta = (info.offset + info.size / 2) - viewportCenter
-                                listState.animateScrollBy(
-                                    delta.toFloat(),
-                                    androidx.compose.animation.core.tween(
-                                        250,
-                                        easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                if (delta > 0) {
+                                    listState.animateScrollBy(
+                                        delta.toFloat(),
+                                        androidx.compose.animation.core.tween(
+                                            250,
+                                            easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     } catch (_: Exception) {
@@ -482,19 +489,20 @@ fun KaraokeLyricsView(
                                             blurRadius = { blurRadiusState.value },
                                             blendMode = stableBlendMode,
                                         ) {
-                                            KaraokeLineText(
-                                                line = line,
-                                                currentTimeProvider = timeProvider,
-                                                normalLineTextStyle = stableNormalTextStyle,
-                                                accompanimentLineTextStyle = stableAccompanimentTextStyle,
-                                                phoneticTextStyle = stablePhoneticTextStyle,
-                                                activeColor = textColor,
-                                                blendMode = stableBlendMode,
-                                                showDebugRectangles = showDebugRectangles,
-                                                showTranslation = showTranslation,
-                                                showPhonetic = showPhonetic,
-                                                precalculatedLayouts = layoutCache[index]
-                                            )
+                                        KaraokeLineText(
+                                            line = line,
+                                            currentTimeProvider = timeProvider,
+                                            normalLineTextStyle = stableNormalTextStyle,
+                                            accompanimentLineTextStyle = stableAccompanimentTextStyle,
+                                            phoneticTextStyle = stablePhoneticTextStyle,
+                                            activeColor = textColor,
+                                            blendMode = stableBlendMode,
+                                            showDebugRectangles = showDebugRectangles,
+                                            showTranslation = showTranslation,
+                                            showPhonetic = showPhonetic,
+                                            precalculatedLayouts = layoutCache[index],
+                                            horizontalScrollWhenActive = horizontalScrollWhenActive
+                                        )
                                         }
                                     }
                                 }
