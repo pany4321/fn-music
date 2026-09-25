@@ -19,3 +19,12 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+# Release Convention (project rule)
+
+Every batch of code changes MUST end with a version bump and a release:
+
+1. Bump `version.properties` at the repo root: `VERSION_NAME` patch +1 (e.g. `1.2.5` → `1.2.6`), `VERSION_CODE` +1.
+2. Commit the bump as `chore: prepare <version> release` together with (or right after) the change commits, then push to `main`.
+3. CI (`.github/workflows/android.yml`) builds the signed universal APK and publishes a GitHub Release automatically — but only when the `v<VERSION_NAME>` tag does NOT exist yet. If no new Release appears, the version number was not bumped.
+4. Never reuse a version name that already has a Release on GitHub.
