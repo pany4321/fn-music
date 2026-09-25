@@ -109,6 +109,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -130,8 +131,10 @@ import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
 import androidx.compose.ui.window.Dialog
 import com.fnmusic.tv.AuthenticatedAppDependencies
+import com.fnmusic.tv.BuildConfig
 import com.fnmusic.tv.NowPlayingPresentation
 import com.fnmusic.tv.NowPlayingResourceState
+import com.fnmusic.tv.R
 import com.fnmusic.tv.decodeArtwork
 import com.fnmusic.tv.core.data.repository.CurrentLyrics
 import com.fnmusic.tv.core.data.repository.SessionState
@@ -712,6 +715,27 @@ private fun BrowseHome(
         }
     }
     val recentArtwork = recentCoverState.snapshot.entries
+    // “全部歌单”卡片：与其它歌单卡片同一套拼排逻辑——启动时从曲库随机取
+    // 3 首歌曲的封面，运行期间保持不变，下次启动重新生成。
+    val allPlaylistsDeckState = retainedStore.list<FeatureArtworkItem>("covers:all-playlists")
+    val allPlaylistsDeck = allPlaylistsDeckState.snapshot.entries
+    LaunchedEffect(Unit) {
+        if (!allPlaylistsDeckState.snapshot.initialLoadCompleted) {
+            retainedStore.scope.launch {
+                runCatching { container.musicRepository.randomTracks(16) }.onSuccess { tracks ->
+                    val deck = tracks.asSequence()
+                        .mapNotNull { track -> track.coverId?.let { FeatureArtworkItem(track.title, it) } }
+                        .distinctBy { it.coverId }
+                        .take(3)
+                        .toList()
+                    if (deck.isNotEmpty()) {
+                        allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
+                    }
+                }
+            }
+        }
+    }
+    val allPlaylistsDeckCovers = allPlaylistsDeck.mapNotNull { it.coverId }
     // 随机专辑/歌曲存会话级缓存：页面切换、返回不重拉；
     // 仅启动时缓存为空才拉一次，手动“刷新”按钮才重新采样。
     val randomAlbumState = retainedStore.list<Album>("random-albums")
@@ -990,7 +1014,7 @@ private fun BrowseHome(
                     title = "全部歌单",
                     subtitle = "浏览全部",
                     coverId = null,
-                    fallback = HomeArtworkKind.PlaylistGrid,
+                    derivedCovers = allPlaylistsDeckCovers,
                     modifier = Modifier
                         .focusProperties {
                             up = favoritesFocus
@@ -1613,12 +1637,12 @@ private fun BrowseMy(
                     "风格",
                     genres.take(8).map { genre ->
                         val key = "genre:" + genre.guid.value
-                        BandEntry(genre.name, "风格", genre.coverId, BandKind.Album, key) {
+                        BandEntry(genre.name, "风格", null, BandKind.Genre, key) {
                             focusedKey = key
                             onGenre(genre)
                         }
                     },
-                    BandEntry("全部风格", "按风格筛选歌曲", null, BandKind.Album, "all-genres") {
+                    BandEntry("全部风格", "按风格筛选歌曲", null, BandKind.Genre, "all-genres") {
                         focusedKey = "all-genres"
                         onGenres()
                     },
@@ -1846,7 +1870,7 @@ private fun ProfileGlyphCanvas(
     }
 }
 
-private enum class BandKind { Artist, Album, Library }
+private enum class BandKind { Artist, Album, Genre, Library }
 
 private data class BandEntry(
     val title: String,
@@ -1951,6 +1975,12 @@ private fun BandLockup(entry: BandEntry, modifier: Modifier = Modifier) {
             entry.title,
             entry.subtitle,
             entry.coverId,
+            modifier = modifier,
+            enabled = entry.action != null,
+        ) { entry.action?.invoke() }
+        BandKind.Genre -> GenreLockup(
+            entry.title,
+            entry.subtitle,
             modifier = modifier,
             enabled = entry.action != null,
         ) { entry.action?.invoke() }
@@ -2893,6 +2923,8 @@ private fun TrackCollection(
                 if (removingTrack) {
                     Text("正在删除…", color = FnColors.Muted, fontSize = 14.sp)
                 } else {
+                    val dialogShape = RoundedCornerShape(24.dp)
+                    val dialogScale = ButtonDefaults.scale(focusedScale = 1.05f)
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -2900,16 +2932,21 @@ private fun TrackCollection(
                         Button(
                             onClick = { pendingRemoveTrack = null },
                             modifier = Modifier
-                                .width(132.dp)
-                                .height(46.dp)
+                                .size(width = 132.dp, height = 46.dp)
                                 .focusRequester(cancelFocus),
+                            shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
+                            scale = dialogScale,
                             contentPadding = PaddingValues(0.dp),
                         ) {
-                            Text("取消", fontSize = 14.sp, textAlign = TextAlign.Center)
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("取消", fontSize = 14.sp)
+                            }
                         }
                         Button(
                             onClick = { confirmRemove(track) },
-                            modifier = Modifier.width(132.dp).height(46.dp),
+                            modifier = Modifier.size(width = 132.dp, height = 46.dp),
+                            shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
+                            scale = dialogScale,
                             colors = ButtonDefaults.colors(
                                 containerColor = FnColors.Coral,
                                 contentColor = FnColors.Text,
@@ -2918,12 +2955,9 @@ private fun TrackCollection(
                             ),
                             contentPadding = PaddingValues(0.dp),
                         ) {
-                            Text(
-                                "删除",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = TextAlign.Center,
-                            )
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("删除", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
@@ -3990,7 +4024,79 @@ private fun LockupLabels(title: String, subtitle: String, modifier: Modifier = M
         Text(title, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         if (subtitle.isNotBlank()) {
             Spacer(Modifier.height(3.dp))
-            Text(subtitle, color = FnColors.Muted, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = FnColors.Muted, fontSize = 9.sp, maxLines = 1)
+        }
+    }
+}
+
+/** 风格卡片：均衡器渐变背景铺满整卡，左下角标题，选中态与其它卡片一致。 */
+@Composable
+private fun GenreLockup(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(width = 165.dp, height = 95.dp),
+        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+        scale = ButtonDefaults.scale(focusedScale = 1.025f),
+        colors = ButtonDefaults.colors(
+            containerColor = Color(0xFF171B1D),
+            contentColor = FnColors.Text,
+            focusedContainerColor = Color(0xFF171B1D),
+            focusedContentColor = FnColors.Text,
+            pressedContainerColor = Color(0xFF171B1D),
+            pressedContentColor = FnColors.Text,
+            disabledContainerColor = Color(0xFF171B1D),
+        ),
+        border = lockupButtonBorder(shape),
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            Image(
+                painter = painterResource(R.drawable.bg_genre_equalizer),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0x14000000), Color(0xCC000000)),
+                        ),
+                    ),
+            )
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(horizontal = 9.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    title,
+                    fontSize = 13.sp,
+                    lineHeight = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        color = FnColors.Text.copy(alpha = 0.78f),
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -4237,10 +4343,9 @@ private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, 
         retainedStore.loadListOnce(genreState) { container.musicRepository.genres() }
     }
     GridPage("全部风格", genres, { it.guid.value }, onBack = onBack) { genre, modifier ->
-        AlbumLockup(
+        GenreLockup(
             title = genre.name,
             subtitle = (genre.trackCount ?: 0).toString() + " 首歌曲",
-            coverId = null,
             modifier = modifier,
             onClick = { onGenre(genre) },
         )

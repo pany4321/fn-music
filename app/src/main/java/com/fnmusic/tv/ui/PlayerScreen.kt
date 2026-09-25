@@ -494,7 +494,12 @@ internal fun ImmersivePlayer(
                 queueError = playback.queueError,
                 canRetry = playback.canRetryQueue,
                 onRetry = container.playbackController::retryQueuePage,
-                onSelect = container.playbackController::selectQueueItem,
+                onSelect = { queueIndex ->
+                    container.playbackController.selectQueueItem(queueIndex)
+                    // 点歌即播：关闭队列面板，回到沉浸播放视图。
+                    queueVisible = false
+                    controlsVisible = false
+                },
                 onRemove = container.playbackController::removeQueueItem,
                 onInteraction = ::revealControls,
             )
