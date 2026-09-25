@@ -28,7 +28,7 @@ class SettingsScreenTest {
             val retainedState = remember(scope) { LibraryRetainedStateStore(scope) }
             FnMusicTheme {
                 CompositionLocalProvider(LocalLibraryRetainedState provides retainedState) {
-                    SettingsScreen(application.container)
+                    SettingsScreen(application.container, onBack = {})
                 }
             }
         }

@@ -190,6 +190,8 @@ internal fun AuthenticatedApp(
 ) {
     var stack by remember(session.user.guid) { mutableStateOf(listOf<LibraryRoute>(LibraryRoute.Home)) }
     var lastHomeBackAt by remember(session.user.guid) { mutableStateOf(0L) }
+    // 最近播放的内容随每次播放变化，进入页面时递增触发整表刷新。
+    var recentContentTick by remember(session.user.guid) { mutableStateOf(0L) }
     val route = stack.last()
     val context = LocalContext.current
     val stateHolder = rememberSaveableStateHolder()
@@ -249,7 +251,10 @@ internal fun AuthenticatedApp(
             onMy = { root(LibraryRoute.My) },
             onPlaylist = { open(LibraryRoute.PlaylistDetail(it)) },
             onFavorites = { open(LibraryRoute.Favorites) },
-            onRecent = { open(LibraryRoute.Recent) },
+            onRecent = {
+                recentContentTick++
+                open(LibraryRoute.Recent)
+            },
             onAll = { open(LibraryRoute.AllPlaylists) },
             onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
             onPlayer = { open(LibraryRoute.Player(null)) },
@@ -365,6 +370,7 @@ internal fun AuthenticatedApp(
                 artworkFallback = CollectionArtworkFallback.Collection,
                 onBack = back,
             ),
+            contentRevision = recentContentTick,
             emptyMessage = "还没有播放记录",
         )
         is LibraryRoute.ArtistDetail -> ArtistDetail(
@@ -769,11 +775,11 @@ private fun BrowseHome(
     }
     val playlistCovers by container.musicRepository.playlistCovers.collectAsStateWithLifecycle()
     LaunchedEffect(playlists) {
+        // playlist/list 不带 trackCount（永远 null），不能拿它当过滤条件，
+        // 否则拼排封面永远不会被拉取。空歌单自然返回空列表并回落默认样式。
         playlists.take(12).forEach { playlist ->
-            if ((playlist.trackCount ?: 0) > 0) {
-                retainedStore.scope.launch {
-                    container.musicRepository.playlistCoverCandidates(playlist.guid.value)
-                }
+            retainedStore.scope.launch {
+                container.musicRepository.playlistCoverCandidates(playlist.guid.value)
             }
         }
     }
@@ -1960,11 +1966,11 @@ private fun AllPlaylists(container: AuthenticatedAppDependencies, onBack: () -> 
         retainedStore.loadListOnce(playlistState, container.musicRepository::playlists)
     }
     LaunchedEffect(playlists) {
+        // playlist/list 不带 trackCount（永远 null），不能拿它当过滤条件，
+        // 否则拼排封面永远不会被拉取。空歌单自然返回空列表并回落默认样式。
         playlists.forEach { playlist ->
-            if ((playlist.trackCount ?: 0) > 0) {
-                retainedStore.scope.launch {
-                    container.musicRepository.playlistCoverCandidates(playlist.guid.value)
-                }
+            retainedStore.scope.launch {
+                container.musicRepository.playlistCoverCandidates(playlist.guid.value)
             }
         }
     }
@@ -3184,88 +3190,94 @@ private fun DetailTrackRow(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(5.dp)
-    Button(
-        enabled = enabled,
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(58.dp)
-            .semantics {
-                contentDescription = "${index + 1}. ${track.title} ${track.artistName.orEmpty()}"
-            },
-        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
-        scale = ButtonDefaults.scale(focusedScale = 1f),
-        colors = ButtonDefaults.colors(
-            containerColor = Color.Transparent,
-            contentColor = FnColors.Text,
-            focusedContainerColor = FnColors.FocusFill,
-            focusedContentColor = FnColors.Text,
-            pressedContainerColor = FnColors.FocusFill,
-            pressedContentColor = FnColors.Text,
-            disabledContainerColor = Color.Transparent,
-            disabledContentColor = FnColors.Muted.copy(alpha = 0.5f),
-        ),
-        contentPadding = PaddingValues(horizontal = 15.dp, vertical = 0.dp),
-    ) {
-        val contentColor = LocalContentColor.current
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                (index + 1).toString().padStart(2, '0'),
-                color = contentColor.copy(alpha = 0.66f),
-                fontSize = 13.sp,
-                modifier = Modifier.width(54.dp),
-            )
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                Text(track.title, color = contentColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                track.albumName?.takeIf(String::isNotBlank)?.let {
-                    Text(it, color = contentColor.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    // 删除按钮必须是行按钮的兄弟节点：tv Button 会吞掉其内部子节点的点击，
+    // 嵌套时点删除会触发行播放。兄弟节点同时保证不可播放的行也能删除。
+    // 注意：modifier（restoredFocus/焦点回调）必须挂在播放按钮上，
+    // FocusRequester 只有和焦点目标同链才能恢复焦点。
+    Row(Modifier.fillMaxWidth().height(58.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(
+            enabled = enabled,
+            onClick = onClick,
+            modifier = modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .semantics {
+                    contentDescription = "${index + 1}. ${track.title} ${track.artistName.orEmpty()}"
+                },
+            shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+            scale = ButtonDefaults.scale(focusedScale = 1f),
+            colors = ButtonDefaults.colors(
+                containerColor = Color.Transparent,
+                contentColor = FnColors.Text,
+                focusedContainerColor = FnColors.FocusFill,
+                focusedContentColor = FnColors.Text,
+                pressedContainerColor = FnColors.FocusFill,
+                pressedContentColor = FnColors.Text,
+                disabledContainerColor = Color.Transparent,
+                disabledContentColor = FnColors.Muted.copy(alpha = 0.5f),
+            ),
+            contentPadding = PaddingValues(horizontal = 15.dp, vertical = 0.dp),
+        ) {
+            val contentColor = LocalContentColor.current
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    (index + 1).toString().padStart(2, '0'),
+                    color = contentColor.copy(alpha = 0.66f),
+                    fontSize = 13.sp,
+                    modifier = Modifier.width(54.dp),
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                    Text(track.title, color = contentColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    track.albumName?.takeIf(String::isNotBlank)?.let {
+                        Text(it, color = contentColor.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
+                Text(
+                    track.artistName.orEmpty(),
+                    color = contentColor.copy(alpha = 0.72f),
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(220.dp),
+                )
+                Text(
+                    if (track.isCue) "需兼容" else formatDuration(track.durationMs ?: 0),
+                    color = contentColor.copy(alpha = 0.72f),
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(70.dp),
+                )
             }
-            Text(
-                track.artistName.orEmpty(),
-                color = contentColor.copy(alpha = 0.72f),
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.width(220.dp),
-            )
-            Text(
-                if (track.isCue) "需兼容" else formatDuration(track.durationMs ?: 0),
-                color = contentColor.copy(alpha = 0.72f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.End,
-                modifier = Modifier.width(70.dp),
-            )
-            if (canRemove) {
-                Spacer(Modifier.width(26.dp))
-                val removeShape = CircleShape
-                Button(
-                    onClick = onRemove,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .semantics { contentDescription = "删除" + track.title },
-                    shape = ButtonDefaults.shape(removeShape, removeShape, removeShape, removeShape, removeShape),
-                    scale = ButtonDefaults.scale(focusedScale = 1.1f),
-                    colors = ButtonDefaults.colors(
-                        containerColor = Color.Transparent,
-                        contentColor = contentColor.copy(alpha = 0.66f),
-                        focusedContainerColor = FnColors.Coral,
-                        focusedContentColor = FnColors.Text,
-                        pressedContainerColor = FnColors.Coral,
-                        pressedContentColor = FnColors.Text,
+        }
+        if (canRemove) {
+            Spacer(Modifier.width(12.dp))
+            val removeShape = CircleShape
+            Button(
+                onClick = onRemove,
+                modifier = Modifier
+                    .size(40.dp)
+                    .semantics { contentDescription = "删除" + track.title },
+                shape = ButtonDefaults.shape(removeShape, removeShape, removeShape, removeShape, removeShape),
+                scale = ButtonDefaults.scale(focusedScale = 1.1f),
+                colors = ButtonDefaults.colors(
+                    containerColor = Color.Transparent,
+                    contentColor = FnColors.Text.copy(alpha = 0.66f),
+                    focusedContainerColor = FnColors.Coral,
+                    focusedContentColor = FnColors.Text,
+                    pressedContainerColor = FnColors.Coral,
+                    pressedContentColor = FnColors.Text,
+                ),
+                border = ButtonDefaults.border(
+                    border = Border(
+                        BorderStroke(1.dp, Color(0xFF454B4D)),
+                        shape = removeShape,
                     ),
-                    border = ButtonDefaults.border(
-                        border = Border(
-                            BorderStroke(1.dp, Color(0xFF454B4D)),
-                            shape = removeShape,
-                        ),
-                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
-                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
-                    ),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                }
+                    focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
+                    pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
+                ),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -4199,6 +4211,7 @@ private fun SearchRoute(
     var artists by remember { mutableStateOf<List<Artist>>(emptyList()) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     val fieldFocus = remember { FocusRequester() }
+    val resultsFocus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     LaunchedEffect(query) {
@@ -4252,6 +4265,7 @@ private fun SearchRoute(
                 .fillMaxWidth()
                 .height(56.dp)
                 .focusRequester(fieldFocus)
+                .focusProperties { down = resultsFocus }
                 .onFocusChanged { state -> fieldFocused = state.isFocused }
                 .background(Color(0xFF1B201F), fieldShape)
                 .border(
@@ -4290,6 +4304,11 @@ private fun SearchRoute(
                 tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() ->
                     Text("没有找到与「" + searched + "」匹配的内容", color = FnColors.Muted, fontSize = 16.sp)
                 else -> {
+                    val firstSection = when {
+                        artists.isNotEmpty() -> "artist"
+                        albums.isNotEmpty() -> "album"
+                        else -> "track"
+                    }
                     if (artists.isNotEmpty()) {
                         Text("歌手", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -4298,7 +4317,11 @@ private fun SearchRoute(
                                     title = artist.name,
                                     subtitle = (artist.trackCount ?: 0).toString() + " 首歌曲",
                                     coverId = artist.coverId,
-                                    modifier = Modifier,
+                                    modifier = if (artist.guid == artists.first().guid) {
+                                        Modifier.focusRequester(resultsFocus)
+                                    } else {
+                                        Modifier
+                                    },
                                     onClick = {
                                         scope.launch {
                                             val page = runCatching {
@@ -4327,7 +4350,11 @@ private fun SearchRoute(
                                     title = album.name,
                                     subtitle = album.artistName.orEmpty(),
                                     coverId = album.coverId,
-                                    modifier = Modifier,
+                                    modifier = if (album.guid == albums.first().guid) {
+                                        Modifier.focusRequester(resultsFocus)
+                                    } else {
+                                        Modifier
+                                    },
                                     onClick = {
                                         scope.launch {
                                             val page = runCatching {
@@ -4356,6 +4383,11 @@ private fun SearchRoute(
                                 title = track.title,
                                 subtitle = track.artistName.orEmpty(),
                                 coverId = track.coverId,
+                                modifier = if (index == 0) {
+                                    Modifier.focusRequester(resultsFocus)
+                                } else {
+                                    Modifier
+                                },
                                 onClick = {
                                     scope.launch {
                                         val prepared = runCatching { container.musicRepository.prepareQueue(tracks) }
@@ -4394,13 +4426,14 @@ private fun TrackResultRow(
     title: String,
     subtitle: String,
     coverId: String?,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val container = LocalAuthenticatedDependencies.current
     val artworkShape = RoundedCornerShape(6.dp)
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(74.dp),
+        modifier = modifier.fillMaxWidth().height(74.dp),
         colors = ButtonDefaults.colors(
             containerColor = Color(0xFF1B201F),
             contentColor = FnColors.Text,

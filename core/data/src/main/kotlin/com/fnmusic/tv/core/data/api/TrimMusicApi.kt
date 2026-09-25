@@ -105,8 +105,9 @@ class TrimMusicApi(
             "sort" to "title,asc",
         )
 
+    // 实测返回 {"data":{"list":[...]}}，与 playlist/list 同构，必须按 PageListDto 解包。
     suspend fun playlistBatchDetail(guids: List<String>): List<PlaylistDetailDto> =
-        get("playlist/batch-detail", "guids" to guids.joinToString(","))
+        get<PageListDto<PlaylistDetailDto>>("playlist/batch-detail", "guids" to guids.joinToString(",")).list
 
     suspend fun searchTracks(query: String, page: Int, size: Int = 20): SortedPageListDto<TrackDto> =
         get("search/track", "q" to query, "page" to page, "size" to size)
