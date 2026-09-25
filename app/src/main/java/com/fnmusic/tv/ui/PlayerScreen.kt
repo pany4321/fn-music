@@ -506,6 +506,16 @@ internal fun ImmersivePlayer(
                 onDismiss = { addToPlaylistVisible = false },
             )
         }
+        // 弹窗是独立窗口，关闭后不保证自动还焦点；显式归位到“添加到歌单”按钮，
+        // 避免遥控器短暂失灵的假死感。仅在“开→关”的跳变时归位，不影响进页初始焦点。
+        var dialogWasVisible by remember { mutableStateOf(false) }
+        LaunchedEffect(addToPlaylistVisible) {
+            if (dialogWasVisible && !addToPlaylistVisible) {
+                yield()
+                runCatching { addToPlaylistFocus.requestFocus() }
+            }
+            dialogWasVisible = addToPlaylistVisible
+        }
         // Touch-first exit affordance for car units: always visible, out of the
         // D-pad focus graph so the remote's layered Back behavior is unchanged.
         Box(
@@ -2283,17 +2293,20 @@ private fun AddToPlaylistDialog(
     trackGuid: String,
     onDismiss: () -> Unit,
 ) {
-    val retainedStore = LocalLibraryRetainedState.current
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var pendingGuid by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        runCatching { container.musicRepository.playlists() }
-            .onSuccess { playlists = it }
+        val loaded = runCatching { container.musicRepository.playlists() }
+            .getOrDefault(emptyList())
+        playlists = loaded
         loading = false
+        runCatching { container.musicRepository.playlistTrackCounts(loaded.map { it.guid.value }) }
+            .onSuccess { counts = it }
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -2326,6 +2339,7 @@ private fun AddToPlaylistDialog(
                             onClick = {
                                 if (pendingGuid != null) return@Button
                                 pendingGuid = playlist.guid.value
+                                message = null
                                 scope.launch {
                                     val result = runCatching {
                                         container.musicRepository.addToPlaylist(playlist.guid.value, trackGuid)
@@ -2333,11 +2347,12 @@ private fun AddToPlaylistDialog(
                                     pendingGuid = null
                                     result
                                         .onSuccess {
-                                            Toast.makeText(context, "已添加到「${playlist.name}」", Toast.LENGTH_SHORT).show()
+                                            message = "已添加到「${playlist.name}」"
+                                            delay(900)
                                             onDismiss()
                                         }
                                         .onFailure {
-                                            Toast.makeText(context, "添加失败，请重试", Toast.LENGTH_SHORT).show()
+                                            message = "添加失败，请重试"
                                         }
                                 }
                             },
@@ -2362,7 +2377,14 @@ private fun AddToPlaylistDialog(
                                     modifier = Modifier.weight(1f),
                                 )
                                 Text(
-                                    if (adding) "添加中…" else "${playlist.trackCount ?: 0} 首",
+                                    if (adding) {
+                                        "添加中…"
+                                    } else {
+                                        val count = counts[playlist.guid.value]
+                                            ?: playlist.trackCount
+                                            ?: 0
+                                        "$count 首"
+                                    },
                                     color = FnColors.Muted,
                                     fontSize = 13.sp,
                                 )
@@ -2370,6 +2392,9 @@ private fun AddToPlaylistDialog(
                         }
                     }
                 }
+            }
+            message?.let {
+                Text(it, color = FnColors.Warning, fontSize = 15.sp)
             }
         }
     }

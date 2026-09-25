@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -127,6 +128,7 @@ import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Border
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
+import androidx.compose.ui.window.Dialog
 import com.fnmusic.tv.AuthenticatedAppDependencies
 import com.fnmusic.tv.NowPlayingPresentation
 import com.fnmusic.tv.NowPlayingResourceState
@@ -177,6 +179,7 @@ internal val LocalLibraryRetainedState = staticCompositionLocalOf<LibraryRetaine
 }
 
 private const val FULL_CATALOG_PAGE_SIZE = 12
+private const val SEARCH_TRACK_PAGE_SIZE = 20
 
 @Composable
 internal fun AuthenticatedApp(
@@ -292,8 +295,6 @@ internal fun AuthenticatedApp(
             onPlayer = { open(LibraryRoute.Player(it)) },
         )
         is LibraryRoute.PlaylistDetail -> {
-            var playlistContentRevision by remember { mutableStateOf(0L) }
-            val retainedScope = rememberCoroutineScope()
             TrackCollection(
                 container = container,
                 stateKey = "playlist:${route.playlist.guid.value}:tracks",
@@ -307,14 +308,11 @@ internal fun AuthenticatedApp(
                     declaredTrackCount = route.playlist.trackCount,
                     onBack = back,
                 ),
-                contentRevision = playlistContentRevision,
-                canRemoveTrack = true,
-                onRemoveTrack = { track ->
-                    retainedScope.launch {
-                        runCatching {
-                            container.musicRepository.removeFromPlaylist(route.playlist.guid.value, track.guid.value)
-                        }.onSuccess { playlistContentRevision++ }
-                    }
+                contentRevision = 0L,
+                removeTrack = { track ->
+                    runCatching {
+                        container.musicRepository.removeFromPlaylist(route.playlist.guid.value, track.guid.value)
+                    }.isSuccess
                 },
             )
         }
@@ -1053,8 +1051,7 @@ private fun BrowseHome(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
                     coverId = track.coverId,
-                    modifier = Modifier.focusProperties { down = FocusRequester.Cancel },
-                    onClick = { openRandomSong(track) },
+                    onClick = { openSampledTrack(randomSongs, track) },
                 )
             }
         }
@@ -1072,7 +1069,6 @@ private fun BrowseHome(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
                     coverId = track.coverId,
-                    modifier = Modifier.focusProperties { down = FocusRequester.Cancel },
                     onClick = { openSampledTrack(recentlyAdded, track) },
                 )
             }
@@ -2608,8 +2604,7 @@ private fun TrackCollection(
     alternateContent: @Composable () -> Unit = {},
     contentRevision: Long = 0L,
     emptyMessage: String = "暂无歌曲",
-    canRemoveTrack: Boolean = false,
-    onRemoveTrack: (Track) -> Unit = {},
+    removeTrack: (suspend (Track) -> Boolean)? = null,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val retained = retainedStore.tracks(stateKey)
@@ -2629,6 +2624,36 @@ private fun TrackCollection(
     val actionScope = rememberCoroutineScope()
     var primaryActionRunning by remember(stateKey) { mutableStateOf(false) }
     var loadedContentRevision by rememberSaveable(stateKey) { mutableStateOf<Long?>(null) }
+    var pendingRemoveTrack by remember(stateKey) { mutableStateOf<Track?>(null) }
+    var removingTrack by remember(stateKey) { mutableStateOf(false) }
+
+    fun requestRemove(track: Track) {
+        if (removingTrack || removeTrack == null) return
+        pendingRemoveTrack = track
+    }
+
+    fun confirmRemove(track: Track) {
+        val remove = removeTrack ?: return
+        if (removingTrack) return
+        removingTrack = true
+        pendingRemoveTrack = null
+        actionScope.launch {
+            val succeeded = runCatching { remove(track) }.getOrDefault(false)
+            removingTrack = false
+            if (!succeeded) return@launch
+            // 就地移除，不回源、不重置页码，焦点落到相邻歌曲上。
+            val before = retained.snapshot
+            val removedIndex = before.tracks.indexOfFirst { it.guid == track.guid }
+            retained.snapshot = removeTrackFromCollection(before, track.guid)
+            val neighbor = before.tracks.getOrNull(removedIndex + 1)
+                ?: before.tracks.getOrNull(removedIndex - 1)
+            if (neighbor != null) {
+                focusedKey = neighbor.guid.value
+                yield()
+                runCatching { restoredFocus.requestFocus() }
+            }
+        }
+    }
     fun setError(value: AppError?) {
         retained.snapshot = retained.snapshot.copy(error = value)
     }
@@ -2794,9 +2819,63 @@ private fun TrackCollection(
         onLoadMore = { load(page + 1) },
         alternateContent = alternateContent,
         emptyMessage = emptyMessage,
-        canRemoveTrack = canRemoveTrack,
-        onRemoveTrack = onRemoveTrack,
+        canRemoveTrack = removeTrack != null,
+        onRequestRemove = ::requestRemove,
     )
+
+    pendingRemoveTrack?.let { track ->
+        val cancelFocus = remember(track) { FocusRequester() }
+        LaunchedEffect(track) {
+            yield()
+            runCatching { cancelFocus.requestFocus() }
+        }
+        Dialog(onDismissRequest = { if (!removingTrack) pendingRemoveTrack = null }) {
+            Column(
+                Modifier
+                    .widthIn(max = 520.dp)
+                    .fillMaxWidth(0.9f)
+                    .background(FnColors.Surface, RoundedCornerShape(8.dp))
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("从歌单删除", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "将「" + track.title + "」从当前歌单中删除？",
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                )
+                if (removingTrack) {
+                    Text("正在删除…", color = FnColors.Muted, fontSize = 14.sp)
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(
+                            onClick = { pendingRemoveTrack = null },
+                            modifier = Modifier
+                                .width(132.dp)
+                                .height(46.dp)
+                                .focusRequester(cancelFocus),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Text("取消", fontSize = 14.sp)
+                        }
+                        Button(
+                            onClick = { confirmRemove(track) },
+                            modifier = Modifier.width(132.dp).height(46.dp),
+                            colors = ButtonDefaults.colors(
+                                containerColor = FnColors.Coral,
+                                contentColor = FnColors.Text,
+                                focusedContainerColor = FnColors.Coral,
+                                focusedContentColor = FnColors.Text,
+                            ),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Text("删除", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -2823,7 +2902,7 @@ private fun DetailTrackCollection(
     onTrack: (Int) -> Unit,
     onLoadMore: () -> Unit,
     canRemoveTrack: Boolean = false,
-    onRemoveTrack: (Track) -> Unit = {},
+    onRequestRemove: (Track) -> Unit = {},
     alternateContent: @Composable () -> Unit = {},
     emptyMessage: String,
 ) {
@@ -2957,7 +3036,7 @@ private fun DetailTrackCollection(
                         track = track,
                         enabled = isTrackPlayable(track),
                         canRemove = canRemoveTrack,
-                        onRemove = { onRemoveTrack(track) },
+                        onRemove = { onRequestRemove(track) },
                         modifier = Modifier
                             .then(if (focusedKey == track.guid.value) Modifier.focusRequester(restoredFocus) else Modifier)
                             .onFocusChanged { if (it.isFocused) onTrackFocused(index, track.guid.value) },
@@ -3159,13 +3238,33 @@ private fun DetailTrackRow(
             )
             if (canRemove) {
                 Spacer(Modifier.width(26.dp))
-                Box(
-                    Modifier
-                        .size(36.dp)
-                        .clickable(onClick = onRemove),
-                    contentAlignment = Alignment.Center,
+                val removeShape = CircleShape
+                Button(
+                    onClick = onRemove,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .semantics { contentDescription = "删除" + track.title },
+                    shape = ButtonDefaults.shape(removeShape, removeShape, removeShape, removeShape, removeShape),
+                    scale = ButtonDefaults.scale(focusedScale = 1.1f),
+                    colors = ButtonDefaults.colors(
+                        containerColor = Color.Transparent,
+                        contentColor = contentColor.copy(alpha = 0.66f),
+                        focusedContainerColor = FnColors.Coral,
+                        focusedContentColor = FnColors.Text,
+                        pressedContainerColor = FnColors.Coral,
+                        pressedContentColor = FnColors.Text,
+                    ),
+                    border = ButtonDefaults.border(
+                        border = Border(
+                            BorderStroke(1.dp, Color(0xFF454B4D)),
+                            shape = removeShape,
+                        ),
+                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
+                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
+                    ),
+                    contentPadding = PaddingValues(0.dp),
                 ) {
-                    Text("✕", color = contentColor.copy(alpha = 0.66f), fontSize = 15.sp)
+                    Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -4096,7 +4195,6 @@ private fun SearchRoute(
     var query by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var searched by rememberSaveable { mutableStateOf("") }
-    var pending by remember { mutableStateOf<String?>(null) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var artists by remember { mutableStateOf<List<Artist>>(emptyList()) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
@@ -4108,8 +4206,10 @@ private fun SearchRoute(
         val q = query.trim()
         if (q.isEmpty()) {
             tracks = emptyList(); artists = emptyList(); albums = emptyList()
+            loading = false
             return@LaunchedEffect
         }
+        searched = q
         loading = true
         try {
             coroutineScope {
@@ -4123,8 +4223,9 @@ private fun SearchRoute(
         } catch (cause: CancellationException) {
             throw cause
         } catch (_: Exception) {
+        } finally {
+            loading = false
         }
-        loading = false
     }
 
     Column(
@@ -4151,7 +4252,6 @@ private fun SearchRoute(
                 .fillMaxWidth()
                 .height(56.dp)
                 .focusRequester(fieldFocus)
-                .focusProperties { down = FocusRequester.Cancel }
                 .onFocusChanged { state -> fieldFocused = state.isFocused }
                 .background(Color(0xFF1B201F), fieldShape)
                 .border(
@@ -4182,7 +4282,11 @@ private fun SearchRoute(
         ) {
             when {
                 loading -> Text("正在搜索…", color = FnColors.Muted, fontSize = 16.sp)
-                query.isBlank() -> Text("输入关键词开始搜索", color = FnColors.Muted, fontSize = 16.sp)
+                query.isBlank() -> Text(
+                    "按确认键呼出键盘输入，将同时匹配歌手、专辑和歌曲",
+                    color = FnColors.Muted,
+                    fontSize = 16.sp,
+                )
                 tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() ->
                     Text("没有找到与「" + searched + "」匹配的内容", color = FnColors.Muted, fontSize = 16.sp)
                 else -> {
@@ -4268,6 +4372,13 @@ private fun SearchRoute(
                                         }
                                     }
                                 },
+                            )
+                        }
+                        if (tracks.size >= SEARCH_TRACK_PAGE_SIZE) {
+                            Text(
+                                "歌曲较多，仅显示前 ${tracks.size} 首，可换更精确的关键词",
+                                color = FnColors.Muted,
+                                fontSize = 14.sp,
                             )
                         }
                     }

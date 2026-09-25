@@ -112,6 +112,7 @@ class PlaybackController(
     private var currentRoamId: String? = null
     private var roamError: AppError? = null
     private var failedRoamDirection: RoamDirection? = null
+    private var consecutiveDecodeFailures = 0
     private val queueProjector = PlaybackQueueProjector(MAX_QUEUE_ITEMS)
     private var forceNextPresentationProjection = false
     private val autoAdvanceGate = RoamAutoAdvanceGate()
@@ -130,6 +131,7 @@ class PlaybackController(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             val player = controller ?: return
+            if (playbackState == Player.STATE_READY) consecutiveDecodeFailures = 0
             if (playbackState == Player.STATE_ENDED && queueKind == QueueKind.Roam) {
                 if (autoAdvanceGate.tryConsume(generation, player.currentMediaItem?.mediaId)) {
                     advanceRoam(RoamDirection.Next)
@@ -139,6 +141,9 @@ class PlaybackController(
 
         override fun onPlayerError(error: PlaybackException) {
             if (error.errorCode !in AUTO_SKIP_ERROR_CODES) return
+            // 连续多首都解不出来，说明整个队列大概率不被本机支持；
+            // 停止自动跳转，避免循环报错空转。
+            if (++consecutiveDecodeFailures > MAX_CONSECUTIVE_DECODE_SKIPS) return
             controller?.let { player ->
                 if (queueKind == QueueKind.Roam) {
                     if (autoAdvanceGate.tryConsume(generation, player.currentMediaItem?.mediaId)) {
@@ -1345,6 +1350,7 @@ class PlaybackController(
         const val SNAPSHOT_INTERVAL_MS = 5_000L
         const val PREVIOUS_RESTART_THRESHOLD_MS = 3_000L
         val QUEUE_RETRY_DELAYS = longArrayOf(500L, 1_000L, 2_000L)
+        const val MAX_CONSECUTIVE_DECODE_SKIPS = 3
 
         /** 设备解码器无法处理的编码格式：自动跳下一首而不是停住。 */
         val AUTO_SKIP_ERROR_CODES = setOf(

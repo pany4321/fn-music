@@ -37,14 +37,15 @@ class AppPreferencesTest {
     @Test fun `background back exit is device scoped and survives recreation`() {
         val shared = context.getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
         val preferences = AppPreferences(context, localStore)
-        assertFalse(preferences.backgroundBackExit.value)
-
-        preferences.setBackgroundBackExitEnabled(true)
-
+        // 车机上默认开启：播放页按返回键进后台，而不是整个应用退出。
         assertTrue(preferences.backgroundBackExit.value)
+
+        preferences.setBackgroundBackExitEnabled(false)
+
+        assertFalse(preferences.backgroundBackExit.value)
         val recreated = AppPreferences(context, localStore)
-        assertTrue(recreated.backgroundBackExit.value)
-        assertEquals(true, shared.getBoolean("background_back_exit", false))
+        assertFalse(recreated.backgroundBackExit.value)
+        assertEquals(false, shared.getBoolean("background_back_exit", true))
     }
 
     @Test fun `binding an existing account syncs service facing preferences`() = runBlocking {

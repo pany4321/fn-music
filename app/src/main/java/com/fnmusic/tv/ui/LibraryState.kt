@@ -11,6 +11,7 @@ import com.fnmusic.tv.core.model.Artist
 import com.fnmusic.tv.core.model.Page
 import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.Track
+import com.fnmusic.tv.core.model.TrackGuid
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -156,6 +157,27 @@ internal fun retainTrackCollectionPage(
         expectedTotal = loaded.total,
         expectedSort = loaded.sort,
         initialLoadCompleted = current.initialLoadCompleted || targetPage == 1,
+    )
+}
+
+/** 本地从已加载集合里移除一首歌：不回源、保留焦点位置用的就地更新。 */
+internal fun removeTrackFromCollection(
+    snapshot: RetainedTrackCollectionSnapshot,
+    trackGuid: TrackGuid,
+): RetainedTrackCollectionSnapshot {
+    if (snapshot.tracks.none { it.guid == trackGuid }) return snapshot
+    val guidValue = trackGuid.value
+    return snapshot.copy(
+        tracks = snapshot.tracks.filterNot { it.guid == trackGuid },
+        loadedPages = snapshot.loadedPages
+            .map { page ->
+                page.copy(
+                    items = page.items.filterNot { it.guid.value == guidValue },
+                    total = (page.total - 1).coerceAtLeast(0),
+                )
+            }
+            .filter { it.items.isNotEmpty() },
+        expectedTotal = snapshot.expectedTotal?.let { total -> (total - 1).coerceAtLeast(0) },
     )
 }
 

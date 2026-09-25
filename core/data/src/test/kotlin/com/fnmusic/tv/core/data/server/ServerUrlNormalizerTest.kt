@@ -33,7 +33,7 @@ class ServerUrlNormalizerTest {
         assertEquals("http://192.168.1.10:5666/music/api/v1/", address.server.apiBase.toString())
         val wide = "nasｏｃａｌ"
         assertEquals("nasocal", ServerUrlNormalizer.normalizeWide(wide))
-        val editable = ServerUrlNormalizer.editableInput("１９２．１６８．３．９７", false)
+        val editable = ServerUrlNormalizer.editableInput("１９２．１６８．１．１０", false)
         assertEquals("192.168.1.10", editable.address)
     }
 

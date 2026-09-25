@@ -21,8 +21,9 @@ class AppPreferences(context: Context, private val localStore: LocalStore) {
     private var namespace: String? = null
 
     // Device-scoped (car-unit) behavior, deliberately outside the account-scoped
-    // AppPreferencesState so namespace binds never reset it.
-    private val _backgroundBackExit = MutableStateFlow(store.getBoolean(BACKGROUND_BACK_EXIT, false))
+    // AppPreferencesState so namespace binds never reset it. Defaults to on:
+    // one Back press killing the whole app mid-drive reads like a crash.
+    private val _backgroundBackExit = MutableStateFlow(store.getBoolean(BACKGROUND_BACK_EXIT, true))
     val backgroundBackExit: StateFlow<Boolean> = _backgroundBackExit.asStateFlow()
 
     fun setBackgroundBackExitEnabled(enabled: Boolean) {
