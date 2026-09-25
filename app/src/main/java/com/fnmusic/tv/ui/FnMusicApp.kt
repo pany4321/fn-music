@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -265,7 +266,15 @@ internal fun LoginScreen(
     val validServer = fnIdInput || ServerUrlNormalizer.normalize(server, https) is ServerUrlResult.Valid
     val canSubmit = !submitting && validServer && username.isNotBlank() &&
         (password.isNotBlank() || (hasSavedPassword && selectedProfileId != null))
-    LaunchedEffect(Unit) { if (savedServer.isBlank()) serverFocus.requestFocus() else usernameFocus.requestFocus() }
+    // 仅在首次进入登录页时聚焦到最上方的输入框；登录失败重建界面后
+    // 不再抢焦点，否则遥控器焦点会无故跳回顶部。
+    var initialFocusApplied by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!initialFocusApplied) {
+            if (savedServer.isBlank()) serverFocus.requestFocus() else usernameFocus.requestFocus()
+            initialFocusApplied = true
+        }
+    }
 
     Box(
         Modifier.fillMaxSize().background(FnColors.Background),
@@ -859,7 +868,8 @@ private fun LoginCheckbox(
                 if (focused) FnColors.Coral else Color(0xFF454A50),
                 RoundedCornerShape(6.dp),
             )
-            .focusable()
+            // 只挂 toggleable：它自带焦点与点击语义。再叠加 focusable() 会产生
+            // 两个焦点目标，遥控器 OK 落在无点击语义的那个上导致无法切换。
             .toggleable(
                 value = selected,
                 role = Role.Checkbox,

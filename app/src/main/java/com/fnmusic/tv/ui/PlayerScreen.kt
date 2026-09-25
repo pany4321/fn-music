@@ -1571,6 +1571,7 @@ internal fun PlayerControlOverlay(
                     description = if (favorite) "取消收藏当前歌曲" else "收藏当前歌曲",
                     focusRequester = favoriteFocus,
                     upFocus = progressFocus,
+                    leftFocus = if (!roaming) modeFocus else null,
                     rightFocus = addToPlaylistFocus,
                     selected = favorite,
                     onFocus = onInteraction,
@@ -1598,8 +1599,8 @@ internal fun PlayerControlOverlay(
                         description = "播放模式：${playModeLabel(playMode)}",
                         focusRequester = modeFocus,
                         upFocus = progressFocus,
-                        leftFocus = addToPlaylistFocus,
-                        rightFocus = if (previousEnabled) previousFocus else playFocus,
+                        leftFocus = favoriteFocus,
+                        rightFocus = favoriteFocus,
                         onFocus = onInteraction,
                         onClick = {
                             onInteraction()
@@ -1619,7 +1620,8 @@ internal fun PlayerControlOverlay(
                     enabled = previousEnabled,
                     focusRequester = previousFocus,
                     upFocus = progressFocus,
-                    leftFocus = if (roaming) favoriteFocus else modeFocus,
+                    // 左移次序：上一首 → 添加到歌单 → 收藏（漫游时没有添加按钮，直接到收藏）
+                    leftFocus = if (roaming) favoriteFocus else addToPlaylistFocus,
                     rightFocus = playFocus,
                     onFocus = onInteraction,
                     onClick = onPrevious,
