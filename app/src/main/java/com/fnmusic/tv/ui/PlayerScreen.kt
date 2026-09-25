@@ -1680,8 +1680,8 @@ internal fun PlayerControlOverlay(
                     enabled = previousEnabled,
                     focusRequester = previousFocus,
                     upFocus = progressFocus,
-                    // 左移次序：上一首 → 添加到歌单 → 收藏（漫游时没有添加按钮，直接到收藏）
-                    leftFocus = if (roaming) favoriteFocus else addToPlaylistFocus,
+                    // 左移次序：上一首 → 添加到歌单（漫游下同样存在）→ 收藏 → 播放模式
+                    leftFocus = addToPlaylistFocus,
                     rightFocus = playFocus,
                     onFocus = onInteraction,
                     onClick = onPrevious,
@@ -1693,8 +1693,8 @@ internal fun PlayerControlOverlay(
                     upFocus = progressFocus,
                     leftFocus = when {
                         previousEnabled -> previousFocus
-                        roaming -> favoriteFocus
-                        else -> modeFocus
+                        // 无上一首时：添加到歌单在几何上紧邻播放键左侧。
+                        else -> addToPlaylistFocus
                     },
                     rightFocus = when {
                         nextEnabled -> nextFocus

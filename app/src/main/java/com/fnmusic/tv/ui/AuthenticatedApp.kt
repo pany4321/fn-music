@@ -1020,8 +1020,15 @@ private fun BrowseHome(
                     modifier = Modifier
                         .focusProperties {
                             up = if (index == 0) roamFocus else favoritesFocus
-                            right = FocusRequester.Cancel
                         }
+                        // 仅行尾钳制：中间卡按右正常移动，行尾不逃逸到顶部标签。
+                        .then(
+                            if (index == playlists.take(12).lastIndex) {
+                                Modifier.focusProperties { right = FocusRequester.Cancel }
+                            } else {
+                                Modifier
+                            }
+                        )
                         .then(if (index == 0) Modifier.focusRequester(playlistRowFocus) else Modifier)
                         .then(if (focusedKey == key) Modifier.focusRequester(contentFocus) else Modifier)
                         .onFocusChanged { if (it.isFocused) focusedKey = key },
@@ -1094,8 +1101,14 @@ private fun BrowseHome(
                         .then(if (index == 0) Modifier.focusRequester(randomAlbumsRowFocus) else Modifier)
                         .focusProperties {
                             up = refreshAlbumsFocus
-                            right = FocusRequester.Cancel
-                        },
+                        }
+                        .then(
+                            if (index == randomAlbums.lastIndex) {
+                                Modifier.focusProperties { right = FocusRequester.Cancel }
+                            } else {
+                                Modifier
+                            }
+                        ),
                     onClick = { onAlbum(album) },
                 )
             }
@@ -1141,8 +1154,14 @@ private fun BrowseHome(
                         .then(if (index == 0) Modifier.focusRequester(randomSongsRowFocus) else Modifier)
                         .focusProperties {
                             up = refreshSongsFocus
-                            right = FocusRequester.Cancel
-                        },
+                        }
+                        .then(
+                            if (index == randomSongs.lastIndex) {
+                                Modifier.focusProperties { right = FocusRequester.Cancel }
+                            } else {
+                                Modifier
+                            }
+                        ),
                     onClick = { openSampledTrack(randomSongs, track) },
                 )
             }
@@ -1166,8 +1185,14 @@ private fun BrowseHome(
                         .focusProperties {
                             // 随机歌曲行可能为空（未加载完成或曲库过小），此时上键显式取消。
                             up = if (randomSongs.isNotEmpty()) randomSongsRowFocus else FocusRequester.Cancel
-                            right = FocusRequester.Cancel
-                        },
+                        }
+                        .then(
+                            if (index == recentlyAdded.lastIndex) {
+                                Modifier.focusProperties { right = FocusRequester.Cancel }
+                            } else {
+                                Modifier
+                            }
+                        ),
                     onClick = { openSampledTrack(recentlyAdded, track) },
                 )
             }
@@ -4540,19 +4565,31 @@ private fun SearchRoute(
                         albums.isNotEmpty() -> "album"
                         else -> "track"
                     }
+                    // 初始焦点只挂在第一个非空分区的首项上；三处同时挂载会导致
+                    // 后挂载者生效，遥控器按下后跳过歌手列。
                     if (artists.isNotEmpty()) {
                         Text("歌手", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            items(artists, key = { "s-artist:" + it.guid.value }) { artist ->
+                            itemsIndexed(artists, key = { _, item -> "s-artist:" + item.guid.value }) { index, artist ->
                                 AlbumLockup(
                                     title = artist.name,
                                     subtitle = (artist.trackCount ?: 0).toString() + " 首歌曲",
                                     coverId = artist.coverId,
-                                    modifier = if (artist.guid == artists.first().guid) {
-                                        Modifier.focusRequester(resultsFocus)
-                                    } else {
-                                        Modifier
-                                    },
+                                    modifier = Modifier
+                                        .then(
+                                            if (firstSection == "artist" && index == 0) {
+                                                Modifier.focusRequester(resultsFocus)
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .then(
+                                            if (index == artists.lastIndex) {
+                                                Modifier.focusProperties { right = FocusRequester.Cancel }
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
                                     onClick = {
                                         scope.launch {
                                             val page = runCatching {
@@ -4576,16 +4613,26 @@ private fun SearchRoute(
                     if (albums.isNotEmpty()) {
                         Text("专辑", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            items(albums, key = { "s-album:" + it.guid.value }) { album ->
+                            itemsIndexed(albums, key = { _, item -> "s-album:" + item.guid.value }) { index, album ->
                                 AlbumLockup(
                                     title = album.name,
                                     subtitle = album.artistName.orEmpty(),
                                     coverId = album.coverId,
-                                    modifier = if (album.guid == albums.first().guid) {
-                                        Modifier.focusRequester(resultsFocus)
-                                    } else {
-                                        Modifier
-                                    },
+                                    modifier = Modifier
+                                        .then(
+                                            if (firstSection == "album" && index == 0) {
+                                                Modifier.focusRequester(resultsFocus)
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .then(
+                                            if (index == albums.lastIndex) {
+                                                Modifier.focusProperties { right = FocusRequester.Cancel }
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
                                     onClick = {
                                         scope.launch {
                                             val page = runCatching {
@@ -4614,7 +4661,7 @@ private fun SearchRoute(
                                 title = track.title,
                                 subtitle = track.artistName.orEmpty(),
                                 coverId = track.coverId,
-                                modifier = if (index == 0) {
+                                modifier = if (firstSection == "track" && index == 0) {
                                     Modifier.focusRequester(resultsFocus)
                                 } else {
                                     Modifier
