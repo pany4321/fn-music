@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -501,8 +502,21 @@ internal fun ImmersivePlayer(
                     controlsVisible = false
                 },
                 onRemove = container.playbackController::removeQueueItem,
+                onClose = {
+                    queueVisible = false
+                    controlsVisible = true
+                },
                 onInteraction = ::revealControls,
             )
+        }
+        // 队列面板关闭（X/点窗外）后把焦点还给打开它的队列按钮，避免遥控器失焦。
+        var queueWasVisible by remember { mutableStateOf(false) }
+        LaunchedEffect(queueVisible) {
+            if (queueWasVisible && !queueVisible) {
+                yield()
+                runCatching { queueFocus.requestFocus() }
+            }
+            queueWasVisible = queueVisible
         }
         if (addToPlaylistVisible) {
             AddToPlaylistDialog(
@@ -1132,7 +1146,10 @@ internal fun TvLyrics(
                         useBlurEffect = false,
                         showTranslation = true,
                         showPhonetic = false,
-                        offset = if (poster) 42.dp else 48.dp,
+                        // 列表上下留白 = 半个视口：让第一行/最后一行也能滚动到
+                        // 视口垂直中心，否则首行顶死在上沿、第二句开始才突然
+                        // 进入居中滚动，观感不协调。
+                        offset = defaultLyricsViewportHeight(poster, controlsVisible) / 2,
                         keepAliveZone = 0.dp,
                         breathingDotsDefaults = KaraokeBreathingDotsDefaults(
                             number = 1,
@@ -1227,6 +1244,7 @@ internal fun PlaybackQueueOverlay(
     onRetry: () -> Unit,
     onSelect: (Int) -> Unit,
     onRemove: (Int) -> Unit,
+    onClose: () -> Unit,
     onInteraction: () -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -1255,11 +1273,23 @@ internal fun PlaybackQueueOverlay(
         }
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.34f))) {
+        // 点击窗口外的暗色区域即关闭；面板自身拦截点击，避免误关。
+        Box(Modifier.matchParentSize().clickable(onClick = onClose))
         Column(
             Modifier.fillMaxHeight().fillMaxWidth(0.43f).align(Alignment.CenterEnd)
-                .background(Color(0xF3121717)).padding(horizontal = 24.dp, vertical = 28.dp),
+                .background(Color(0xF3121717))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                )
+                .padding(horizontal = 24.dp, vertical = 28.dp),
         ) {
-            Text("当前播放 ($loadedCount)", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("当前播放 ($loadedCount)", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                QueueCloseButton(onClose = onClose)
+            }
             Spacer(Modifier.height(18.dp))
             LazyColumn(
                 state = listState,
@@ -1427,6 +1457,32 @@ internal fun PlaybackQueueOverlay(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QueueCloseButton(onClose: () -> Unit) {
+    val shape = CircleShape
+    TvMaterialButton(
+        onClick = onClose,
+        modifier = Modifier
+            .size(40.dp)
+            .semantics { contentDescription = "关闭当前播放列表" },
+        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+        scale = ButtonDefaults.scale(focusedScale = 1.1f),
+        colors = ButtonDefaults.colors(
+            containerColor = Color(0xFF1E2426),
+            contentColor = FnColors.Text,
+            focusedContainerColor = FnColors.Coral,
+            focusedContentColor = FnColors.Text,
+            pressedContainerColor = FnColors.Coral,
+            pressedContentColor = FnColors.Text,
+        ),
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -2326,21 +2382,38 @@ private fun AddToPlaylistDialog(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
-            when {
-                trackGuid.isBlank() -> Text(
-                    "当前没有正在播放的歌曲",
-                    color = FnColors.Muted,
-                    fontSize = 16.sp,
-                )
-                loading -> Text("正在加载歌单…", color = FnColors.Muted, fontSize = 16.sp)
-                playlists.isEmpty() -> Text("还没有歌单", color = FnColors.Muted, fontSize = 16.sp)
-                else -> Column(
-                    Modifier
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    playlists.forEach { playlist ->
+            // 内容区固定高度：加载中/空态/列表占同样空间，弹出不再跳变；
+            // 底部消息行也预留固定一行，成功/失败提示出现时高度不变。
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(360.dp),
+            ) {
+                when {
+                    trackGuid.isBlank() -> Text(
+                        "当前没有正在播放的歌曲",
+                        color = FnColors.Muted,
+                        fontSize = 16.sp,
+                    )
+                    loading -> Text(
+                        "正在加载歌单…",
+                        color = FnColors.Muted,
+                        fontSize = 16.sp,
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    )
+                    playlists.isEmpty() -> Text(
+                        "还没有歌单",
+                        color = FnColors.Muted,
+                        fontSize = 16.sp,
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    )
+                    else -> Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        playlists.forEach { playlist ->
                         val adding = pendingGuid == playlist.guid.value
                         Button(
                             onClick = {
@@ -2397,12 +2470,18 @@ private fun AddToPlaylistDialog(
                                 )
                             }
                         }
+                        }
                     }
                 }
             }
-            message?.let {
-                Text(it, color = FnColors.Warning, fontSize = 15.sp)
-            }
+            Text(
+                message ?: "",
+                color = FnColors.Warning,
+                fontSize = 15.sp,
+                lineHeight = 19.sp,
+                maxLines = 1,
+                modifier = Modifier.height(19.dp),
+            )
         }
     }
 }
