@@ -119,8 +119,8 @@ fun UiScaleMode.factor(deviceDensity: Float): Float = when (this) {
         else -> 1.0f
     }
     UiScaleMode.Standard -> 1.5f
-    UiScaleMode.Large -> 1.75f
-    UiScaleMode.Larger -> 2.0f
+    UiScaleMode.Large -> 1.6f
+    UiScaleMode.Larger -> 1.75f
 }
 
 enum class CoverVariant(val width: Int?) {

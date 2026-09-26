@@ -74,7 +74,7 @@ private val SettingsBorderColor: Color get() = FnColors.PanelBorder
 private fun uiScaleLabel(mode: UiScaleMode): String = when (mode) {
     UiScaleMode.Auto -> "自动"
     UiScaleMode.Standard -> "标准"
-    UiScaleMode.Large -> "大"
+    UiScaleMode.Large -> "较大"
     UiScaleMode.Larger -> "更大"
 }
 
@@ -500,9 +500,11 @@ private fun SettingsChoiceButton(
         colors = ButtonDefaults.colors(
             containerColor = if (selected) FnColors.AccentSoft else SettingsControl,
             contentColor = FnColors.Text,
-            focusedContainerColor = if (selected) FnColors.AccentSoftFocused else FnColors.FocusFill,
+            // 焦点只用中性提亮 + 主色描边表示：未选中项若也填主色调，
+            // 看起来会比“选中项”更亮，导致分不清哪个是当前选项。
+            focusedContainerColor = if (selected) FnColors.AccentSoftFocused else FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
-            pressedContainerColor = FnColors.FocusFill,
+            pressedContainerColor = if (selected) FnColors.AccentSoftFocused else FnColors.CardFocused,
             pressedContentColor = FnColors.Text,
         ),
         border = ButtonDefaults.border(
@@ -516,7 +518,14 @@ private fun SettingsChoiceButton(
         contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(label, fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            // 选中态靠“底色 + 加粗”区分，焦点态靠描边，两者不再混淆。
+            Text(
+                label,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+            )
         }
     }
 }

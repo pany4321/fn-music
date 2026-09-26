@@ -748,6 +748,15 @@ private fun BrowseHome(
     val roamArtwork = roamCoverState.snapshot.entries
     LaunchedEffect(Unit) {
         if (!roamCoverState.snapshot.initialLoadCompleted) {
+            // 先用上次启动存下的那组封面画出来（命中图片缓存，秒出）；
+            // 同时后台取一组新的写回偏好，下次启动换新——既快又保持随机感。
+            val persisted = container.appPreferences.homeDeck(ROAM_DECK_KEY)
+            if (persisted.isNotEmpty()) {
+                roamCoverState.snapshot = retainLoadedList(
+                    roamCoverState.snapshot,
+                    persisted.map { FeatureArtworkItem("", it) },
+                )
+            }
             retainedStore.scope.launch {
                 var deck = randomTrackDeck { container.musicRepository.randomTrackSample(24) }
                 if (deck.isEmpty()) {
@@ -758,7 +767,10 @@ private fun BrowseHome(
                     )
                 }
                 if (deck.isNotEmpty()) {
-                    roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
+                    container.appPreferences.saveHomeDeck(ROAM_DECK_KEY, deck.mapNotNull { it.coverId })
+                    if (persisted.isEmpty()) {
+                        roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
+                    }
                 }
             }
         }
@@ -790,10 +802,20 @@ private fun BrowseHome(
     val allPlaylistsDeck = allPlaylistsDeckState.snapshot.entries
     LaunchedEffect(Unit) {
         if (!allPlaylistsDeckState.snapshot.initialLoadCompleted) {
+            val persisted = container.appPreferences.homeDeck(ALL_PLAYLISTS_DECK_KEY)
+            if (persisted.isNotEmpty()) {
+                allPlaylistsDeckState.snapshot = retainLoadedList(
+                    allPlaylistsDeckState.snapshot,
+                    persisted.map { FeatureArtworkItem("", it) },
+                )
+            }
             retainedStore.scope.launch {
                 val deck = randomTrackDeck { container.musicRepository.randomTrackSample(24) }
                 if (deck.isNotEmpty()) {
-                    allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
+                    container.appPreferences.saveHomeDeck(ALL_PLAYLISTS_DECK_KEY, deck.mapNotNull { it.coverId })
+                    if (persisted.isEmpty()) {
+                        allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
+                    }
                 }
             }
         }
@@ -1491,6 +1513,10 @@ private suspend fun randomTrackDeck(fetch: suspend () -> List<Track>): List<Feat
 
 private const val RANDOM_DECK_ATTEMPTS = 2
 private const val RANDOM_DECK_RETRY_DELAY_MS = 700L
+
+/** 卡片叠层封面在偏好里的键：随机漫游 / 全部歌单各存一组，供下次启动秒出。 */
+private const val ROAM_DECK_KEY = "roam"
+private const val ALL_PLAYLISTS_DECK_KEY = "all-playlists"
 
 @Composable
 private fun HomePlaylistLockup(
@@ -3471,7 +3497,8 @@ internal fun DetailBackButton(modifier: Modifier = Modifier, onClick: () -> Unit
     val shape = CircleShape
     Button(
         onClick = onClick,
-        modifier = modifier.size(48.dp).semantics { contentDescription = "返回" },
+        // 10 英尺 UI 下略放大：48dp → 53dp，字形 36sp → 40sp（约 +10%）。
+        modifier = modifier.size(53.dp).semantics { contentDescription = "返回" },
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.08f),
         colors = ButtonDefaults.colors(
@@ -3484,7 +3511,7 @@ internal fun DetailBackButton(modifier: Modifier = Modifier, onClick: () -> Unit
         ),
         contentPadding = PaddingValues(0.dp),
     ) {
-        Text("‹", fontSize = 36.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+        Text("‹", fontSize = 40.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold)
     }
 }
 

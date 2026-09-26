@@ -549,13 +549,14 @@ internal fun ImmersivePlayer(
             Modifier
                 .align(Alignment.TopStart)
                 .padding(start = 20.dp, top = 14.dp)
-                .size(48.dp)
+                // 与其它页面返回键一致：53dp 圆钮 + 主题外框描边（约比原先大 10%）。
+                .size(53.dp)
                 .background(FnColors.ControlStrong.copy(alpha = 0.72f), CircleShape)
-                .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+                .border(0.5.dp, FnColors.FrameBorder, CircleShape)
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Text("‹", fontSize = 30.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)
+            Text("‹", fontSize = 33.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

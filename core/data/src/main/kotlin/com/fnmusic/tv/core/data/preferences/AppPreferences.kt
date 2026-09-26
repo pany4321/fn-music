@@ -76,6 +76,21 @@ class AppPreferences(context: Context, private val localStore: LocalStore) {
         store.edit().remove(SEARCH_HISTORY_PREFIX + namespace).apply()
     }
 
+    /**
+     * 卡片叠层封面（随机漫游 / 全部歌单）：沿用上次启动取到的那组封面，
+     * 首屏直接用图片缓存画出来，避免每次启动都要等一轮随机取数和下载。
+     */
+    fun homeDeck(key: String): List<String> =
+        store.getString(HOME_DECK_PREFIX + key, null)
+            ?.split(DECK_SEPARATOR)
+            ?.filter(String::isNotBlank)
+            .orEmpty()
+
+    fun saveHomeDeck(key: String, coverIds: List<String>) {
+        if (coverIds.isEmpty()) return
+        store.edit().putString(HOME_DECK_PREFIX + key, coverIds.joinToString(DECK_SEPARATOR)).apply()
+    }
+
     suspend fun bindNamespace(value: String) {
         namespace = value
         val account = localStore.account(value)
@@ -151,6 +166,8 @@ class AppPreferences(context: Context, private val localStore: LocalStore) {
         const val THEME = "app_theme"
         const val UI_SCALE = "ui_scale"
         const val SEARCH_HISTORY_PREFIX = "search_history_"
+        private const val HOME_DECK_PREFIX = "home_deck_"
+        private const val DECK_SEPARATOR = ""
         const val SEARCH_HISTORY_SEPARATOR = ""
         const val MAX_SEARCH_HISTORY = 5
         const val MAX_SEARCH_HISTORY_LENGTH = 30
