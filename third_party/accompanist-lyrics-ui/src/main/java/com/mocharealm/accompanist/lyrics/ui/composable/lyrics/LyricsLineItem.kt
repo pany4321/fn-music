@@ -34,20 +34,10 @@ fun LyricsLineItem(
     isInteractive: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val scaleState by animateFloatAsState(
-        targetValue = if (isFocused) 1f else 0.98f,
-        animationSpec = if (isFocused) {
-            tween(durationMillis = 600, easing = LinearOutSlowInEasing)
-        } else {
-            tween(durationMillis = 300, easing = EaseInOut)
-        },
-        label = "scale"
-    )
-
-    val alphaState by animateFloatAsState(
-        targetValue = if (isFocused) activeAlpha else inactiveAlpha,
-        label = "alpha"
-    )
+    // 直接取目标值，不做过渡动画：原实现让刚唱完的一行先以全白高亮、再淡出
+    // 并缩放回 0.98，产生“白闪 + 抖动”。切换瞬间即与其他行完全一致。
+    val scaleState = 1f
+    val alphaState = if (isFocused) activeAlpha else inactiveAlpha
 
     Box(
         modifier = modifier

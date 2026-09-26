@@ -39,8 +39,10 @@ fun SyncedLineText(
     activeTextColor: Color = Color.Unspecified,
     currentPositionMs: (() -> Int)? = null,
 ) {
-    val mainColor = if (isActive && activeTextColor != Color.Unspecified) activeTextColor else textColor
-    val mainStyle = if (isActive) textStyle.copy(fontWeight = FontWeight.Black) else textStyle
+    // 活动行不换色也不加粗：切换行时若颜色/字重变化，会先出现白光再加
+    // 文本重排抖动；这里让所有行颜色、字重完全一致。
+    val mainColor = textColor
+    val mainStyle = textStyle
 
     Column(
         modifier
@@ -57,7 +59,9 @@ fun SyncedLineText(
                 derivedStateOf {
                     val t = currentPositionMs.invoke()
                     val span = (line.end - line.start).coerceAtLeast(1)
-                    ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
+                    val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
+                    // 前半段保持行首不滚动（保证开头可读），后半段再平滑滚到行尾。
+                    ((elapsed - 0.5f) / 0.5f).coerceIn(0f, 1f)
                 }
             }
             val lineScrollX by animateFloatAsState(
@@ -98,9 +102,7 @@ fun SyncedLineText(
             line.translation?.let {
                 Text(
                     text = it,
-                    color = if (isActive && activeTextColor != Color.Unspecified)
-                        activeTextColor.copy(alpha = 0.6f)
-                    else textColor.copy(alpha = 0.6f),
+                    color = textColor.copy(alpha = 0.6f),
                     textAlign = if (isLineRtl) TextAlign.End else TextAlign.Start
                 )
             }

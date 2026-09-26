@@ -51,12 +51,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -137,6 +139,7 @@ import com.fnmusic.tv.NowPlayingResourceState
 import com.fnmusic.tv.R
 import com.fnmusic.tv.decodeArtwork
 import com.fnmusic.tv.core.data.repository.CurrentLyrics
+import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.SessionState
 import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.Album
@@ -276,6 +279,7 @@ internal fun AuthenticatedApp(
             onArtist = { open(LibraryRoute.ArtistDetail(it)) },
             onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
             onSettings = { open(LibraryRoute.Settings) },
+            onSwitchAccount = { open(LibraryRoute.SwitchAccount) },
             onPlayer = { open(LibraryRoute.Player(null)) },
         )
         LibraryRoute.AllPlaylists -> AllPlaylists(container, onBack = back, onOpen = { open(LibraryRoute.PlaylistDetail(it)) })
@@ -330,8 +334,16 @@ internal fun AuthenticatedApp(
                 },
             )
         }
-        LibraryRoute.Artists -> ArtistGrid(container, onOpen = { open(LibraryRoute.ArtistDetail(it)) })
-        LibraryRoute.Albums -> AlbumGrid(container, onOpen = { open(LibraryRoute.AlbumDetail(it)) })
+        LibraryRoute.Artists -> ArtistGrid(
+            container,
+            onBack = back,
+            onOpen = { open(LibraryRoute.ArtistDetail(it)) },
+        )
+        LibraryRoute.Albums -> AlbumGrid(
+            container,
+            onBack = back,
+            onOpen = { open(LibraryRoute.AlbumDetail(it)) },
+        )
         LibraryRoute.AllTracks -> TrackCollection(
             container = container,
             stateKey = "all-tracks",
@@ -435,9 +447,35 @@ internal fun AuthenticatedApp(
             onBack = back,
         )
                 LibraryRoute.Settings -> SettingsScreen(container, onBack = back)
+                LibraryRoute.SwitchAccount -> SwitchAccountRoute(container, onBack = back)
             }
         }
     }
+}
+
+@Composable
+private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
+    var history by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        history = runCatching { container.authenticatedActions.savedLoginEntries() }
+            .getOrDefault(emptyList())
+    }
+    // 不清除当前会话：登录成功后才由协调器完成切换；失败或按返回都停留在原账号。
+    LoginScreen(
+        savedServer = "",
+        recentServers = emptyList(),
+        initialError = null,
+        loginHistory = history,
+        onBack = onBack,
+        onLogin = { server, https, user, password, remember, accessCode ->
+            container.authenticatedActions.switchAccountTo(server, https, user, password, remember, accessCode)
+        },
+        onHistoryLogin = { profileId, accessCode, remember ->
+            container.authenticatedActions.switchAccountWithHistory(profileId, accessCode, remember)
+        },
+        onHistoryDelete = { profileId -> container.authenticatedActions.deleteSavedLoginEntry(profileId) },
+        onHistoryClear = { container.authenticatedActions.clearSavedLoginEntries() },
+    )
 }
 
 @Composable
@@ -848,8 +886,10 @@ private fun BrowseHome(
     val refreshSongsFocus = remember { FocusRequester() }
     val randomSongsRowFocus = remember { FocusRequester() }
     val recentlyAddedRowFocus = remember { FocusRequester() }
-    val albumRowState = rememberLazyListState()
-    val rowState = rememberLazyListState()
+    val playlistRowScroll = rememberScrollState()
+    val albumRowScroll = rememberScrollState()
+    val songRowScroll = rememberScrollState()
+    val recentRowScroll = rememberScrollState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         retainedStore.loadListOnce(playlistState, container.musicRepository::playlists)
@@ -933,6 +973,7 @@ private fun BrowseHome(
                     .weight(1f)
                     .focusProperties {
                         up = if (playback.hasMedia) nowPlayingFocus else homeTabFocus
+                        left = FocusRequester.Cancel
                         right = favoritesFocus
                         down = playlistRowFocus
                     }
@@ -1005,12 +1046,16 @@ private fun BrowseHome(
         Spacer(Modifier.height(18.dp))
         Text("歌单", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp))
-        LazyRow(
-            state = rowState,
-            contentPadding = PaddingValues(4.dp),
+        // Row + horizontalScroll 取代 LazyRow：列表项常驻组合，行级 FocusRequester
+        // 不会因滚动回收而失效（此前造成焦点卡死无法上下移动）。
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(playlistRowScroll)
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            itemsIndexed(playlists.take(12), key = { _, playlist -> playlist.guid.value }) { index, playlist ->
+            playlists.take(12).forEachIndexed { index, playlist ->
                 val key = "playlist:${playlist.guid.value}"
                 HomePlaylistLockup(
                     title = playlist.name,
@@ -1020,15 +1065,9 @@ private fun BrowseHome(
                     modifier = Modifier
                         .focusProperties {
                             up = if (index == 0) roamFocus else favoritesFocus
+                            // 左右键只在本行内移动：行首按左不逃逸到播放小窗口。
+                            if (index == 0) left = FocusRequester.Cancel
                         }
-                        // 仅行尾钳制：中间卡按右正常移动，行尾不逃逸到顶部标签。
-                        .then(
-                            if (index == playlists.take(12).lastIndex) {
-                                Modifier.focusProperties { right = FocusRequester.Cancel }
-                            } else {
-                                Modifier
-                            }
-                        )
                         .then(if (index == 0) Modifier.focusRequester(playlistRowFocus) else Modifier)
                         .then(if (focusedKey == key) Modifier.focusRequester(contentFocus) else Modifier)
                         .onFocusChanged { if (it.isFocused) focusedKey = key },
@@ -1038,26 +1077,24 @@ private fun BrowseHome(
                     },
                 )
             }
-            item {
-                HomePlaylistLockup(
-                    title = "全部歌单",
-                    subtitle = "浏览全部",
-                    coverId = null,
-                    derivedCovers = allPlaylistsDeckCovers,
-                    modifier = Modifier
-                        .focusProperties {
-                            up = favoritesFocus
-                            right = FocusRequester.Cancel
-                        }
-                        .then(if (playlists.isEmpty()) Modifier.focusRequester(playlistRowFocus) else Modifier)
-                        .then(if (focusedKey == "all-playlists") Modifier.focusRequester(contentFocus) else Modifier)
-                        .onFocusChanged { if (it.isFocused) focusedKey = "all-playlists" },
-                    onClick = {
-                        focusedKey = "all-playlists"
-                        onAll()
-                    },
-                )
-            }
+            HomePlaylistLockup(
+                title = "全部歌单",
+                subtitle = "浏览全部",
+                coverId = null,
+                derivedCovers = allPlaylistsDeckCovers,
+                modifier = Modifier
+                    .focusProperties {
+                        up = favoritesFocus
+                        right = FocusRequester.Cancel
+                    }
+                    .then(if (playlists.isEmpty()) Modifier.focusRequester(playlistRowFocus) else Modifier)
+                    .then(if (focusedKey == "all-playlists") Modifier.focusRequester(contentFocus) else Modifier)
+                    .onFocusChanged { if (it.isFocused) focusedKey = "all-playlists" },
+                onClick = {
+                    focusedKey = "all-playlists"
+                    onAll()
+                },
+            )
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1071,7 +1108,8 @@ private fun BrowseHome(
                     .focusRequester(refreshAlbumsFocus)
                     .focusProperties {
                         up = playlistRowFocus
-                        down = randomAlbumsRowFocus
+                        // 列表为空时其 FousRequester 未挂载，改指向下一个可聚焦行头。
+                        down = if (randomAlbums.isNotEmpty()) randomAlbumsRowFocus else refreshSongsFocus
                         left = FocusRequester.Cancel
                         right = FocusRequester.Cancel
                     },
@@ -1087,12 +1125,14 @@ private fun BrowseHome(
             }
         }
         Spacer(Modifier.height(14.dp))
-        LazyRow(
-            state = albumRowState,
-            contentPadding = PaddingValues(4.dp),
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(albumRowScroll)
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            itemsIndexed(randomAlbums, key = { _, album -> "rand-album:${album.guid.value}" }) { index, album ->
+            randomAlbums.forEachIndexed { index, album ->
                 AlbumLockup(
                     title = album.name,
                     subtitle = album.artistName.orEmpty(),
@@ -1101,14 +1141,9 @@ private fun BrowseHome(
                         .then(if (index == 0) Modifier.focusRequester(randomAlbumsRowFocus) else Modifier)
                         .focusProperties {
                             up = refreshAlbumsFocus
-                        }
-                        .then(
-                            if (index == randomAlbums.lastIndex) {
-                                Modifier.focusProperties { right = FocusRequester.Cancel }
-                            } else {
-                                Modifier
-                            }
-                        ),
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == randomAlbums.lastIndex) right = FocusRequester.Cancel
+                        },
                     onClick = { onAlbum(album) },
                 )
             }
@@ -1124,8 +1159,8 @@ private fun BrowseHome(
                     .size(width = 88.dp, height = 38.dp)
                     .focusRequester(refreshSongsFocus)
                     .focusProperties {
-                        up = randomAlbumsRowFocus
-                        down = randomSongsRowFocus
+                        up = if (randomAlbums.isNotEmpty()) randomAlbumsRowFocus else refreshAlbumsFocus
+                        down = if (randomSongs.isNotEmpty()) randomSongsRowFocus else FocusRequester.Cancel
                         left = FocusRequester.Cancel
                         right = FocusRequester.Cancel
                     },
@@ -1141,11 +1176,14 @@ private fun BrowseHome(
             }
         }
         Spacer(Modifier.height(14.dp))
-        LazyRow(
-            contentPadding = PaddingValues(4.dp),
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(songRowScroll)
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            itemsIndexed(randomSongs, key = { _, track -> "rand-song:${track.guid.value}" }) { index, track ->
+            randomSongs.forEachIndexed { index, track ->
                 TrackLockup(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
@@ -1154,14 +1192,9 @@ private fun BrowseHome(
                         .then(if (index == 0) Modifier.focusRequester(randomSongsRowFocus) else Modifier)
                         .focusProperties {
                             up = refreshSongsFocus
-                        }
-                        .then(
-                            if (index == randomSongs.lastIndex) {
-                                Modifier.focusProperties { right = FocusRequester.Cancel }
-                            } else {
-                                Modifier
-                            }
-                        ),
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == randomSongs.lastIndex) right = FocusRequester.Cancel
+                        },
                     onClick = { openSampledTrack(randomSongs, track) },
                 )
             }
@@ -1171,11 +1204,14 @@ private fun BrowseHome(
             Text("最近添加", fontSize = 34.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(14.dp))
-        LazyRow(
-            contentPadding = PaddingValues(4.dp),
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(recentRowScroll)
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            itemsIndexed(recentlyAdded, key = { _, track -> "recently-added:${track.guid.value}" }) { index, track ->
+            recentlyAdded.forEachIndexed { index, track ->
                 TrackLockup(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
@@ -1185,14 +1221,9 @@ private fun BrowseHome(
                         .focusProperties {
                             // 随机歌曲行可能为空（未加载完成或曲库过小），此时上键显式取消。
                             up = if (randomSongs.isNotEmpty()) randomSongsRowFocus else FocusRequester.Cancel
-                        }
-                        .then(
-                            if (index == recentlyAdded.lastIndex) {
-                                Modifier.focusProperties { right = FocusRequester.Cancel }
-                            } else {
-                                Modifier
-                            }
-                        ),
+                            if (index == 0) left = FocusRequester.Cancel
+                            if (index == recentlyAdded.lastIndex) right = FocusRequester.Cancel
+                        },
                     onClick = { openSampledTrack(recentlyAdded, track) },
                 )
             }
@@ -1515,6 +1546,7 @@ private fun BrowseMy(
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onSettings: () -> Unit,
+    onSwitchAccount: () -> Unit,
     onPlayer: () -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
@@ -1573,12 +1605,18 @@ private fun BrowseMy(
             add("settings")
             add("switch-account")
         }
-        focusedKey = focusedKey?.takeIf(availableKeys::contains) ?: availableKeys.firstOrNull()
-        yield()
-        if (focusedKey != null) {
-            runCatching { contentFocus.requestFocus() }
+        val restored = focusedKey?.takeIf(availableKeys::contains)
+        if (restored == null) {
+            // 首次进入：焦点落在“我的”标签——按下键到搜索栏，按左键依次到首页、播放小窗口。
+            yield()
+            runCatching { myTabFocus.requestFocus() }
             initialFocusRequested = true
+            return@LaunchedEffect
         }
+        focusedKey = restored
+        yield()
+        runCatching { contentFocus.requestFocus() }
+        initialFocusRequested = true
     }
     val window = LocalAdaptiveWindow.current
     Column(
@@ -1611,7 +1649,11 @@ private fun BrowseMy(
                 .fillMaxWidth()
                 .height(54.dp)
                 .focusRequester(searchEntryFocus)
-                .focusProperties { down = settingsFocus }
+                .focusProperties {
+                    down = settingsFocus
+                    // 左键链：搜索栏 → 首页标签 → 播放小窗口（与顶部导航顺序一致）。
+                    left = homeTabFocus
+                }
                 .then(if (focusedKey == "search") Modifier.focusRequester(contentFocus) else Modifier)
                 .onFocusChanged { if (it.isFocused) focusedKey = "search" },
             colors = ButtonDefaults.colors(
@@ -1647,14 +1689,21 @@ private fun BrowseMy(
             },
             onSwitchAccount = {
                 focusedKey = "switch-account"
-                scope.launch { container.authenticatedActions.switchAccount() }
+                onSwitchAccount()
             },
         )
         Spacer(Modifier.height(10.dp))
-        LazyColumn(state = listState) {
-            item {
-                MediaBand(
-                    "歌手",
+        // 非惰性列表：四个 band 全部常驻组合，band 级 FocusRequester 不因回收失效
+        // （惰性回收会让相邻 band 的上/下键目标变成未挂载 requester，导致焦点卡死）。
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            MediaBand(
+                "歌手",
                     artists.take(8).map {
                         val key = "artist:${it.guid.value}"
                         BandEntry(it.name, "${it.trackCount ?: 0} 首歌曲", it.coverId, BandKind.Artist, key) {
@@ -1673,67 +1722,60 @@ private fun BrowseMy(
                     downFocusRequester = albumRowFocus,
                     onFocused = { focusedKey = it },
                 )
-            }
-            item {
-                MediaBand(
-                    "专辑",
-                    albums.take(8).map {
-                        val key = "album:${it.guid.value}"
-                        BandEntry(it.name, it.artistName.orEmpty(), it.coverId, BandKind.Album, key) {
-                            focusedKey = key
-                            onAlbum(it)
-                        }
-                    },
-                    BandEntry("全部专辑", "浏览完整列表", null, BandKind.Album, "all-albums", artworkRes = R.drawable.cover_all_albums) {
-                        focusedKey = "all-albums"
-                        onAlbums()
-                    },
-                    focusedKey,
-                    contentFocus,
-                    rowFocusRequester = albumRowFocus,
-                    upFocusRequester = artistRowFocus,
-                    downFocusRequester = genreRowFocus,
-                    onFocused = { focusedKey = it },
-                )
-            }
-            item {
-                MediaBand(
-                    "风格",
-                    genres.take(8).map { genre ->
-                        val key = "genre:" + genre.guid.value
-                        BandEntry(genre.name, "风格", null, BandKind.Genre, key) {
-                            focusedKey = key
-                            onGenre(genre)
-                        }
-                    },
-                    BandEntry("全部风格", "按风格筛选歌曲", null, BandKind.Genre, "all-genres") {
-                        focusedKey = "all-genres"
-                        onGenres()
-                    },
-                    focusedKey,
-                    contentFocus,
-                    rowFocusRequester = genreRowFocus,
-                    upFocusRequester = albumRowFocus,
-                    downFocusRequester = libraryRowFocus,
-                    onFocused = { focusedKey = it },
-                )
-            }
-            item {
-                MediaBand(
-                    "音乐库",
-                    emptyList(),
-                    BandEntry("全部歌曲", "完整曲库", null, BandKind.Library, "all-tracks") {
-                        focusedKey = "all-tracks"
-                        onAllTracks()
-                    },
-                    focusedKey,
-                    contentFocus,
-                    rowFocusRequester = libraryRowFocus,
-                    upFocusRequester = genreRowFocus,
-                    downFocusRequester = FocusRequester.Cancel,
-                    onFocused = { focusedKey = it },
-                )
-            }
+            MediaBand(
+                "专辑",
+                albums.take(8).map {
+                    val key = "album:${it.guid.value}"
+                    BandEntry(it.name, it.artistName.orEmpty(), it.coverId, BandKind.Album, key) {
+                        focusedKey = key
+                        onAlbum(it)
+                    }
+                },
+                BandEntry("全部专辑", "浏览完整列表", null, BandKind.Album, "all-albums", artworkRes = R.drawable.cover_all_albums) {
+                    focusedKey = "all-albums"
+                    onAlbums()
+                },
+                focusedKey,
+                contentFocus,
+                rowFocusRequester = albumRowFocus,
+                upFocusRequester = artistRowFocus,
+                downFocusRequester = genreRowFocus,
+                onFocused = { focusedKey = it },
+            )
+            MediaBand(
+                "风格",
+                genres.take(8).map { genre ->
+                    val key = "genre:" + genre.guid.value
+                    BandEntry(genre.name, "风格", null, BandKind.Genre, key) {
+                        focusedKey = key
+                        onGenre(genre)
+                    }
+                },
+                BandEntry("全部风格", "按风格筛选歌曲", null, BandKind.Genre, "all-genres") {
+                    focusedKey = "all-genres"
+                    onGenres()
+                },
+                focusedKey,
+                contentFocus,
+                rowFocusRequester = genreRowFocus,
+                upFocusRequester = albumRowFocus,
+                downFocusRequester = libraryRowFocus,
+                onFocused = { focusedKey = it },
+            )
+            MediaBand(
+                "音乐库",
+                emptyList(),
+                BandEntry("全部歌曲", "完整曲库", null, BandKind.Library, "all-tracks") {
+                    focusedKey = "all-tracks"
+                    onAllTracks()
+                },
+                focusedKey,
+                contentFocus,
+                rowFocusRequester = libraryRowFocus,
+                upFocusRequester = genreRowFocus,
+                downFocusRequester = FocusRequester.Cancel,
+                onFocused = { focusedKey = it },
+            )
         }
     }
 }
@@ -1980,11 +2022,15 @@ private fun MediaBand(
     Column {
         Text(title, fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
-        LazyRow(
-            contentPadding = PaddingValues(4.dp),
+        // Row + horizontalScroll：条目常驻组合，行级 FocusRequester 不会因回收失效。
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            itemsIndexed(entries, key = { _, entry -> entry.focusKey }) { index, entry ->
+            entries.forEachIndexed { index, entry ->
                 BandLockup(
                     entry,
                     Modifier
@@ -2003,26 +2049,24 @@ private fun MediaBand(
                         },
                 )
             }
-            item {
-                BandLockup(
-                    terminalEntry,
-                    Modifier
-                        .focusProperties {
-                            if (entries.isEmpty()) left = FocusRequester.Cancel
-                            right = FocusRequester.Cancel
-                            up = upFocusRequester
-                            down = downFocusRequester
+            BandLockup(
+                terminalEntry,
+                Modifier
+                    .focusProperties {
+                        if (entries.isEmpty()) left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                        up = upFocusRequester
+                        down = downFocusRequester
+                    }
+                    .then(if (returnFocusKey == terminalEntry.focusKey) Modifier.focusRequester(rowFocusRequester) else Modifier)
+                    .then(if (focusedKey == terminalEntry.focusKey) Modifier.focusRequester(focusRequester) else Modifier)
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            lastFocusedEntryKey = terminalEntry.focusKey
+                            onFocused(terminalEntry.focusKey)
                         }
-                        .then(if (returnFocusKey == terminalEntry.focusKey) Modifier.focusRequester(rowFocusRequester) else Modifier)
-                        .then(if (focusedKey == terminalEntry.focusKey) Modifier.focusRequester(focusRequester) else Modifier)
-                        .onFocusChanged {
-                            if (it.isFocused) {
-                                lastFocusedEntryKey = terminalEntry.focusKey
-                                onFocused(terminalEntry.focusKey)
-                            }
-                        },
-                )
-            }
+                    },
+            )
         }
     }
 }
@@ -2124,26 +2168,36 @@ private fun AllPlaylists(container: AuthenticatedAppDependencies, onBack: () -> 
 }
 
 @Composable
-private fun ArtistGrid(container: AuthenticatedAppDependencies, onOpen: (Artist) -> Unit) {
+private fun ArtistGrid(
+    container: AuthenticatedAppDependencies,
+    onBack: () -> Unit,
+    onOpen: (Artist) -> Unit,
+) {
     PagedCatalogPage(
         stateKey = "artists",
         title = "全部歌手",
         totalLabel = { "$it 位歌手" },
         loader = { page -> container.musicRepository.artists(page, FULL_CATALOG_PAGE_SIZE) },
         key = { it.guid.value },
+        onBack = onBack,
     ) { artist, modifier ->
         ArtistLockup(artist.name, "${artist.trackCount ?: 0} 首歌曲", artist.coverId, modifier = modifier) { onOpen(artist) }
     }
 }
 
 @Composable
-private fun AlbumGrid(container: AuthenticatedAppDependencies, onOpen: (Album) -> Unit) {
+private fun AlbumGrid(
+    container: AuthenticatedAppDependencies,
+    onBack: () -> Unit,
+    onOpen: (Album) -> Unit,
+) {
     PagedCatalogPage(
         stateKey = "albums",
         title = "全部专辑",
         totalLabel = { "$it 张专辑" },
         loader = { page -> container.musicRepository.albums(page, FULL_CATALOG_PAGE_SIZE) },
         key = { it.guid.value },
+        onBack = onBack,
     ) { album, modifier ->
         AlbumLockup(album.name, album.artistName.orEmpty(), album.coverId, modifier = modifier) { onOpen(album) }
     }
@@ -2318,66 +2372,65 @@ private fun <T> PagedCatalogPage(
                 }
             }
             Spacer(Modifier.height(20.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
+            // 非惰性网格：每页固定 12 项，全部常驻组合。惰性网格在窄屏滚动时会
+            // 回收条目，itemFocuses 随之失效，上下左右焦点目标变成未挂载的
+            // FocusRequester，表现为“焦点卡死无法移动”（与首页各行同类问题）。
+            Column(
                 modifier = if (scrollableGrid) {
-                    Modifier.fillMaxWidth().weight(1f)
+                    Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())
                 } else {
-                    Modifier.fillMaxWidth().height(gridHeight)
+                    Modifier.fillMaxWidth()
                 },
-                userScrollEnabled = scrollableGrid,
-                contentPadding = PaddingValues(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                items(
-                    count = visibleEntries.size,
-                    key = { index -> key(visibleEntries[index]) },
-                ) { index ->
-                    val entry = visibleEntries[index]
-                    val entryKey = key(entry)
-                    val column = index % columns
-                    val nextRowIndex = index + columns
-                    val pagerTarget = catalogPagerTarget(column, columns, canPrevious, canNext)
-                    item(
-                        entry,
-                        Modifier
-                            .focusProperties {
-                                left = itemFocuses.getOrNull(index - 1)
-                                    ?.takeIf { column > 0 }
-                                    ?: FocusRequester.Cancel
-                                right = itemFocuses.getOrNull(index + 1)
-                                    ?.takeIf { column < columns - 1 && index + 1 < visibleEntries.size }
-                                    ?: FocusRequester.Cancel
-                                up = itemFocuses.getOrNull(index - columns) ?: FocusRequester.Cancel
-                                down = if (nextRowIndex < visibleEntries.size) {
-                                    itemFocuses[nextRowIndex]
-                                } else {
-                                    when (pagerTarget) {
-                                        CatalogPagerTarget.Previous -> previousPageFocus
-                                        CatalogPagerTarget.Next -> nextPageFocus
-                                        null -> FocusRequester.Cancel
+                visibleEntries.chunked(columns).forEachIndexed { rowIndex, rowEntries ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        rowEntries.forEachIndexed { column, entry ->
+                            val index = rowIndex * columns + column
+                            val entryKey = key(entry)
+                            val nextRowIndex = index + columns
+                            val pagerTarget = catalogPagerTarget(column, columns, canPrevious, canNext)
+                            item(
+                                entry,
+                                Modifier
+                                    .focusProperties {
+                                        left = itemFocuses.getOrNull(index - 1)
+                                            ?.takeIf { column > 0 }
+                                            ?: FocusRequester.Cancel
+                                        right = itemFocuses.getOrNull(index + 1)
+                                            ?.takeIf { column < columns - 1 && index + 1 < visibleEntries.size }
+                                            ?: FocusRequester.Cancel
+                                        up = itemFocuses.getOrNull(index - columns) ?: FocusRequester.Cancel
+                                        down = if (nextRowIndex < visibleEntries.size) {
+                                            itemFocuses[nextRowIndex]
+                                        } else {
+                                            when (pagerTarget) {
+                                                CatalogPagerTarget.Previous -> previousPageFocus
+                                                CatalogPagerTarget.Next -> nextPageFocus
+                                                null -> FocusRequester.Cancel
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                            .focusRequester(itemFocuses[index])
-                            .onFocusChanged {
-                                if (it.isFocused) {
-                                    focusedKey = entryKey
-                                    lastFocusedIndex = index
-                                }
-                            },
-                    )
-                }
-
-                if (visibleEntries.isEmpty() && snapshot.error != null) {
-                    item {
-                        CatalogRetryButton(
-                            loading = retained.loading,
-                            modifier = Modifier.focusRequester(retryFocus),
-                        ) { load(1) }
+                                    .focusRequester(itemFocuses[index])
+                                    .onFocusChanged {
+                                        if (it.isFocused) {
+                                            focusedKey = entryKey
+                                            lastFocusedIndex = index
+                                        }
+                                    },
+                            )
+                        }
                     }
                 }
+            }
+            if (visibleEntries.isEmpty() && snapshot.error != null) {
+                CatalogRetryButton(
+                    loading = retained.loading,
+                    modifier = Modifier.focusRequester(retryFocus),
+                ) { load(1) }
             }
             if (!scrollableGrid) {
                 Spacer(Modifier.weight(1f))
@@ -2387,6 +2440,7 @@ private fun <T> PagedCatalogPage(
                 totalPages = totalPages,
                 canPrevious = canPrevious,
                 canNext = canNext,
+                hasGridItems = visibleEntries.isNotEmpty(),
                 previousFocus = previousPageFocus,
                 nextFocus = nextPageFocus,
                 upFocus = returnItemFocus,
@@ -2433,22 +2487,40 @@ private fun <T> GridPage(
             Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(20.dp))
-        LazyVerticalGrid(
-            state = gridState,
-            // Playlist tiles are 193dp wide; adaptive cells keep exactly four
-            // columns on TV and reflow on narrower car screens.
-            columns = GridCells.Adaptive(minSize = 193.dp),
-            contentPadding = PaddingValues(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            items(entries, key = key) { entry ->
-                val entryKey = key(entry)
-                item(
-                    entry,
-                    Modifier.then(if (focusedKey == entryKey) Modifier.focusRequester(contentFocus) else Modifier)
-                        .onFocusChanged { if (it.isFocused) focusedKey = entryKey },
-                )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            // 与 Adaptive(193dp) 相同的列数推导，用于左右键行首/行尾钳制：
+            // 左右键只在本行内移动，不跨行（也不逃逸到顶部返回按钮）。
+            val columns = fittedGridColumns(
+                availableWidth = maxWidth,
+                maxColumns = 12,
+                minTileWidth = 193.dp,
+                spacing = 14.dp,
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                // Playlist tiles are 193dp wide; adaptive cells keep exactly four
+                // columns on TV and reflow on narrower car screens.
+                columns = GridCells.Adaptive(minSize = 193.dp),
+                contentPadding = PaddingValues(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                itemsIndexed(entries, key = { _, entry -> key(entry) }) { index, entry ->
+                    val entryKey = key(entry)
+                    val column = index % columns
+                    item(
+                        entry,
+                        Modifier
+                            .focusProperties {
+                                if (column == 0) left = FocusRequester.Cancel
+                                if (column == columns - 1 || index == entries.lastIndex) {
+                                    right = FocusRequester.Cancel
+                                }
+                            }
+                            .then(if (focusedKey == entryKey) Modifier.focusRequester(contentFocus) else Modifier)
+                            .onFocusChanged { if (it.isFocused) focusedKey = entryKey },
+                    )
+                }
             }
         }
     }
@@ -2615,11 +2687,24 @@ private fun ArtistAlbumGrid(
                 Text("正在加载专辑", color = FnColors.Muted, fontSize = 16.sp, modifier = Modifier.padding(vertical = 20.dp))
             }
         }
-        items(albums, key = { it.guid.value }) { album ->
-            val index = albums.indexOf(album)
+        val gridColumns = fittedGridColumns(
+            availableWidth = maxWidth,
+            maxColumns = 3,
+            minTileWidth = 165.dp,
+            spacing = 12.dp,
+        )
+        itemsIndexed(albums, key = { _, album -> album.guid.value }) { index, album ->
+            val column = index % gridColumns
             DetailAlbumCard(
                 album = album,
                 modifier = Modifier
+                    // 左右键只在本行内移动：行首/行尾钳制，不跨行也不逃逸到返回按钮。
+                    .focusProperties {
+                        if (column == 0) left = FocusRequester.Cancel
+                        if (column == gridColumns - 1 || index == albums.lastIndex) {
+                            right = FocusRequester.Cancel
+                        }
+                    }
                     .then(if (focusedKey == album.guid.value) Modifier.focusRequester(restoredFocus) else Modifier)
                     .onFocusChanged {
                         if (it.isFocused) {
@@ -3207,6 +3292,8 @@ private fun DetailTrackCollection(
                         onRemove = { onRequestRemove(track) },
                         modifier = Modifier
                             .then(if (focusedKey == track.guid.value) Modifier.focusRequester(restoredFocus) else Modifier)
+                            // 左右键只在本行内移动：行首按左不逃逸到返回/播放全部按钮。
+                            .focusProperties { left = FocusRequester.Cancel }
                             .onFocusChanged { if (it.isFocused) onTrackFocused(index, track.guid.value) },
                         onClick = { onTrack(index) },
                     )
@@ -3216,7 +3303,14 @@ private fun DetailTrackCollection(
                         Button(
                             enabled = !loading,
                             onClick = onLoadMore,
-                            modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 5.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .padding(top = 5.dp)
+                                .focusProperties {
+                                    left = FocusRequester.Cancel
+                                    right = FocusRequester.Cancel
+                                },
                         ) {
                             Text(if (loading) "正在加载" else "加载更多")
                         }
@@ -3369,7 +3463,7 @@ private fun DetailTrackRow(
     // 嵌套时点删除会触发行播放。兄弟节点同时保证不可播放的行也能删除。
     // 注意：modifier（restoredFocus/焦点回调）必须挂在播放按钮上，
     // FocusRequester 只有和焦点目标同链才能恢复焦点。
-    Row(Modifier.fillMaxWidth().height(58.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
         Button(
             enabled = enabled,
             onClick = onClick,
@@ -3394,7 +3488,13 @@ private fun DetailTrackRow(
             contentPadding = PaddingValues(horizontal = 15.dp, vertical = 0.dp),
         ) {
             val contentColor = LocalContentColor.current
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // 必须撑满行高：否则内容按顶部对齐，行内文字会比右侧居中的删除按钮
+            // 高出约 11dp，看起来“删除按钮和本行没对齐”（实测行中心 988px、
+            // 文字中心约 940px）。
+            Row(
+                Modifier.fillMaxWidth().fillMaxHeight(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     (index + 1).toString().padStart(2, '0'),
                     color = contentColor.copy(alpha = 0.66f),
@@ -3431,6 +3531,7 @@ private fun DetailTrackRow(
                     onClick = onRemove,
                     modifier = Modifier
                         .size(44.dp)
+                        .focusProperties { right = FocusRequester.Cancel }
                         .semantics { contentDescription = "删除" + track.title },
                 shape = ButtonDefaults.shape(removeShape, removeShape, removeShape, removeShape, removeShape),
                 scale = ButtonDefaults.scale(focusedScale = 1.1f),
@@ -4222,6 +4323,7 @@ private fun CatalogPager(
     totalPages: Int,
     canPrevious: Boolean,
     canNext: Boolean,
+    hasGridItems: Boolean = true,
     previousFocus: FocusRequester,
     nextFocus: FocusRequester,
     upFocus: FocusRequester,
@@ -4241,7 +4343,8 @@ private fun CatalogPager(
                 .focusProperties {
                     left = FocusRequester.Cancel
                     right = if (canNext) nextFocus else FocusRequester.Cancel
-                    up = upFocus
+                    // 空页时网格项未挂载，上键显式取消，避免指向未挂载的焦点目标。
+                    up = if (hasGridItems) upFocus else FocusRequester.Cancel
                 }
                 .focusRequester(previousFocus)
                 .onFocusChanged { if (it.isFocused) onPagerFocused(CatalogPagerTarget.Previous) },
@@ -4265,7 +4368,7 @@ private fun CatalogPager(
                 .focusProperties {
                     left = if (canPrevious) previousFocus else FocusRequester.Cancel
                     right = FocusRequester.Cancel
-                    up = upFocus
+                    up = if (hasGridItems) upFocus else FocusRequester.Cancel
                 }
                 .focusRequester(nextFocus)
                 .onFocusChanged { if (it.isFocused) onPagerFocused(CatalogPagerTarget.Next) },
@@ -4569,8 +4672,14 @@ private fun SearchRoute(
                     // 后挂载者生效，遥控器按下后跳过歌手列。
                     if (artists.isNotEmpty()) {
                         Text("歌手", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            itemsIndexed(artists, key = { _, item -> "s-artist:" + item.guid.value }) { index, artist ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        ) {
+                            artists.forEachIndexed { index, artist ->
                                 AlbumLockup(
                                     title = artist.name,
                                     subtitle = (artist.trackCount ?: 0).toString() + " 首歌曲",
@@ -4583,13 +4692,11 @@ private fun SearchRoute(
                                                 Modifier
                                             }
                                         )
-                                        .then(
-                                            if (index == artists.lastIndex) {
-                                                Modifier.focusProperties { right = FocusRequester.Cancel }
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
+                                        .focusProperties {
+                                            // 左右键只在本行内移动。
+                                            if (index == 0) left = FocusRequester.Cancel
+                                            if (index == artists.lastIndex) right = FocusRequester.Cancel
+                                        },
                                     onClick = {
                                         scope.launch {
                                             val page = runCatching {
@@ -4612,8 +4719,14 @@ private fun SearchRoute(
                     }
                     if (albums.isNotEmpty()) {
                         Text("专辑", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            itemsIndexed(albums, key = { _, item -> "s-album:" + item.guid.value }) { index, album ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        ) {
+                            albums.forEachIndexed { index, album ->
                                 AlbumLockup(
                                     title = album.name,
                                     subtitle = album.artistName.orEmpty(),
@@ -4626,13 +4739,10 @@ private fun SearchRoute(
                                                 Modifier
                                             }
                                         )
-                                        .then(
-                                            if (index == albums.lastIndex) {
-                                                Modifier.focusProperties { right = FocusRequester.Cancel }
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
+                                        .focusProperties {
+                                            if (index == 0) left = FocusRequester.Cancel
+                                            if (index == albums.lastIndex) right = FocusRequester.Cancel
+                                        },
                                     onClick = {
                                         scope.launch {
                                             val page = runCatching {

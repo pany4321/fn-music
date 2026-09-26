@@ -189,7 +189,7 @@ private fun SessionRecoveryScreen(
             ) { Text("切换登录", fontSize = 20.sp) }
         }
     }
-    LaunchedEffect(Unit) { retryFocus.requestFocus() }
+    LaunchedEffect(Unit) { runCatching { retryFocus.requestFocus() } }
 }
 
 @Composable
@@ -229,6 +229,8 @@ internal fun LoginScreen(
     onHistoryDelete: suspend (String) -> Unit = {},
     onHistoryClear: suspend () -> Unit = {},
     historyDraft: (String) -> LoginDraft? = { null },
+    /** 应用内“切换账号”时提供返回入口；为 null 表示登录页是顶层界面。 */
+    onBack: (() -> Unit)? = null,
 ) {
     val selectedDraft = remember(initialSelectedProfileId, loginHistory) {
         initialSelectedProfileId?.let(historyDraft)
@@ -264,14 +266,19 @@ internal fun LoginScreen(
     val loginFocus = remember { FocusRequester() }
     val fnIdInput = ConnectionResolver.isFnId(server)
     val validServer = fnIdInput || ServerUrlNormalizer.normalize(server, https) is ServerUrlResult.Valid
-    val canSubmit = !submitting && validServer && username.isNotBlank() &&
+    // 表单是否已填齐（与“是否正在提交”无关）。登录按钮的可聚焦状态只看它：
+    // 若提交时把按钮置为 disabled，焦点会回落到第一个可聚焦控件（NAS 地址栏）。
+    val credentialsReady = validServer && username.isNotBlank() &&
         (password.isNotBlank() || (hasSavedPassword && selectedProfileId != null))
+    val canSubmit = !submitting && credentialsReady
     // 仅在首次进入登录页时聚焦到最上方的输入框；登录失败重建界面后
     // 不再抢焦点，否则遥控器焦点会无故跳回顶部。
     var initialFocusApplied by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!initialFocusApplied) {
-            if (savedServer.isBlank()) serverFocus.requestFocus() else usernameFocus.requestFocus()
+            runCatching {
+                if (savedServer.isBlank()) serverFocus.requestFocus() else usernameFocus.requestFocus()
+            }
             initialFocusApplied = true
         }
     }
@@ -287,6 +294,14 @@ internal fun LoginScreen(
                 .semantics { contentDescription = "登录表单" },
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            onBack?.let { back ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DetailBackButton(onClick = back)
+                    Spacer(Modifier.width(14.dp))
+                    Text("返回", color = FnColors.Muted, fontSize = 16.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+            }
             Text("飞牛音乐", color = FnColors.Teal, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text("登录", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Row(
@@ -423,7 +438,7 @@ internal fun LoginScreen(
                         .focusProperties {
                             up = rememberFocus
                             left = rememberFocus
-                            down = if (canSubmit) loginFocus else FocusRequester.Cancel
+                            down = if (credentialsReady) loginFocus else FocusRequester.Cancel
                         }
                         .focusRequester(httpsFocus),
                 ) {
@@ -448,7 +463,7 @@ internal fun LoginScreen(
                 maxLines = 1,
             )
             LoginActionButton(
-                enabled = canSubmit,
+                enabled = credentialsReady,
                 onClick = {
                     if (submitting) return@LoginActionButton
                     submitting = true
@@ -621,7 +636,7 @@ internal fun LoginScreen(
                 ) { Text("清除所有历史记录", color = FnColors.Coral, fontSize = 19.sp) }
             }
         }
-        LaunchedEffect(firstHistoryFocus) { firstHistoryFocus?.requestFocus() }
+        LaunchedEffect(firstHistoryFocus) { firstHistoryFocus?.let { runCatching { it.requestFocus() } } }
     }
 }
 
@@ -762,7 +777,7 @@ private fun TvTextField(
         editing = false
         imeWasVisible = false
         keyboard?.hide()
-        target?.requestFocus()
+        target?.let { runCatching { it.requestFocus() } }
     }
 
     Column(
@@ -795,7 +810,7 @@ private fun TvTextField(
             }
             when {
                 target != null -> {
-                    target.requestFocus()
+                    runCatching { target.requestFocus() }
                     true
                 }
                 else -> false

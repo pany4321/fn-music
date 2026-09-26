@@ -632,7 +632,9 @@ fun KaraokeLineText(
                 else {
                     val t = currentTimeProvider()
                     val span = (line.end - line.start).coerceAtLeast(1)
-                    ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
+                    val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
+                    // 前半段保持行首不滚动（保证开头可读），后半段再平滑滚到行尾。
+                    ((elapsed - 0.5f) / 0.5f).coerceIn(0f, 1f)
                 }
             }
             val lineScrollX by animateFloatAsState(

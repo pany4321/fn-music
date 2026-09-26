@@ -288,6 +288,15 @@ class SessionRepository internal constructor(
         return "${current.server.guid.value}:${current.user.guid.value}"
     }
 
+    /** 已保存账号列表，供应用内“切换账号”界面使用（与 SignedOut 状态同源）。 */
+    suspend fun savedLoginEntries(): List<LoginHistoryEntry> {
+        loadRememberedCredentials()
+        return securePayload.profiles.map { profile ->
+            val editable = ServerUrlNormalizer.editableInput(profile.server, false)
+            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps)
+        }
+    }
+
     internal suspend fun <T> authenticated(block: suspend (TrimMusicApi) -> T): T {
         val current = requireApi()
         return try {

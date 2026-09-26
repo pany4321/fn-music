@@ -32,6 +32,7 @@ internal sealed interface LibraryRoute {
     data class AlbumDetail(val album: Album) : LibraryRoute
     data class Player(val track: Track?) : LibraryRoute
     data object Settings : LibraryRoute
+    data object SwitchAccount : LibraryRoute
 }
 
 internal data class RetainedPageSnapshot<T>(
@@ -330,6 +331,7 @@ internal fun LibraryRoute.storageKey(): String = when (this) {
     is LibraryRoute.AlbumDetail -> "album:${album.guid.value}"
     is LibraryRoute.Player -> "player"
     LibraryRoute.Settings -> "settings"
+    LibraryRoute.SwitchAccount -> "switch-account"
 }
 
 internal fun LibraryRoute.retainedStateKeys(): Set<String> = when (this) {

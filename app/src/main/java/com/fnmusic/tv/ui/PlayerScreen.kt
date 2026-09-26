@@ -298,7 +298,7 @@ internal fun ImmersivePlayer(
     fun dismissPlayerChrome() {
         queueVisible = false
         controlsVisible = false
-        playerFocus.requestFocus()
+        runCatching { playerFocus.requestFocus() }
     }
     val title = metadata?.title?.takeUnless(String::isBlank)
         ?: playback.title.takeUnless(String::isBlank)
@@ -337,12 +337,12 @@ internal fun ImmersivePlayer(
     LaunchedEffect(controlsVisible, queueVisible) {
         when {
             queueVisible -> Unit
-            controlsVisible -> playFocus.requestFocus()
-            else -> playerFocus.requestFocus()
+            controlsVisible -> runCatching { playFocus.requestFocus() }
+            else -> runCatching { playerFocus.requestFocus() }
         }
     }
     LaunchedEffect(roaming) {
-        if (!roaming && controlsVisible) playFocus.requestFocus()
+        if (!roaming && controlsVisible) runCatching { playFocus.requestFocus() }
     }
     LaunchedEffect(queueVisible, playback.queueItems.isEmpty()) {
         if (queueVisible && playback.queueItems.isEmpty()) {
@@ -938,7 +938,7 @@ internal fun PlayerStatusRetryButton(
     Button(
         onClick = {
             onInteraction()
-            returnFocusRequester.requestFocus()
+            runCatching { returnFocusRequester.requestFocus() }
             onRetry()
         },
         modifier = Modifier.height(40.dp)
@@ -1302,7 +1302,7 @@ internal fun PlaybackQueueOverlay(
                     val requester = remember(rowKey) { FocusRequester() }
                     val deleteRequester = remember(rowKey) { FocusRequester() }
                     LaunchedEffect(requestedFocusKey, rowKey) {
-                        if (requestedFocusKey == rowKey) requester.requestFocus()
+                        if (requestedFocusKey == rowKey) runCatching { requester.requestFocus() }
                     }
                     val rowShape = RoundedCornerShape(5.dp)
                     Row(Modifier.fillMaxWidth().height(54.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1461,27 +1461,21 @@ internal fun PlaybackQueueOverlay(
 
 @Composable
 private fun QueueCloseButton(onClose: () -> Unit) {
-    val shape = CircleShape
-    TvMaterialButton(
-        onClick = onClose,
-        modifier = Modifier
-            .size(40.dp)
+    var focused by remember { mutableStateOf(false) }
+    // 用 clickable（与车机侧退出按钮同一套触屏路径）而不是 tv Button：
+    // 后者在本面板内不响应触摸点击。
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(if (focused) FnColors.Coral else Color(0xFF1E2426))
+            .border(1.dp, if (focused) FnColors.Coral else Color(0xFF454B4D), CircleShape)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClose)
             .semantics { contentDescription = "关闭当前播放列表" },
-        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
-        scale = ButtonDefaults.scale(focusedScale = 1.1f),
-        colors = ButtonDefaults.colors(
-            containerColor = Color(0xFF1E2426),
-            contentColor = FnColors.Text,
-            focusedContainerColor = FnColors.Coral,
-            focusedContentColor = FnColors.Text,
-            pressedContainerColor = FnColors.Coral,
-            pressedContentColor = FnColors.Text,
-        ),
-        contentPadding = PaddingValues(0.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        }
+        Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = FnColors.Text)
     }
 }
 

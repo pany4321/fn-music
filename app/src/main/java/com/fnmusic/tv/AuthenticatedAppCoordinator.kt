@@ -3,6 +3,7 @@ package com.fnmusic.tv
 import android.app.Application
 import android.content.Intent
 import com.fnmusic.tv.core.data.preferences.AppPreferences
+import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.MusicRepository
 import com.fnmusic.tv.core.data.repository.SessionRepository
 import com.fnmusic.tv.core.data.repository.SessionState
@@ -23,6 +24,18 @@ internal interface AuthenticatedAppActions {
     suspend fun retrySessionRestore()
     suspend fun showLogin()
     suspend fun switchAccount()
+    suspend fun switchAccountTo(
+        server: String,
+        useHttps: Boolean,
+        username: String,
+        password: CharArray,
+        remember: Boolean,
+        accessCode: CharArray,
+    )
+    suspend fun switchAccountWithHistory(profileId: String, accessCode: CharArray?, remember: Boolean)
+    suspend fun savedLoginEntries(): List<LoginHistoryEntry>
+    suspend fun deleteSavedLoginEntry(profileId: String)
+    suspend fun clearSavedLoginEntries()
     suspend fun clearAllEvictableCaches()
     suspend fun retryPlaybackConnection(): Boolean
     suspend fun shutdownForExit()
@@ -117,6 +130,55 @@ internal class AuthenticatedAppCoordinator(
             clearLocalNamespace = { musicRepository.clearLocalNamespace(includeEssential = false) },
             logout = sessionRepository::logout,
         )
+    }
+
+    override suspend fun savedLoginEntries(): List<LoginHistoryEntry> = sessionRepository.savedLoginEntries()
+
+    override suspend fun deleteSavedLoginEntry(profileId: String) {
+        sessionRepository.deleteLoginHistory(profileId)
+    }
+
+    override suspend fun clearSavedLoginEntries() {
+        sessionRepository.clearLoginHistory()
+    }
+
+    /**
+     * 应用内“切换账号”：先完成新账号登录，失败时旧会话与播放完全不受影响；
+     * 成功后再清理旧账号的播放会话与本地缓存（按切换前的命名空间精确清理）。
+     */
+    override suspend fun switchAccountTo(
+        server: String,
+        useHttps: Boolean,
+        username: String,
+        password: CharArray,
+        remember: Boolean,
+        accessCode: CharArray,
+    ) {
+        val departingNamespace = runCatching { sessionRepository.cacheNamespace() }.getOrNull()
+        sessionRepository.login(server, useHttps, username, password, remember, accessCode)
+        completeAccountSwitch(departingNamespace)
+    }
+
+    override suspend fun switchAccountWithHistory(
+        profileId: String,
+        accessCode: CharArray?,
+        remember: Boolean,
+    ) {
+        val departingNamespace = runCatching { sessionRepository.cacheNamespace() }.getOrNull()
+        sessionRepository.loginWithHistory(profileId, accessCode, remember)
+        completeAccountSwitch(departingNamespace)
+    }
+
+    private suspend fun completeAccountSwitch(departingNamespace: String?) {
+        runCatching { playbackController.clearSessionDurably() }
+        artworkBitmapCache.clear()
+        val currentNamespace = runCatching { sessionRepository.cacheNamespace() }.getOrNull()
+        departingNamespace
+            ?.takeIf { it != currentNamespace }
+            ?.let { namespace ->
+                runCatching { musicRepository.invalidateNamespace(namespace, includeEssential = false) }
+            }
+        nowPlayingPresenter.refreshCurrentPresentation()
     }
 
     override suspend fun clearAllEvictableCaches() {
