@@ -4,6 +4,7 @@ import android.content.Context
 import com.fnmusic.tv.core.data.local.LocalStore
 import com.fnmusic.tv.core.model.AppTheme
 import com.fnmusic.tv.core.model.PlayerStyle
+import com.fnmusic.tv.core.model.UiScaleMode
 import com.fnmusic.tv.core.model.preferences.AppPreferencesState
 import com.fnmusic.tv.core.model.preferences.CacheBudget
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,17 @@ class AppPreferences(context: Context, private val localStore: LocalStore) {
     fun setTheme(value: AppTheme) {
         store.edit().putString(THEME, value.name).apply()
         _theme.value = value
+    }
+
+    // 界面缩放：设备级偏好（车机 1.5 倍为标准档），即时生效。
+    private val _uiScale = MutableStateFlow(
+        UiScaleMode.entries.firstOrNull { it.name == store.getString(UI_SCALE, null) } ?: UiScaleMode.Auto,
+    )
+    val uiScale: StateFlow<UiScaleMode> = _uiScale.asStateFlow()
+
+    fun setUiScale(value: UiScaleMode) {
+        store.edit().putString(UI_SCALE, value.name).apply()
+        _uiScale.value = value
     }
 
     // ---- 搜索历史：设备级、按账号命名空间隔离（不动数据库，避免 schema 迁移）----
@@ -137,6 +149,7 @@ class AppPreferences(context: Context, private val localStore: LocalStore) {
         const val MIGRATED_NAMESPACE = "room_migrated_namespace"
         const val BACKGROUND_BACK_EXIT = "background_back_exit"
         const val THEME = "app_theme"
+        const val UI_SCALE = "ui_scale"
         const val SEARCH_HISTORY_PREFIX = "search_history_"
         const val SEARCH_HISTORY_SEPARATOR = ""
         const val MAX_SEARCH_HISTORY = 5

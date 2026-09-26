@@ -2468,6 +2468,11 @@ private fun AddToPlaylistDialog(
                                 focusedContainerColor = FnColors.CardFocused,
                                 focusedContentColor = FnColors.Text,
                             ),
+                            border = ButtonDefaults.border(
+                                border = Border(BorderStroke(0.5.dp, FnColors.CardBorder)),
+                                focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral)),
+                                pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral)),
+                            ),
                             contentPadding = PaddingValues(0.dp),
                         ) {
                             Row(

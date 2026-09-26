@@ -112,6 +112,10 @@ internal data class ThemeColors(
     val pillBorder: Color,
     /** 封面占位底色。 */
     val artworkPlaceholder: Color,
+    /** 卡片描边（让卡片区块与背景之间界限清晰）。 */
+    val cardBorder: Color,
+    /** 外框描边（胶囊容器、小控件、叠层封面），比卡片描边更轻。 */
+    val frameBorder: Color,
     /** 错误/危险色。 */
     val danger: Color,
     /** 播放页左上角退出键底色。 */
@@ -127,21 +131,28 @@ internal data class ThemeColors(
     val cardCollectionEnd: Color,
 )
 
+/** 卡片提亮：把深色卡片底整体抬亮一档，强光下的车机屏幕也能分清卡片边界。 */
+private fun Color.lifted(t: Float = 0.08f): Color = lerp(this, Color.White, t)
+
 internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     // 默认主题：与历史版本完全一致。
     AppTheme.CoralNight -> {
         val background = Color(0xFF101214)
+        // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
+        val frameBorder = Color(0xFF36383A)
         val surface = Color(0xFF171A1E)
         val text = Color(0xFFF4F2EC)
         val muted = Color(0xFFA9ADB4)
         val accent = Color(0xFFFF7657)
         val secondary = Color(0xFF55C5A5)
         val warning = Color(0xFFE8C36A)
-        val card = Color(0xFF1B201F)
+        // 卡片提亮：与背景拉开层次，车机强光下也能看清分区。
+        val card = Color(0xFF292D2C)
+        val cardBorder = Color(0xFF434645)
         val cardFocused = Color(0xFF303634)
         val container = Color(0xFF171B1D)
         val hairline = Color(0xFF454B4D)
-        val panel = Color(0xFF151A19)
+        val panel = Color(0xFF212524)
         val control = Color(0xFF292D31)
         val divider = Color(0xFF2A302F)
         val panelBorder = Color(0xFF303735)
@@ -177,6 +188,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             warning = warning,
             card = card,
             cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
             container = container,
             hairline = hairline,
             panel = panel,
@@ -209,17 +222,21 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     AppTheme.Jade -> {
         val background = Color(0xFF0F1416)
+        // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
+        val frameBorder = Color(0xFF353A3B)
         val surface = Color(0xFF161B1C)
         val text = Color(0xFFF1F5F3)
         val muted = Color(0xFF9FB0AC)
         val accent = Color(0xFF4FD1C5)
         val secondary = Color(0xFF7FD1AE)
         val warning = Color(0xFFE8C36A)
-        val card = Color(0xFF18201F)
+        // 卡片提亮：与背景拉开层次，车机强光下也能看清分区。
+        val card = Color(0xFF262D2C)
+        val cardBorder = Color(0xFF404645)
         val cardFocused = Color(0xFF2C3836)
         val container = Color(0xFF151C1D)
         val hairline = Color(0xFF3E4B48)
-        val panel = Color(0xFF141B1A)
+        val panel = Color(0xFF202625)
         val control = Color(0xFF26302F)
         val divider = Color(0xFF27302E)
         val panelBorder = Color(0xFF2D3836)
@@ -234,6 +251,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             warning = warning,
             card = card,
             cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
             container = container,
             hairline = hairline,
             panel = panel,
@@ -266,17 +285,21 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     AppTheme.ForestGreen -> {
         val background = Color(0xFF0F1410)
+        // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
+        val frameBorder = Color(0xFF353A36)
         val surface = Color(0xFF161C17)
         val text = Color(0xFFF1F5EF)
         val muted = Color(0xFFA3B3A4)
         val accent = Color(0xFF58C070)
         val secondary = Color(0xFFE8C36A)
         val warning = Color(0xFFE8C36A)
-        val card = Color(0xFF182018)
+        // 卡片提亮：与背景拉开层次，车机强光下也能看清分区。
+        val card = Color(0xFF262D26)
+        val cardBorder = Color(0xFF404640)
         val cardFocused = Color(0xFF2C382C)
         val container = Color(0xFF151C15)
         val hairline = Color(0xFF3E4B3E)
-        val panel = Color(0xFF141B15)
+        val panel = Color(0xFF202621)
         val control = Color(0xFF263026)
         val divider = Color(0xFF273026)
         val panelBorder = Color(0xFF2D382E)
@@ -291,6 +314,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             warning = warning,
             card = card,
             cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
             container = container,
             hairline = hairline,
             panel = panel,
@@ -323,17 +348,21 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     AppTheme.Violet -> {
         val background = Color(0xFF121016)
+        // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
+        val frameBorder = Color(0xFF38363B)
         val surface = Color(0xFF1A1720)
         val text = Color(0xFFF4F1FA)
         val muted = Color(0xFFADA6BD)
         val accent = Color(0xFFA78BFA)
         val secondary = Color(0xFFF0A0D0)
         val warning = Color(0xFFE8C36A)
-        val card = Color(0xFF1E1A24)
+        // 卡片提亮：与背景拉开层次，车机强光下也能看清分区。
+        val card = Color(0xFF2C2831)
+        val cardBorder = Color(0xFF45424A)
         val cardFocused = Color(0xFF342C42)
         val container = Color(0xFF191521)
         val hairline = Color(0xFF48405A)
-        val panel = Color(0xFF191522)
+        val panel = Color(0xFF24212D)
         val control = Color(0xFF2D2838)
         val divider = Color(0xFF2E2939)
         val panelBorder = Color(0xFF363040)
@@ -348,6 +377,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             warning = warning,
             card = card,
             cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
             container = container,
             hairline = hairline,
             panel = panel,
@@ -380,17 +411,21 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     AppTheme.SakuraPink -> {
         val background = Color(0xFF161012)
+        // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
+        val frameBorder = Color(0xFF3B3638)
         val surface = Color(0xFF1E171A)
         val text = Color(0xFFFAF1F3)
         val muted = Color(0xFFBDA6AC)
         val accent = Color(0xFFF58AA8)
         val secondary = Color(0xFF7FD1E8)
         val warning = Color(0xFFE8C36A)
-        val card = Color(0xFF221A1D)
+        // 卡片提亮：与背景拉开层次，车机强光下也能看清分区。
+        val card = Color(0xFF2F282B)
+        val cardBorder = Color(0xFF484244)
         val cardFocused = Color(0xFF3A2C31)
         val container = Color(0xFF1C1518)
         val hairline = Color(0xFF503F45)
-        val panel = Color(0xFF1C1518)
+        val panel = Color(0xFF272124)
         val control = Color(0xFF322A2E)
         val divider = Color(0xFF332B2F)
         val panelBorder = Color(0xFF3B3236)
@@ -405,6 +440,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             warning = warning,
             card = card,
             cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
             container = container,
             hairline = hairline,
             panel = panel,
@@ -437,6 +474,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     AppTheme.GraphiteBlue -> {
         val background = Color(0xFF0F1216)
+        // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
+        val frameBorder = Color(0xFF35383B)
         val surface = Color(0xFF161A20)
         val text = Color(0xFFF2F4F8)
         val muted = Color(0xFFA5AEBB)
@@ -444,11 +483,13 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         // 副色必须与其它主题不同：漫游等图标用副色，若与默认主题同值会看不出变化。
         val secondary = Color(0xFF9CC7F0)
         val warning = Color(0xFFE8C36A)
-        val card = Color(0xFF181E26)
+        // 卡片提亮：与背景拉开层次，车机强光下也能看清分区。
+        val card = Color(0xFF262C33)
+        val cardBorder = Color(0xFF40454B)
         val cardFocused = Color(0xFF2C3644)
         val container = Color(0xFF151A22)
         val hairline = Color(0xFF3E4854)
-        val panel = Color(0xFF141922)
+        val panel = Color(0xFF20242D)
         val control = Color(0xFF262E3A)
         val divider = Color(0xFF272F3B)
         val panelBorder = Color(0xFF2D3542)
@@ -463,6 +504,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             warning = warning,
             card = card,
             cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
             container = container,
             hairline = hairline,
             panel = panel,
@@ -523,7 +566,7 @@ object FnColors {
         private set
     var Warning by mutableStateOf(Color(0xFFE8C36A))
         private set
-    var Card by mutableStateOf(Color(0xFF1B201F))
+    var Card by mutableStateOf(Color(0xFF262B2D))
         private set
     var CardFocused by mutableStateOf(Color(0xFF303634))
         private set
@@ -531,7 +574,7 @@ object FnColors {
         private set
     var Hairline by mutableStateOf(Color(0xFF454B4D))
         private set
-    var Panel by mutableStateOf(Color(0xFF151A19))
+    var Panel by mutableStateOf(Color(0xFF222829))
         private set
     var Control by mutableStateOf(Color(0xFF292D31))
         private set
@@ -562,6 +605,10 @@ object FnColors {
     var PillBorder by mutableStateOf(Color(0xFF454C49))
         private set
     var ArtworkPlaceholder by mutableStateOf(Color(0xFF242927))
+        private set
+    var CardBorder by mutableStateOf(Color(0xFF434645))
+        private set
+    var FrameBorder by mutableStateOf(Color(0xFF36383A))
         private set
     var Danger by mutableStateOf(Color(0xFFFF3B4D))
         private set
@@ -614,16 +661,18 @@ object FnColors {
         PillBackgroundPressed = colors.pillBackgroundPressed
         PillBorder = colors.pillBorder
         ArtworkPlaceholder = colors.artworkPlaceholder
+        CardBorder = colors.cardBorder
+        FrameBorder = colors.frameBorder
         Danger = colors.danger
         ControlStrong = colors.controlStrong
-        CardRoamStart = colors.cardRoamStart
-        CardRoamEnd = colors.cardRoamEnd
-        CardFavoritesStart = colors.cardFavoritesStart
-        CardFavoritesEnd = colors.cardFavoritesEnd
-        CardRecentStart = colors.cardRecentStart
-        CardRecentEnd = colors.cardRecentEnd
-        CardCollectionStart = colors.cardCollectionStart
-        CardCollectionEnd = colors.cardCollectionEnd
+        CardRoamStart = colors.cardRoamStart.lifted()
+        CardRoamEnd = colors.cardRoamEnd.lifted()
+        CardFavoritesStart = colors.cardFavoritesStart.lifted()
+        CardFavoritesEnd = colors.cardFavoritesEnd.lifted()
+        CardRecentStart = colors.cardRecentStart.lifted()
+        CardRecentEnd = colors.cardRecentEnd.lifted()
+        CardCollectionStart = colors.cardCollectionStart.lifted()
+        CardCollectionEnd = colors.cardCollectionEnd.lifted()
     }
 }
 

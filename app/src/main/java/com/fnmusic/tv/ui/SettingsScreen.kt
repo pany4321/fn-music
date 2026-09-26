@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +56,7 @@ import com.fnmusic.tv.BuildConfig
 import com.fnmusic.tv.R
 import com.fnmusic.tv.core.model.AppTheme
 import com.fnmusic.tv.core.model.PlayerStyle
+import com.fnmusic.tv.core.model.UiScaleMode
 import com.fnmusic.tv.core.model.preferences.CacheBudget
 import com.fnmusic.tv.core.model.preferences.CacheUsage
 import com.fnmusic.tv.update.UpdateCheckSource
@@ -68,6 +70,14 @@ private val SettingsControl: Color get() = FnColors.Control
 private val SettingsDividerColor: Color get() = FnColors.Divider
 private val SettingsBorderColor: Color get() = FnColors.PanelBorder
 
+/** 缩放档位的界面标签；自动档按设备密度决定实际倍数。 */
+private fun uiScaleLabel(mode: UiScaleMode): String = when (mode) {
+    UiScaleMode.Auto -> "自动"
+    UiScaleMode.Standard -> "标准"
+    UiScaleMode.Large -> "大"
+    UiScaleMode.Larger -> "更大"
+}
+
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
@@ -77,6 +87,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
     val window = LocalAdaptiveWindow.current
     val backgroundBackExit by container.appPreferences.backgroundBackExit.collectAsStateWithLifecycle()
     val preferencesTheme by container.appPreferences.theme.collectAsStateWithLifecycle()
+    val preferencesUiScale by container.appPreferences.uiScale.collectAsStateWithLifecycle()
     val coverStyleFocus = remember { FocusRequester() }
     val posterStyleFocus = remember { FocusRequester() }
     val backgroundExitFocus = remember { FocusRequester() }
@@ -84,6 +95,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
     val cacheFocuses = remember { List(CacheBudget.entries.size) { FocusRequester() } }
     val clearCacheFocus = remember { FocusRequester() }
     val themeFocuses = remember { List(AppTheme.entries.size) { FocusRequester() } }
+    val scaleFocuses = remember { List(UiScaleMode.entries.size) { FocusRequester() } }
     val updateFocus = remember { FocusRequester() }
     var usage by remember { mutableStateOf(CacheUsage(artworkBytes = 0, indexBytes = 0)) }
 
@@ -298,11 +310,8 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                                     .width(104.dp)
                                     .focusProperties {
                                         up = clearCacheFocus
-                                        down = if (container.updateController.enabled) {
-                                            updateFocus
-                                        } else {
-                                            FocusRequester.Cancel
-                                        }
+                                        // 下方是界面缩放行（新增），再往下才是更新按钮。
+                                        down = scaleFocuses.first()
                                         left = themeFocuses.getOrNull(index - 1)
                                             ?: FocusRequester.Cancel
                                         right = themeFocuses.getOrNull(index + 1)
@@ -312,6 +321,48 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                             )
                         }
                     }
+                }
+                SettingsDivider()
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("界面缩放", color = FnColors.Muted, fontSize = 12.sp)
+                    // 四个档位固定在单行（总宽约 437dp，最短的横屏也放得下），
+                    // 不换行意味着上下键不会跳格：上行接主题、下行接更新按钮。
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        UiScaleMode.entries.forEachIndexed { index, mode ->
+                            SettingsChoiceButton(
+                                label = uiScaleLabel(mode),
+                                selected = preferencesUiScale == mode,
+                                onClick = { container.appPreferences.setUiScale(mode) },
+                                modifier = Modifier
+                                    // 等分可用宽度并封顶 104dp：窄屏（手机开 1.5 倍）也不会把
+                                    // 第四个档位挤出边界，宽屏仍与主题行胶囊等宽。
+                                    .weight(1f, fill = false)
+                                    .widthIn(max = 104.dp)
+                                    .focusProperties {
+                                        up = themeFocuses.last()
+                                        down = if (container.updateController.enabled) {
+                                            updateFocus
+                                        } else {
+                                            FocusRequester.Cancel
+                                        }
+                                        left = scaleFocuses.getOrNull(index - 1)
+                                            ?: FocusRequester.Cancel
+                                        right = scaleFocuses.getOrNull(index + 1)
+                                            ?: FocusRequester.Cancel
+                                    }
+                                    .focusRequester(scaleFocuses[index]),
+                            )
+                        }
+                    }
+                    Text(
+                        "自动按屏幕密度选择：电视/手机 1 倍，1080P 车机 1.5 倍。车机建议「标准」。",
+                        color = FnColors.Muted,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                    )
                 }
             }
 
@@ -376,7 +427,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                                         .width(128.dp)
                                         .height(48.dp)
                                 .focusProperties {
-                                    up = themeFocuses.last()
+                                    up = scaleFocuses.last()
                                     down = FocusRequester.Cancel
                                     left = FocusRequester.Cancel
                                     right = FocusRequester.Cancel

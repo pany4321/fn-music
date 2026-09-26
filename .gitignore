@@ -32,3 +32,6 @@ Thumbs.db
 tool/update-publisher/
 SearchPlaybackDiagnosticTest.kt
 .trellis/tasks/
+
+# Local scratch (screenshots, adb dumps) never gets committed
+.trellis/tmp/

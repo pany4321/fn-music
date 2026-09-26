@@ -14,13 +14,15 @@ data class AdaptiveWindow(
     val horizontalMargin: Dp,
     val compact: Boolean,
     val shortHeight: Boolean,
+    /** 当前界面缩放倍数（1 倍为原始尺寸），封面据此选择更大的位图变体。 */
+    val uiScale: Float = 1f,
 )
 
 val LocalAdaptiveWindow = staticCompositionLocalOf {
     AdaptiveWindow(horizontalMargin = 64.dp, compact = false, shortHeight = false)
 }
 
-internal fun adaptiveWindowFor(maxWidth: Dp, maxHeight: Dp): AdaptiveWindow {
+internal fun adaptiveWindowFor(maxWidth: Dp, maxHeight: Dp, uiScale: Float = 1f): AdaptiveWindow {
     val horizontalMargin = when {
         maxWidth >= 880.dp -> 64.dp
         maxWidth >= 600.dp -> 40.dp
@@ -32,6 +34,7 @@ internal fun adaptiveWindowFor(maxWidth: Dp, maxHeight: Dp): AdaptiveWindow {
         // 16:9 TVs are 960x540dp; only shorter car viewports (e.g. 1920x720
         // at 1.5x density = 480dp tall) count as short.
         shortHeight = maxHeight < 520.dp,
+        uiScale = uiScale,
     )
 }
 

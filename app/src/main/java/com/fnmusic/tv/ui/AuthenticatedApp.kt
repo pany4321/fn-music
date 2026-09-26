@@ -540,7 +540,7 @@ private fun SegmentedLibraryTabs(
         modifier = Modifier
             .size(width = 170.dp, height = 54.dp)
             .background(FnColors.Container, containerShape)
-            .border(0.5.dp, Color.White.copy(alpha = 0.12f), containerShape)
+            .border(0.5.dp, FnColors.FrameBorder, containerShape)
             .padding(3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -742,17 +742,27 @@ private fun BrowseHome(
     val playlistsLoaded = playlistSnapshot.initialLoadCompleted
     val albums = albumState.snapshot.entries
     val favoriteTracks = favoritePreviewState.snapshot.entries
+    // “随机漫游”卡片：与其它卡片同一套拼排逻辑——启动时从曲库随机取
+    // 3 首歌曲的封面，运行期间保持不变，下次启动重新生成。
     val roamCoverState = retainedStore.list<FeatureArtworkItem>("covers:roam")
-    LaunchedEffect(albums, playlists) {
-        if ((albums.isNotEmpty() || playlists.isNotEmpty()) && !roamCoverState.snapshot.initialLoadCompleted) {
-            val deck = featureArtworkSlots(
-                primary = albums.map { FeatureArtworkItem(it.name, it.coverId) },
-                fallback = playlists.map { FeatureArtworkItem(it.name, it.coverId) },
-            )
-            if (deck.isNotEmpty()) roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
+    val roamArtwork = roamCoverState.snapshot.entries
+    LaunchedEffect(Unit) {
+        if (!roamCoverState.snapshot.initialLoadCompleted) {
+            retainedStore.scope.launch {
+                var deck = randomTrackDeck { container.musicRepository.randomTracks(16) }
+                if (deck.isEmpty()) {
+                    // 首启请求偶发失败：退回专辑/歌单封面，保证卡片不会是空的。
+                    deck = featureArtworkSlots(
+                        primary = albums.map { FeatureArtworkItem(it.name, it.coverId) },
+                        fallback = playlists.map { FeatureArtworkItem(it.name, it.coverId) },
+                    )
+                }
+                if (deck.isNotEmpty()) {
+                    roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
+                }
+            }
         }
     }
-    val roamArtwork = roamCoverState.snapshot.entries
     val favoriteCoverState = retainedStore.list<FeatureArtworkItem>("covers:favorites")
     LaunchedEffect(favoriteTracks) {
         if (favoriteTracks.isNotEmpty() && !favoriteCoverState.snapshot.initialLoadCompleted) {
@@ -781,15 +791,9 @@ private fun BrowseHome(
     LaunchedEffect(Unit) {
         if (!allPlaylistsDeckState.snapshot.initialLoadCompleted) {
             retainedStore.scope.launch {
-                runCatching { container.musicRepository.randomTracks(16) }.onSuccess { tracks ->
-                    val deck = tracks.asSequence()
-                        .mapNotNull { track -> track.coverId?.let { FeatureArtworkItem(track.title, it) } }
-                        .distinctBy { it.coverId }
-                        .take(3)
-                        .toList()
-                    if (deck.isNotEmpty()) {
-                        allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
-                    }
+                val deck = randomTrackDeck { container.musicRepository.randomTracks(16) }
+                if (deck.isNotEmpty()) {
+                    allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
                 }
             }
         }
@@ -1271,7 +1275,7 @@ private fun HomeFeatureCard(
         HomeArtworkKind.Recent -> Brush.horizontalGradient(listOf(FnColors.CardRecentStart, FnColors.CardRecentEnd))
         HomeArtworkKind.Collection,
         HomeArtworkKind.PlaylistGrid,
-        -> Brush.horizontalGradient(listOf(FnColors.InkOnWarning, FnColors.CardCollectionEnd))
+        -> Brush.horizontalGradient(listOf(FnColors.CardCollectionStart, FnColors.CardCollectionEnd))
     }
     Button(
         onClick = onClick,
@@ -1287,7 +1291,7 @@ private fun HomeFeatureCard(
             pressedContentColor = FnColors.Text,
         ),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.05f)), shape = shape),
+            border = Border(BorderStroke(0.5.dp, FnColors.CardBorder), shape = shape),
             focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
             pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
         ),
@@ -1345,7 +1349,7 @@ private fun FeatureCoverDeck(
                         shape = artworkShape
                         clip = true
                     }
-                    .border(0.5.dp, Color.White.copy(alpha = 0.22f), artworkShape),
+                    .border(0.5.dp, FnColors.FrameBorder, artworkShape),
             ) {
                 val coverId = item.coverId
                 if (coverId != null) {
@@ -1438,7 +1442,7 @@ private fun FeatureGlyph(kind: HomeArtworkKind, modifier: Modifier = Modifier) {
     Box(
         modifier
             .background(FnColors.ControlStrong.copy(alpha = 0.92f), CircleShape)
-            .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape),
+            .border(0.5.dp, FnColors.FrameBorder, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(25.dp)) {
@@ -1468,6 +1472,26 @@ private fun FeatureGlyph(kind: HomeArtworkKind, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 卡片封面：从曲库随机取最多 3 首歌曲的封面拼成叠层。
+ * 首次请求可能撞上刚登录后的会话预热而失败，失败重试一次。
+ */
+private suspend fun randomTrackDeck(fetch: suspend () -> List<Track>): List<FeatureArtworkItem> {
+    repeat(RANDOM_DECK_ATTEMPTS) { attempt ->
+        val deck = runCatching { fetch() }.getOrNull().orEmpty().asSequence()
+            .mapNotNull { track -> track.coverId?.let { FeatureArtworkItem(track.title, it) } }
+            .distinctBy { it.coverId }
+            .take(3)
+            .toList()
+        if (deck.isNotEmpty()) return deck
+        if (attempt < RANDOM_DECK_ATTEMPTS - 1) delay(RANDOM_DECK_RETRY_DELAY_MS)
+    }
+    return emptyList()
+}
+
+private const val RANDOM_DECK_ATTEMPTS = 2
+private const val RANDOM_DECK_RETRY_DELAY_MS = 700L
+
 @Composable
 private fun HomePlaylistLockup(
     title: String,
@@ -1478,32 +1502,34 @@ private fun HomePlaylistLockup(
     derivedCovers: List<String> = emptyList(),
     onClick: () -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
     Button(
         onClick = onClick,
-        modifier = modifier
-            .size(width = 190.dp, height = 174.dp)
-            .onFocusChanged { focused = it.isFocused },
+        modifier = modifier.size(width = 190.dp, height = 174.dp),
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.018f),
         colors = ButtonDefaults.colors(
-            containerColor = Color.Transparent,
+            containerColor = FnColors.Card,
             contentColor = FnColors.Text,
-            focusedContainerColor = Color.Transparent,
+            focusedContainerColor = FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
-            pressedContainerColor = Color.Transparent,
+            pressedContainerColor = FnColors.CardFocused,
             pressedContentColor = FnColors.Text,
+        ),
+        border = ButtonDefaults.border(
+            border = Border(BorderStroke(1.dp, FnColors.CardBorder), shape = shape),
+            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
+            pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
         ),
         contentPadding = PaddingValues(0.dp),
     ) {
         Column(Modifier.fillMaxSize()) {
+            // 封面顶到卡片上边（不缩小），文字行留 8dp 内边距。
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(120.dp)
-                    .then(if (focused) Modifier.border(1.5.dp, FnColors.Coral, shape) else Modifier)
-                    .clip(shape),
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)),
             ) {
                 PlaylistTileArtwork(
                     title = title,
@@ -1514,10 +1540,26 @@ private fun HomePlaylistLockup(
                     derivedCovers = derivedCovers,
                 )
             }
-            Spacer(Modifier.height(7.dp))
-            Text(title, fontSize = 18.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(3.dp))
-            Text(subtitle, color = FnColors.Muted, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                title,
+                fontSize = 18.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                subtitle,
+                color = FnColors.Muted,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
         }
     }
 }
@@ -1663,6 +1705,11 @@ private fun BrowseMy(
                 contentColor = FnColors.Muted,
                 focusedContainerColor = FnColors.CardFocused,
                 focusedContentColor = FnColors.Text,
+            ),
+            border = ButtonDefaults.border(
+                border = Border(BorderStroke(0.5.dp, FnColors.CardBorder)),
+                focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral)),
+                pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral)),
             ),
             contentPadding = PaddingValues(start = 20.dp),
         ) {
@@ -1883,7 +1930,7 @@ private fun ServerChip(serverName: String) {
         modifier = Modifier
             .width(132.dp)
             .height(18.dp)
-            .border(0.5.dp, Color.White.copy(alpha = 0.17f), shape)
+            .border(0.5.dp, FnColors.FrameBorder, shape)
             .padding(horizontal = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1924,7 +1971,7 @@ private fun ProfileActionButton(
             pressedContentColor = FnColors.Coral,
         ),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), shape = shape),
+            border = Border(BorderStroke(0.5.dp, FnColors.FrameBorder), shape = shape),
             focusedBorder = Border(BorderStroke(1.2.dp, FnColors.Coral), shape = shape),
             pressedBorder = Border(BorderStroke(1.2.dp, FnColors.Coral), shape = shape),
         ),
@@ -3291,10 +3338,10 @@ private fun DetailTrackCollection(
             }
         }
         Spacer(Modifier.height(18.dp))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(FnColors.Divider))
         if (showTrackList) {
             DetailTrackColumnHeader(withRemoveColumn = canRemoveTrack)
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.09f)))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(FnColors.Divider.copy(alpha = 0.7f)))
             LazyColumn(Modifier.weight(1f), state = listState) {
                 if (error != null) {
                     item { InlineError(error) }
@@ -3692,6 +3739,11 @@ private fun PlaylistTile(
             focusedContainerColor = FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
         ),
+        border = ButtonDefaults.border(
+            border = Border(BorderStroke(0.5.dp, FnColors.CardBorder), shape = cardShape),
+            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = cardShape),
+            pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = cardShape),
+        ),
         contentPadding = PaddingValues(0.dp),
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -3791,7 +3843,7 @@ private fun PlaylistCoverDeck(
                                 else -> 5f
                             }
                         }
-                        .border(0.5.dp, Color.White.copy(alpha = 0.22f), deckShape),
+                        .border(0.5.dp, FnColors.FrameBorder, deckShape),
                 ) {
                     RemoteArtwork(
                         container = container,
@@ -4332,18 +4384,19 @@ private fun GenreLockup(
 
 @Composable
 private fun lockupButtonColors() = ButtonDefaults.colors(
-    containerColor = Color.Transparent,
+    // 卡片底色：与首页三张功能卡、列表行同一套 token，聚焦时再提亮一档。
+    containerColor = FnColors.Card,
     contentColor = FnColors.Text,
     focusedContainerColor = FnColors.CardFocused,
     focusedContentColor = FnColors.Text,
     pressedContainerColor = FnColors.CardFocused,
     pressedContentColor = FnColors.Text,
-    disabledContainerColor = Color.Transparent,
+    disabledContainerColor = FnColors.Card,
 )
 
 @Composable
 private fun lockupButtonBorder(shape: Shape) = ButtonDefaults.border(
-    border = Border(BorderStroke(1.5.dp, Color.Transparent), shape = shape),
+    border = Border(BorderStroke(1.dp, FnColors.CardBorder), shape = shape),
     focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
     pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
 )
@@ -4489,6 +4542,12 @@ private fun CatalogRetryButton(
     }
 }
 
+/** 放大显示时用小图变体渲染会发虚，逐级升到更大的变体（Poster 为原始大图，保持不变）。 */
+private fun CoverVariant.largerOrSame(): CoverVariant = when (this) {
+    CoverVariant.Compact -> CoverVariant.Grid
+    else -> this
+}
+
 @Composable
 private fun RemoteArtwork(
     container: AuthenticatedAppDependencies,
@@ -4500,7 +4559,11 @@ private fun RemoteArtwork(
     contentScale: ContentScale = ContentScale.Fit,
     placeholderContent: (@Composable () -> Unit)? = null,
 ) {
-    val bitmap = rememberRemoteArtworkBitmap(container, coverId, variant, fallbackVariant)
+    // 放大显示时（车机 1.5 倍）请求更大的位图，避免封面被拉伸发虚。
+    val upscale = LocalAdaptiveWindow.current.uiScale >= 1.4f
+    val effectiveVariant = if (upscale) variant.largerOrSame() else variant
+    val effectiveFallback = if (upscale) fallbackVariant?.largerOrSame() else fallbackVariant
+    val bitmap = rememberRemoteArtworkBitmap(container, coverId, effectiveVariant, effectiveFallback)
     if (bitmap != null) {
         Image(bitmap.asImageBitmap(), null, modifier.clip(shape), contentScale = contentScale)
     } else {
@@ -5071,6 +5134,11 @@ private fun TrackResultRow(
             contentColor = FnColors.Text,
             focusedContainerColor = FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
+        ),
+        border = ButtonDefaults.border(
+            border = Border(BorderStroke(0.5.dp, FnColors.CardBorder)),
+            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral)),
+            pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral)),
         ),
         contentPadding = PaddingValues(0.dp),
     ) {

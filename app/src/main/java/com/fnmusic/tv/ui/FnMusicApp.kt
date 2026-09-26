@@ -63,6 +63,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -74,6 +75,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -90,6 +92,7 @@ import com.fnmusic.tv.core.data.server.ServerUrlNormalizer
 import com.fnmusic.tv.core.data.server.ServerUrlResult
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
+import com.fnmusic.tv.core.model.factor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -101,46 +104,58 @@ internal fun FnMusicApp(container: AppUiDependencies, onExitApplication: () -> U
     // 主题即时生效：偏好一改，FnColors 的可见状态随之更新，所有读取处立即换色。
     val theme by container.appPreferences.theme.collectAsStateWithLifecycle()
     LaunchedEffect(theme) { FnColors.applyTheme(themeColors(theme)) }
+    // 界面缩放：覆盖 LocalDensity 让所有 dp/sp 等比放大（车机 1.5 倍为标准档），
+    // 文字、卡片、按钮、返回键、歌词字号等一并生效，无需逐个元素调整。
+    val uiScaleMode by container.appPreferences.uiScale.collectAsStateWithLifecycle()
+    val baseDensity = LocalDensity.current
+    val uiScale = uiScaleMode.factor(baseDensity.density)
     FnMusicTheme {
-        BoxWithConstraints(Modifier.fillMaxSize().background(FnColors.Background)) {
-            CompositionLocalProvider(
-                LocalAdaptiveWindow provides adaptiveWindowFor(maxWidth, maxHeight),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        // Car head units expose cutouts and persistent system bars;
-                        // TVs report zero insets and render unchanged.
-                        .windowInsetsPadding(WindowInsets.safeDrawing),
+        CompositionLocalProvider(
+            LocalDensity provides Density(
+                density = baseDensity.density * uiScale,
+                fontScale = baseDensity.fontScale,
+            ),
+        ) {
+            BoxWithConstraints(Modifier.fillMaxSize().background(FnColors.Background)) {
+                CompositionLocalProvider(
+                    LocalAdaptiveWindow provides adaptiveWindowFor(maxWidth, maxHeight, uiScale),
                 ) {
-                    when (val current = session) {
-                        SessionState.Loading -> BrandLoading()
-                        is SessionState.Recovering -> SessionRecoveryScreen(
-                            state = current,
-                            onRetry = container.authenticatedActions::retrySessionRestore,
-                            onShowLogin = container.authenticatedActions::showLogin,
-                        )
-                        is SessionState.SignedOut -> {
-                            LoginScreen(
-                                savedServer = current.savedServer,
-                                recentServers = current.recentServers,
-                                loginHistory = current.loginHistory,
-                                initialSelectedProfileId = current.selectedProfileId,
-                                initialError = current.error,
-                                onLogin = { server, https, user, password, remember, accessCode ->
-                                    container.sessionRepository.login(server, https, user, password, remember, accessCode)
-                                },
-                                onHistoryLogin = container.sessionRepository::loginWithHistory,
-                                onHistoryDelete = container.sessionRepository::deleteLoginHistory,
-                                onHistoryClear = container.sessionRepository::clearLoginHistory,
-                                historyDraft = container.sessionRepository::loginDraft,
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            // Car head units expose cutouts and persistent system bars;
+                            // TVs report zero insets and render unchanged.
+                            .windowInsetsPadding(WindowInsets.safeDrawing),
+                    ) {
+                        when (val current = session) {
+                            SessionState.Loading -> BrandLoading()
+                            is SessionState.Recovering -> SessionRecoveryScreen(
+                                state = current,
+                                onRetry = container.authenticatedActions::retrySessionRestore,
+                                onShowLogin = container.authenticatedActions::showLogin,
                             )
+                            is SessionState.SignedOut -> {
+                                LoginScreen(
+                                    savedServer = current.savedServer,
+                                    recentServers = current.recentServers,
+                                    loginHistory = current.loginHistory,
+                                    initialSelectedProfileId = current.selectedProfileId,
+                                    initialError = current.error,
+                                    onLogin = { server, https, user, password, remember, accessCode ->
+                                        container.sessionRepository.login(server, https, user, password, remember, accessCode)
+                                    },
+                                    onHistoryLogin = container.sessionRepository::loginWithHistory,
+                                    onHistoryDelete = container.sessionRepository::deleteLoginHistory,
+                                    onHistoryClear = container.sessionRepository::clearLoginHistory,
+                                    historyDraft = container.sessionRepository::loginDraft,
+                                )
+                            }
+                            is SessionState.SignedIn -> {
+                                AuthenticatedApp(container, current, playback, onExitApplication)
+                            }
                         }
-                        is SessionState.SignedIn -> {
-                            AuthenticatedApp(container, current, playback, onExitApplication)
-                        }
+                        UpdateDialogHost(updateState, container.updateController)
                     }
-                    UpdateDialogHost(updateState, container.updateController)
                 }
             }
         }
