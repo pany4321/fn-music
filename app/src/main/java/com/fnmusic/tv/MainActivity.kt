@@ -10,7 +10,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.fnmusic.tv.ui.FnColors
 import com.fnmusic.tv.ui.FnMusicApp
+import com.fnmusic.tv.ui.themeColors
 import com.fnmusic.tv.update.UpdateEffect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -29,6 +31,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
         val container = appContainer
+        // 首帧前套用已保存主题，避免启动瞬间闪现默认配色。
+        runCatching { FnColors.applyTheme(themeColors(container.appPreferences.theme.value)) }
         setContent {
             FnMusicApp(container) { exitApplication(container) }
         }

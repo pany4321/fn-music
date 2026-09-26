@@ -539,7 +539,7 @@ private fun SegmentedLibraryTabs(
     Row(
         modifier = Modifier
             .size(width = 170.dp, height = 54.dp)
-            .background(Color(0xFF171B1D), containerShape)
+            .background(FnColors.Container, containerShape)
             .border(0.5.dp, Color.White.copy(alpha = 0.12f), containerShape)
             .padding(3.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -588,8 +588,8 @@ private fun LibraryTab(
         scale = ButtonDefaults.scale(focusedScale = 1.025f),
         colors = ButtonDefaults.colors(
             containerColor = if (selected) FnColors.Coral else Color.Transparent,
-            contentColor = if (selected) FnColors.Background else Color(0xFFADB0B6),
-            focusedContainerColor = if (selected) Color(0xFFFF866D) else FnColors.FocusFill,
+            contentColor = if (selected) FnColors.Background else FnColors.Muted,
+            focusedContainerColor = if (selected) FnColors.AccentBright else FnColors.FocusFill,
             focusedContentColor = if (selected) FnColors.Background else FnColors.Text,
             pressedContainerColor = FnColors.Coral,
             pressedContentColor = FnColors.Background,
@@ -626,15 +626,15 @@ internal fun NowPlayingPill(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.04f),
         colors = ButtonDefaults.colors(
-            containerColor = Color(0xFF232827),
+            containerColor = FnColors.PillBackground,
             contentColor = FnColors.Text,
-            focusedContainerColor = Color(0xFF343A38),
+            focusedContainerColor = FnColors.PillBackgroundFocused,
             focusedContentColor = FnColors.Text,
-            pressedContainerColor = Color(0xFF3B413F),
+            pressedContainerColor = FnColors.PillBackgroundPressed,
             pressedContentColor = FnColors.Text,
         ),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(0.5.dp, Color(0xFF454C49)), shape = shape),
+            border = Border(BorderStroke(0.5.dp, FnColors.PillBorder), shape = shape),
             focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
             pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
         ),
@@ -661,7 +661,7 @@ internal fun NowPlayingPill(
                     Spacer(Modifier.width(3.5.dp))
                     Text(
                         if (playback.isPlaying) "正在播放" else "已暂停",
-                        color = Color(0xFFB7BBB7),
+                        color = FnColors.Text,
                         fontSize = 9.sp,
                         lineHeight = 9.sp,
                         style = TextStyle(
@@ -688,7 +688,7 @@ internal fun NowPlayingPill(
                         Spacer(Modifier.width(4.5.dp))
                         Text(
                             playback.artist,
-                            color = Color(0xFFA7ABA7),
+                            color = FnColors.Muted,
                             fontSize = 9.sp,
                             lineHeight = 10.sp,
                             maxLines = 1,
@@ -699,7 +699,7 @@ internal fun NowPlayingPill(
                 }
             }
             Spacer(Modifier.width(5.dp))
-            Text("›", color = Color(0xFFC6C9C5), fontSize = 17.sp, lineHeight = 17.sp)
+            Text("›", color = FnColors.Muted, fontSize = 17.sp, lineHeight = 17.sp)
         }
     }
 }
@@ -707,7 +707,7 @@ internal fun NowPlayingPill(
 @Composable
 private fun NowPlayingArtworkFallback(title: String) {
     Box(
-        Modifier.size(27.dp).background(Color(0xFF31413D), CircleShape),
+        Modifier.size(27.dp).background(FnColors.CardCollectionEnd, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -1266,12 +1266,12 @@ private fun HomeFeatureCard(
 ) {
     val shape = RoundedCornerShape(8.dp)
     val background = when (kind) {
-        HomeArtworkKind.Roam -> Brush.horizontalGradient(listOf(Color(0xFF071D19), Color(0xFF102823)))
-        HomeArtworkKind.Favorites -> Brush.horizontalGradient(listOf(Color(0xFF1C1110), Color(0xFF2A1615)))
-        HomeArtworkKind.Recent -> Brush.horizontalGradient(listOf(Color(0xFF10151C), Color(0xFF1A2330)))
+        HomeArtworkKind.Roam -> Brush.horizontalGradient(listOf(FnColors.CardRoamStart, FnColors.CardRoamEnd))
+        HomeArtworkKind.Favorites -> Brush.horizontalGradient(listOf(FnColors.CardFavoritesStart, FnColors.CardFavoritesEnd))
+        HomeArtworkKind.Recent -> Brush.horizontalGradient(listOf(FnColors.CardRecentStart, FnColors.CardRecentEnd))
         HomeArtworkKind.Collection,
         HomeArtworkKind.PlaylistGrid,
-        -> Brush.horizontalGradient(listOf(Color(0xFF17201E), Color(0xFF22302D)))
+        -> Brush.horizontalGradient(listOf(FnColors.InkOnWarning, FnColors.CardCollectionEnd))
     }
     Button(
         onClick = onClick,
@@ -1361,7 +1361,7 @@ private fun FeatureCoverDeck(
                             Box(
                                 Modifier
                                     .fillMaxSize()
-                                    .background(Color(0xFF242927), artworkShape),
+                                    .background(FnColors.ArtworkPlaceholder, artworkShape),
                             )
                         },
                     )
@@ -1440,7 +1440,7 @@ private fun FeatureGlyph(kind: HomeArtworkKind, modifier: Modifier = Modifier) {
     }
     Box(
         modifier
-            .background(Color(0xFF0E1314).copy(alpha = 0.92f), CircleShape)
+            .background(FnColors.ControlStrong.copy(alpha = 0.92f), CircleShape)
             .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
@@ -1662,9 +1662,9 @@ private fun BrowseMy(
                 .then(if (focusedKey == "search") Modifier.focusRequester(contentFocus) else Modifier)
                 .onFocusChanged { if (it.isFocused) focusedKey = "search" },
             colors = ButtonDefaults.colors(
-                containerColor = Color(0xFF1B201F),
+                containerColor = FnColors.Card,
                 contentColor = FnColors.Muted,
-                focusedContainerColor = Color(0xFF303634),
+                focusedContainerColor = FnColors.CardFocused,
                 focusedContentColor = FnColors.Text,
             ),
             contentPadding = PaddingValues(start = 20.dp),
@@ -1864,7 +1864,7 @@ private fun ProfileAvatar(username: String, modifier: Modifier = Modifier) {
     Box(
         modifier.background(
             brush = Brush.linearGradient(
-                listOf(Color(0xFFFF8A70), Color(0xFFD6A35E), Color(0xFF70C8AF)),
+                listOf(FnArt.AvatarStart, FnArt.AvatarMid, FnArt.AvatarEnd),
             ),
             shape = CircleShape,
         ),
@@ -1890,11 +1890,11 @@ private fun ServerChip(serverName: String) {
             .padding(horizontal = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ProfileGlyphCanvas(ProfileGlyph.Server, Modifier.size(11.dp), Color(0xFF9FA5A8))
+        ProfileGlyphCanvas(ProfileGlyph.Server, Modifier.size(11.dp), FnColors.Muted)
         Spacer(Modifier.width(5.dp))
         Text(
             serverName.ifBlank { "NAS" },
-            color = Color(0xFFB7BBBE),
+            color = FnColors.Muted,
             fontSize = 10.sp,
             lineHeight = 11.sp,
             maxLines = 1,
@@ -1920,7 +1920,7 @@ private fun ProfileActionButton(
         scale = ButtonDefaults.scale(focusedScale = 1.035f),
         colors = ButtonDefaults.colors(
             containerColor = Color.Transparent,
-            contentColor = Color(0xFFC7CACC),
+            contentColor = FnColors.Muted,
             focusedContainerColor = FnColors.Coral.copy(alpha = 0.08f),
             focusedContentColor = FnColors.Coral,
             pressedContainerColor = FnColors.Coral.copy(alpha = 0.13f),
@@ -3579,7 +3579,7 @@ private fun DetailTrackRow(
                 ),
                 border = ButtonDefaults.border(
                     border = Border(
-                        BorderStroke(1.dp, Color(0xFF454B4D)),
+                        BorderStroke(1.dp, FnColors.Hairline),
                         shape = removeShape,
                     ),
                     focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = removeShape),
@@ -3690,9 +3690,9 @@ private fun PlaylistTile(
         ),
         scale = ButtonDefaults.scale(focusedScale = 1.025f),
         colors = ButtonDefaults.colors(
-            containerColor = Color(0xFF1B201F),
+            containerColor = FnColors.Card,
             contentColor = FnColors.Text,
-            focusedContainerColor = Color(0xFF303634),
+            focusedContainerColor = FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
         ),
         contentPadding = PaddingValues(0.dp),
@@ -3805,7 +3805,7 @@ private fun PlaylistCoverDeck(
                         shape = deckShape,
                         contentScale = ContentScale.Crop,
                         placeholderContent = {
-                            Box(Modifier.size(coverSize).background(Color(0xFF242927), deckShape))
+                            Box(Modifier.size(coverSize).background(FnColors.ArtworkPlaceholder, deckShape))
                         },
                     )
                 }
@@ -3825,10 +3825,10 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFF38393D),
-                        Color(0xFF0B0C0E),
-                        Color(0xFF27282C),
-                        Color(0xFF08090A),
+                        FnArt.VinylRing,
+                        FnArt.VinylBody,
+                        FnArt.VinylGroove,
+                        FnArt.VinylEdge,
                     ),
                     center = center,
                     radius = radius,
@@ -3845,14 +3845,14 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 )
             }
             drawCircle(label, radius * 0.24f, center)
-            drawCircle(Color(0xFFF8F2E7), radius * 0.055f, center)
+            drawCircle(FnArt.VinylLabelInk, radius * 0.055f, center)
         }
 
         when (kind) {
             HomeArtworkKind.Recent -> {
                 drawRect(
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFF101820), Color(0xFF1B2733)),
+                        colors = listOf(FnArt.ClockFaceStart, FnArt.ClockFaceEnd),
                         start = point(0.08f, 0f),
                         end = point(0.94f, 1f),
                     ),
@@ -3860,7 +3860,7 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 // Large clock face: rim, hands, center pin.
                 val clockCenter = point(0.66f, 0.5f)
                 val clockRadius = shortEdge * 0.34f
-                drawCircle(Color(0xFF0D1114).copy(alpha = 0.9f), clockRadius, clockCenter)
+                drawCircle(FnArt.ClockHand.copy(alpha = 0.9f), clockRadius, clockCenter)
                 drawCircle(
                     Color.White.copy(alpha = 0.16f),
                     clockRadius,
@@ -3896,7 +3896,7 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
             HomeArtworkKind.Roam -> {
                 drawRect(
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFEAE6DF), Color(0xFFC5CDCB)),
+                        colors = listOf(FnArt.HeadphoneStart, FnArt.HeadphoneEnd),
                         start = point(0.08f, 0f),
                         end = point(0.94f, 1f),
                     ),
@@ -3916,10 +3916,10 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 drawRoundRect(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFFFF4938),
+                            FnArt.WavePrimary,
                             FnColors.Coral,
-                            Color(0xFFEC477E),
-                            Color(0xFF7569D8),
+                            FnArt.WaveSecondary,
+                            FnArt.WaveTertiary,
                         ),
                         start = sleeveTopLeft,
                         end = sleeveTopLeft + androidx.compose.ui.geometry.Offset(sleeveEdge, sleeveEdge),
@@ -3944,7 +3944,7 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                     lineTo(sleeveTopLeft.x, sleeveTopLeft.y + sleeveEdge)
                     close()
                 }
-                drawPath(orangeWave, Color(0xFFFFA538).copy(alpha = 0.84f))
+                drawPath(orangeWave, FnArt.WaveGlow.copy(alpha = 0.84f))
                 drawRoundRect(
                     brush = Brush.linearGradient(
                         colors = listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
@@ -3961,10 +3961,10 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 drawRect(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFFFF304D),
-                            Color(0xFFFF563F),
-                            Color(0xFFFF9D37),
-                            Color(0xFFFFD45A),
+                            FnArt.HeartStart,
+                            FnArt.HeartMidStart,
+                            FnArt.HeartMidEnd,
+                            FnArt.HeartEnd,
                         ),
                         start = point(0.08f, 0.06f),
                         end = point(0.94f, 0.92f),
@@ -3972,7 +3972,7 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 )
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFD91442).copy(alpha = 0.72f), Color.Transparent),
+                        colors = listOf(FnArt.HeartShadow.copy(alpha = 0.72f), Color.Transparent),
                         center = point(0.20f, 0.20f),
                         radius = shortEdge * 0.78f,
                     ),
@@ -3981,7 +3981,7 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 )
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFFFDA70).copy(alpha = 0.65f), Color.Transparent),
+                        colors = listOf(FnArt.HeartGlow.copy(alpha = 0.65f), Color.Transparent),
                         center = point(0.89f, 0.89f),
                         radius = shortEdge * 0.62f,
                     ),
@@ -3994,24 +3994,24 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                     (size.height - heartSize.height) / 2f - shortEdge * 0.015f,
                 )
                 withTransform({ translate(heartOrigin.x + shortEdge * 0.035f, heartOrigin.y + shortEdge * 0.055f) }) {
-                    drawPath(heartPath(heartSize), Color(0xFF9E1731).copy(alpha = 0.18f))
+                    drawPath(heartPath(heartSize), FnArt.HeartVein.copy(alpha = 0.18f))
                 }
                 withTransform({ translate(heartOrigin.x, heartOrigin.y) }) {
-                    drawPath(heartPath(heartSize), Color(0xFFFFDDD8).copy(alpha = 0.78f))
+                    drawPath(heartPath(heartSize), FnColors.Text.copy(alpha = 0.78f))
                 }
             }
 
             HomeArtworkKind.Collection -> {
                 drawRect(
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFF124A3A), Color(0xFF267A60), FnColors.Teal),
+                        colors = listOf(FnArt.CelebrateStart, FnArt.CelebrateMid, FnColors.Teal),
                         start = point(0f, 0.10f),
                         end = point(1f, 0.90f),
                     ),
                 )
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFB4ECD7).copy(alpha = 0.30f), Color.Transparent),
+                        colors = listOf(FnColors.Teal.copy(alpha = 0.30f), Color.Transparent),
                         center = point(0.88f, 0.12f),
                         radius = shortEdge * 0.72f,
                     ),
@@ -4031,14 +4031,14 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                     cornerRadius = corner,
                 )
                 drawRoundRect(
-                    color = Color(0xFFE7C95D),
+                    color = FnArt.Star,
                     topLeft = point(0.12f, 0.13f),
                     size = androidx.compose.ui.geometry.Size(coverEdge, coverEdge),
                     cornerRadius = corner,
                 )
                 drawRoundRect(
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFF4EFE5), Color(0xFFD5E0DB)),
+                        colors = listOf(FnColors.Text, FnColors.Text),
                         start = point(0.19f, 0.17f),
                         end = point(0.53f, 0.84f),
                     ),
@@ -4053,7 +4053,7 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                     cornerRadius = corner,
                 )
                 drawRoundRect(
-                    color = Color(0xFF202528),
+                    color = FnArt.PlayBadge,
                     topLeft = point(0.35f, 0.24f),
                     size = androidx.compose.ui.geometry.Size(coverEdge * 0.14f, coverEdge * 0.62f),
                     cornerRadius = corner,
@@ -4071,19 +4071,19 @@ private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
                 drawRect(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFF2B1B3D),
-                            Color(0xFF173F4E),
-                            Color(0xFF4E2317),
-                            Color(0xFF1F3A2A),
+                            FnArt.GridTileStart,
+                            FnArt.GridTileSecond,
+                            FnArt.GridTileThird,
+                            FnArt.GridTileEnd,
                         ),
                         start = Offset(0f, 0f),
                         end = Offset(size.width, size.height),
                     ),
                 )
                 val tileColors = listOf(
-                    Color(0xFFF6C445),
-                    Color(0xFF4FC3F7),
-                    Color(0xFFBA68C8),
+                    FnArt.EqualizerStart,
+                    FnArt.EqualizerMid,
+                    FnArt.EqualizerEnd,
                 )
                 val tileEdge = size.height * 0.52f
                 tileColors.forEachIndexed { index, color ->
@@ -4165,7 +4165,7 @@ private fun ArtistAvatarPlaceholder(
     fontSize: TextUnit = 23.sp,
 ) {
     Box(
-        modifier.background(Color(0xFF2D4A46), CircleShape),
+        modifier.background(FnColors.Hairline, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -4278,13 +4278,13 @@ private fun GenreLockup(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.025f),
         colors = ButtonDefaults.colors(
-            containerColor = Color(0xFF171B1D),
+            containerColor = FnColors.Container,
             contentColor = FnColors.Text,
-            focusedContainerColor = Color(0xFF171B1D),
+            focusedContainerColor = FnColors.Container,
             focusedContentColor = FnColors.Text,
-            pressedContainerColor = Color(0xFF171B1D),
+            pressedContainerColor = FnColors.Container,
             pressedContentColor = FnColors.Text,
-            disabledContainerColor = Color(0xFF171B1D),
+            disabledContainerColor = FnColors.Container,
         ),
         border = lockupButtonBorder(shape),
         contentPadding = PaddingValues(0.dp),
@@ -4301,7 +4301,7 @@ private fun GenreLockup(
                     .matchParentSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color(0x14000000), Color(0xCC000000)),
+                            listOf(Color.Black.copy(alpha = 0.08f), Color.Black.copy(alpha = 0.80f)),
                         ),
                     ),
             )
@@ -4337,9 +4337,9 @@ private fun GenreLockup(
 private fun lockupButtonColors() = ButtonDefaults.colors(
     containerColor = Color.Transparent,
     contentColor = FnColors.Text,
-    focusedContainerColor = Color(0xFF303634),
+    focusedContainerColor = FnColors.CardFocused,
     focusedContentColor = FnColors.Text,
-    pressedContainerColor = Color(0xFF303634),
+    pressedContainerColor = FnColors.CardFocused,
     pressedContentColor = FnColors.Text,
     disabledContainerColor = Color.Transparent,
 )
@@ -4430,14 +4430,14 @@ private fun CatalogPageArrowButton(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.05f),
         colors = ButtonDefaults.colors(
-            containerColor = Color(0xFF171B1D),
-            contentColor = Color(0xFFB8BEC1),
+            containerColor = FnColors.Container,
+            contentColor = FnColors.Muted,
             focusedContainerColor = FnColors.Coral.copy(alpha = 0.09f),
             focusedContentColor = FnColors.Coral,
             pressedContainerColor = FnColors.Coral.copy(alpha = 0.14f),
             pressedContentColor = FnColors.Coral,
             disabledContainerColor = Color.Transparent,
-            disabledContentColor = Color(0xFF50575A),
+            disabledContentColor = FnColors.Muted,
         ),
         border = ButtonDefaults.border(
             border = Border(BorderStroke(1.5.dp, Color.Transparent), shape = shape),
@@ -4599,11 +4599,40 @@ private fun SearchRoute(
     var query by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var searched by rememberSaveable { mutableStateOf("") }
+    // 历史胶囊：直接搜索的请求（立即执行，不等防抖、不写回输入框）。
+    var searchRequest by remember { mutableStateOf<String?>(null) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var artists by remember { mutableStateOf<List<Artist>>(emptyList()) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     val fieldFocus = remember { FocusRequester() }
     val resultsFocus = remember { FocusRequester() }
+    val backFocus = remember { FocusRequester() }
+
+    suspend fun performSearch(term: String) {
+        if (term.isEmpty()) {
+            searched = ""
+            tracks = emptyList(); artists = emptyList(); albums = emptyList()
+            loading = false
+            return
+        }
+        searched = term
+        loading = true
+        try {
+            coroutineScope {
+                val t = async { runCatching { container.musicRepository.searchTracks(term) }.getOrNull() }
+                val a = async { runCatching { container.musicRepository.searchArtists(term) }.getOrNull() }
+                val al = async { runCatching { container.musicRepository.searchAlbums(term) }.getOrNull() }
+                tracks = t.await()?.items ?: emptyList()
+                artists = a.await()?.items ?: emptyList()
+                albums = al.await()?.items ?: emptyList()
+            }
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (_: Exception) {
+        } finally {
+            loading = false
+        }
+    }
     val clearHistoryFocus = remember { FocusRequester() }
     val historyChipFocuses = remember { List(5) { FocusRequester() } }
     // 最近搜索：设备级持久化、按账号隔离；点击搜索结果时记录（避免存入半截关键词）。
@@ -4619,31 +4648,16 @@ private fun SearchRoute(
     }
 
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    // 输入防抖：只在有关键词时搜索；清空输入框不抹掉已有结果
+    // （历史胶囊直搜时输入框保持为空，若因此触发空搜索会立刻清掉结果）。
     LaunchedEffect(query) {
+        if (query.isBlank()) return@LaunchedEffect
         kotlinx.coroutines.delay(500)
-        val q = query.trim()
-        if (q.isEmpty()) {
-            tracks = emptyList(); artists = emptyList(); albums = emptyList()
-            loading = false
-            return@LaunchedEffect
-        }
-        searched = q
-        loading = true
-        try {
-            coroutineScope {
-                val t = async { runCatching { container.musicRepository.searchTracks(q) }.getOrNull() }
-                val a = async { runCatching { container.musicRepository.searchArtists(q) }.getOrNull() }
-                val al = async { runCatching { container.musicRepository.searchAlbums(q) }.getOrNull() }
-                tracks = t.await()?.items ?: emptyList()
-                artists = a.await()?.items ?: emptyList()
-                albums = al.await()?.items ?: emptyList()
-            }
-        } catch (cause: CancellationException) {
-            throw cause
-        } catch (_: Exception) {
-        } finally {
-            loading = false
-        }
+        performSearch(query.trim())
+    }
+    // 历史胶囊：立即搜索（独立 effect，避免把自己的 key 重置成 null 而自我取消）。
+    LaunchedEffect(searchRequest) {
+        searchRequest?.let { performSearch(it.trim()) }
     }
 
     Column(
@@ -4653,7 +4667,17 @@ private fun SearchRoute(
             .padding(horizontal = 42.dp, vertical = 24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            DetailBackButton(onClick = onBack)
+            DetailBackButton(
+                modifier = Modifier
+                    .focusRequester(backFocus)
+                    .focusProperties {
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                        up = FocusRequester.Cancel
+                        down = fieldFocus
+                    },
+                onClick = onBack,
+            )
             Spacer(Modifier.width(16.dp))
             Text("搜索", fontSize = 40.sp, fontWeight = FontWeight.Bold)
         }
@@ -4673,8 +4697,8 @@ private fun SearchRoute(
                 return historyChipFocuses.getOrNull(slotIndex(row + 1, column.coerceAtMost(nextRow.lastIndex)))
                     ?: FocusRequester.Cancel
             }
-            // 最后一行向下：有结果去结果区，无结果取消。
-            return if (hasResults) resultsFocus else FocusRequester.Cancel
+            // 最后一行胶囊之下是“清空”，再往下才是结果区（不跳站）。
+            return clearHistoryFocus
         }
         fun chipUp(row: Int, column: Int): FocusRequester {
             if (row == 0) return fieldFocus
@@ -4702,11 +4726,28 @@ private fun SearchRoute(
                         FocusRequester.Cancel
                     }
                 }
+                // 单行输入框会吞掉上下方向键（Compose 文本字段内部处理），
+                // 这里显式接管：下→历史/结果，上→返回按钮，避免焦点被输入框困住。
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.DirectionDown -> {
+                            val target = if (hasHistory) historyChipFocuses.first() else resultsFocus
+                            runCatching { target.requestFocus() }
+                            true
+                        }
+                        Key.DirectionUp -> {
+                            runCatching { backFocus.requestFocus() }
+                            true
+                        }
+                        else -> false
+                    }
+                }
                 .onFocusChanged { state -> fieldFocused = state.isFocused }
-                .background(Color(0xFF1B201F), fieldShape)
+                .background(FnColors.Card, fieldShape)
                 .border(
                     if (fieldFocused) 1.5.dp else 0.5.dp,
-                    if (fieldFocused) FnColors.Coral else Color(0xFF454A50),
+                    if (fieldFocused) FnColors.Coral else FnColors.Hairline,
                     fieldShape,
                 )
                 .padding(horizontal = 20.dp),
@@ -4743,9 +4784,10 @@ private fun SearchRoute(
                                     down = chipDown(rowIndex, column)
                                 },
                             onClick = {
-                                query = item
+                                // 直接按历史项搜索：不填入输入框、不把焦点移回输入框
+                                // （否则会弹出输入法），焦点保持在当前胶囊上。
+                                searchRequest = item
                                 recordSearch(item)
-                                runCatching { fieldFocus.requestFocus() }
                             },
                         )
                     }
@@ -4761,13 +4803,14 @@ private fun SearchRoute(
                         .align(Alignment.CenterEnd)
                         .focusRequester(clearHistoryFocus)
                         .focusProperties {
-                            left = historyChipFocuses[slotIndex(1, 0)]
+                            // “清空”独占一行：左右取消，向上回到最后一行胶囊，向下进结果区。
+                            left = FocusRequester.Cancel
                             right = FocusRequester.Cancel
-                            up = if (historyRows.size > 1) {
-                                historyChipFocuses[slotIndex(0, 2)]
-                            } else {
-                                FocusRequester.Cancel
-                            }
+                            up = historyRows.lastOrNull()?.let { lastRow ->
+                                historyChipFocuses.getOrNull(
+                                    slotIndex(historyRows.lastIndex, 2.coerceAtMost(lastRow.lastIndex)),
+                                )
+                            } ?: fieldFocus
                             down = if (hasResults) resultsFocus else FocusRequester.Cancel
                         },
                     onClick = {
@@ -4789,7 +4832,8 @@ private fun SearchRoute(
         ) {
             when {
                 loading -> Text("正在搜索…", color = FnColors.Muted, fontSize = 16.sp)
-                query.isBlank() -> Text(
+                // 用实际搜索词判断，而不是输入框文本：历史胶囊直搜时输入框保持为空。
+                searched.isBlank() -> Text(
                     "按确认键呼出键盘输入，将同时匹配歌手、专辑和歌曲",
                     color = FnColors.Muted,
                     fontSize = 16.sp,
@@ -4957,12 +5001,20 @@ private fun SearchHistoryChip(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    // 遥控器聚焦时必须有可见反馈：与其它控件一致的强调色描边 + 聚焦底色。
+    var focused by remember { mutableStateOf(false) }
     Box(
         modifier
             .height(44.dp)
-            .background(Color(0xFF1B201F), RoundedCornerShape(22.dp))
-            .border(0.5.dp, Color(0xFF3A4145), RoundedCornerShape(22.dp))
-            .clickable(onClick = onClick),
+            .onFocusChanged { focused = it.isFocused }
+            .background(if (focused) FnColors.CardFocused else FnColors.Card, RoundedCornerShape(22.dp))
+            .border(
+                if (focused) 1.5.dp else 0.5.dp,
+                if (focused) FnColors.Coral else FnColors.Hairline,
+                RoundedCornerShape(22.dp),
+            )
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "搜索历史 $label" },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -4978,12 +5030,19 @@ private fun SearchHistoryChip(
 
 @Composable
 private fun SearchHistoryClearButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
     Box(
         modifier
-            .height(40.dp)
-            .background(Color(0xFF1B201F), RoundedCornerShape(20.dp))
-            .border(0.5.dp, Color(0xFF3A4145), RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick),
+            .height(44.dp)
+            .onFocusChanged { focused = it.isFocused }
+            .background(if (focused) FnColors.CardFocused else FnColors.Card, RoundedCornerShape(22.dp))
+            .border(
+                if (focused) 1.5.dp else 0.5.dp,
+                if (focused) FnColors.Coral else FnColors.Hairline,
+                RoundedCornerShape(22.dp),
+            )
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "清空搜索历史" },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -5011,9 +5070,9 @@ private fun TrackResultRow(
         onClick = onClick,
         modifier = modifier.fillMaxWidth().height(74.dp),
         colors = ButtonDefaults.colors(
-            containerColor = Color(0xFF1B201F),
+            containerColor = FnColors.Card,
             contentColor = FnColors.Text,
-            focusedContainerColor = Color(0xFF303634),
+            focusedContainerColor = FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
         ),
         contentPadding = PaddingValues(0.dp),

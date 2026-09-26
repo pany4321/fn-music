@@ -843,7 +843,7 @@ private fun TvTextField(
                     }
                 }
                 .background(FnColors.Surface, RoundedCornerShape(6.dp))
-                .border(if (focused) 3.dp else 1.dp, if (focused) FnColors.Coral else Color(0xFF454A50), RoundedCornerShape(6.dp)),
+                .border(if (focused) 3.dp else 1.dp, if (focused) FnColors.Coral else FnColors.Hairline, RoundedCornerShape(6.dp)),
             readOnly = !editing,
             textStyle = TextStyle(color = FnColors.Text, fontSize = 22.sp),
             cursorBrush = SolidColor(FnColors.Coral),
@@ -883,7 +883,7 @@ private fun LoginCheckbox(
             .background(FnColors.Surface, RoundedCornerShape(6.dp))
             .border(
                 if (focused) 3.dp else 1.dp,
-                if (focused) FnColors.Coral else Color(0xFF454A50),
+                if (focused) FnColors.Coral else FnColors.Hairline,
                 RoundedCornerShape(6.dp),
             )
             // 只挂 toggleable：它自带焦点与点击语义。再叠加 focusable() 会产生
@@ -904,7 +904,7 @@ private fun LoginCheckbox(
                 .border(2.dp, if (selected) FnColors.Warning else FnColors.Muted, RoundedCornerShape(3.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            if (selected) Text("✓", color = Color(0xFF17201E), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            if (selected) Text("✓", color = FnColors.InkOnWarning, fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
         Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
@@ -929,16 +929,16 @@ private fun LoginActionButton(
             }
             .background(
                 when {
-                    !enabled -> Color(0xFF292A2F)
-                    focused -> Color(0xFF4A464F)
+                    !enabled -> FnColors.Disabled
+                    focused -> FnColors.CardFocused
                     selected -> FnColors.FocusFill
-                    else -> Color(0xFF414047)
+                    else -> FnColors.CardFocused
                 },
                 shape,
             )
             .border(
                 width = if (focused) 3.dp else 1.dp,
-                color = if (focused) FnColors.Coral else Color(0xFF454A50),
+                color = if (focused) FnColors.Coral else FnColors.Hairline,
                 shape = shape,
             )
             .onPreviewKeyEvent { event ->

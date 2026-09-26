@@ -75,6 +75,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
@@ -549,7 +550,7 @@ internal fun ImmersivePlayer(
                 .align(Alignment.TopStart)
                 .padding(start = 20.dp, top = 14.dp)
                 .size(48.dp)
-                .background(Color(0xFF0E1314).copy(alpha = 0.72f), CircleShape)
+                .background(FnColors.ControlStrong.copy(alpha = 0.72f), CircleShape)
                 .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
@@ -1054,8 +1055,8 @@ private fun DiscArtwork(
         Box(Modifier.size(recordSize).graphicsLayer { rotationZ = rotation.value }, contentAlignment = Alignment.Center) {
             Canvas(Modifier.fillMaxSize()) {
                 val radius = minOf(this.size.width, this.size.height) / 2f
-                drawCircle(Color(0xFF101313), radius)
-                drawCircle(Color(0xFF242928), radius * 0.96f, style = Stroke(width = 3.dp.toPx()))
+                drawCircle(FnColors.ControlStrong, radius)
+                drawCircle(FnColors.ArtworkPlaceholder, radius * 0.96f, style = Stroke(width = 3.dp.toPx()))
                 for (ring in 1..14) {
                     val ringRadius = radius * (0.52f + ring * 0.029f)
                     drawCircle(Color.White.copy(alpha = if (ring % 3 == 0) 0.09f else 0.045f), ringRadius, style = Stroke(width = 1.dp.toPx()))
@@ -1080,21 +1081,21 @@ private fun DiscArtwork(
             } else {
                 PlayerArtworkPlaceholder(placeholder, placeholderAccent, Modifier.size(labelSize), CircleShape)
             }
-            Box(Modifier.size(14.dp).background(Color(0xFFCDD4D0), CircleShape))
+            Box(Modifier.size(14.dp).background(FnColors.Text, CircleShape))
         }
         Canvas(Modifier.fillMaxSize()) {
             val pivot = androidx.compose.ui.geometry.Offset(this.size.width * 0.68f, this.size.height * 0.12f)
             val elbow = androidx.compose.ui.geometry.Offset(this.size.width * 0.72f, this.size.height * 0.35f)
             val needle = androidx.compose.ui.geometry.Offset(this.size.width * 0.82f, this.size.height * 0.46f)
-            drawCircle(Color(0xFF252B2A), 15.dp.toPx(), pivot)
-            drawCircle(Color(0xFFE5E8E3), 9.dp.toPx(), pivot)
+            drawCircle(FnColors.CardFocused, 15.dp.toPx(), pivot)
+            drawCircle(FnColors.Text, 9.dp.toPx(), pivot)
             val arm = Path().apply {
                 moveTo(pivot.x, pivot.y)
                 lineTo(elbow.x, elbow.y)
                 lineTo(needle.x, needle.y)
             }
-            drawPath(arm, Color(0xFFD9DDD8), style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round))
-            drawLine(Color(0xFF8CA39E), needle, needle + androidx.compose.ui.geometry.Offset(12.dp.toPx(), 7.dp.toPx()), 7.dp.toPx(), StrokeCap.Round)
+            drawPath(arm, FnColors.Text, style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round))
+            drawLine(FnColors.Muted, needle, needle + androidx.compose.ui.geometry.Offset(12.dp.toPx(), 7.dp.toPx()), 7.dp.toPx(), StrokeCap.Round)
         }
     }
 }
@@ -1293,7 +1294,7 @@ internal fun PlaybackQueueOverlay(
         Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures { onClose() } })
         Column(
             Modifier.fillMaxHeight().fillMaxWidth(0.43f).align(Alignment.CenterEnd)
-                .background(Color(0xF3121717))
+                .background(FnColors.Panel.copy(alpha = 0.95f))
                 .pointerInput(Unit) { detectTapGestures { } }
                 .padding(horizontal = 24.dp, vertical = 28.dp),
         ) {
@@ -1482,8 +1483,8 @@ private fun QueueCloseButton(onClose: () -> Unit) {
         Modifier
             .size(44.dp)
             .clip(CircleShape)
-            .background(if (focused) FnColors.Coral else Color(0xFF1E2426))
-            .border(1.dp, if (focused) FnColors.Coral else Color(0xFF454B4D), CircleShape)
+            .background(if (focused) FnColors.Coral else FnColors.PillBackground)
+            .border(1.dp, if (focused) FnColors.Coral else FnColors.Hairline, CircleShape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClose)
             .semantics { contentDescription = "关闭当前播放列表" },
@@ -1557,8 +1558,8 @@ internal fun PlayerControlOverlay(
             .background(
                 Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.38f to Color(0x2B090D0C),
-                    1f to Color(0xA3090D0C),
+                    0.38f to Color.Black.copy(alpha = 0.17f),
+                    1f to Color.Black.copy(alpha = 0.64f),
                 ),
             )
             .padding(start = 47.dp, top = 8.dp, end = 47.dp, bottom = 8.dp),
@@ -1785,16 +1786,16 @@ private fun PlayerSideActionButton(
                 },
             scale = ButtonDefaults.scale(focusedScale = 1.1f),
             colors = ButtonDefaults.colors(
-                containerColor = if (emphasized) Color(0x66382A27) else Color.Transparent,
+                containerColor = if (emphasized) FnColors.AccentSoft else Color.Transparent,
                 contentColor = when {
-                    selected -> Color(0xFFFF3B4D)
-                    emphasized -> Color(0xFFF0D9D1)
+                    selected -> FnColors.Danger
+                    emphasized -> lerp(FnColors.Text, FnColors.Coral, 0.25f)
                     else -> FnColors.Text
                 },
-                focusedContainerColor = if (selected) Color(0xFFF8F3EE) else FnColors.Coral,
-                focusedContentColor = if (selected) Color(0xFFFF3B4D) else FnColors.Background,
-                pressedContainerColor = if (selected) Color(0xFFEDE7E2) else FnColors.Coral,
-                pressedContentColor = if (selected) Color(0xFFFF3B4D) else FnColors.Background,
+                focusedContainerColor = if (selected) FnColors.Text else FnColors.Coral,
+                focusedContentColor = if (selected) FnColors.Danger else FnColors.Background,
+                pressedContainerColor = if (selected) FnColors.Text else FnColors.Coral,
+                pressedContentColor = if (selected) FnColors.Danger else FnColors.Background,
             ),
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -2110,7 +2111,7 @@ internal fun artworkAmbienceColor(swatches: List<ArtworkPaletteSwatch>): Color {
     )
 }
 
-internal fun fallbackAmbienceColor(): Color = Color(0xFF29312F)
+internal fun fallbackAmbienceColor(): Color = lerp(FnColors.Background, FnColors.Teal, 0.18f)
 
 private const val POSTER_EDGE_MAX_INFLUENCE = 0.35f
 private const val POSTER_EDGE_DISTANCE_LIMIT = 0.18f
@@ -2462,9 +2463,9 @@ private fun AddToPlaylistDialog(
                                     }
                                 ),
                             colors = ButtonDefaults.colors(
-                                containerColor = Color(0xFF1B201F),
+                                containerColor = FnColors.Card,
                                 contentColor = FnColors.Text,
-                                focusedContainerColor = Color(0xFF303634),
+                                focusedContainerColor = FnColors.CardFocused,
                                 focusedContentColor = FnColors.Text,
                             ),
                             contentPadding = PaddingValues(0.dp),

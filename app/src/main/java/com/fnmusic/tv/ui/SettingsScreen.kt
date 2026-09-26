@@ -62,10 +62,11 @@ import com.fnmusic.tv.update.UpdateUiState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 
-private val SettingsPanel = Color(0xFF151A19)
-private val SettingsControl = Color(0xFF292D31)
-private val SettingsDividerColor = Color(0xFF2A302F)
-private val SettingsBorderColor = Color(0xFF303735)
+// 面板/控件配色改为主题 token（默认主题下与原硬编码值一致，其它主题随主题变化）。
+private val SettingsPanel: Color get() = FnColors.Panel
+private val SettingsControl: Color get() = FnColors.Control
+private val SettingsDividerColor: Color get() = FnColors.Divider
+private val SettingsBorderColor: Color get() = FnColors.PanelBorder
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -105,14 +106,14 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                 .align(Alignment.TopEnd)
                 .offset(x = 84.dp, y = (-132).dp)
                 .size(280.dp)
-                .background(Color(0xFF141719), CircleShape),
+                .background(FnColors.DecorA, CircleShape),
         )
         Box(
             Modifier
                 .align(Alignment.BottomEnd)
                 .offset(x = 70.dp, y = 104.dp)
                 .size(230.dp)
-                .background(Color(0xFF131617), CircleShape),
+                .background(FnColors.DecorB, CircleShape),
         )
 
         Column(
@@ -236,11 +237,8 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                                         .width(104.dp)
                                         .focusProperties {
                                             up = onlineLyricsFocus
-                                            down = if (container.updateController.enabled) {
-                                                updateFocus
-                                            } else {
-                                                FocusRequester.Cancel
-                                            }
+                                            // 下方是主题行（新增），不能再跳过它直达更新按钮。
+                                            down = themeFocuses.first()
                                             left = cacheFocuses.getOrNull(index - 1)
                                                 ?: FocusRequester.Cancel
                                             right = cacheFocuses.getOrNull(index + 1)
@@ -449,16 +447,16 @@ private fun SettingsChoiceButton(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.025f),
         colors = ButtonDefaults.colors(
-            containerColor = if (selected) Color(0xFF4B3936) else SettingsControl,
+            containerColor = if (selected) FnColors.AccentSoft else SettingsControl,
             contentColor = FnColors.Text,
-            focusedContainerColor = if (selected) Color(0xFF513B37) else FnColors.FocusFill,
+            focusedContainerColor = if (selected) FnColors.AccentSoftFocused else FnColors.FocusFill,
             focusedContentColor = FnColors.Text,
             pressedContainerColor = FnColors.FocusFill,
             pressedContentColor = FnColors.Text,
         ),
         border = ButtonDefaults.border(
             border = Border(
-                BorderStroke(if (selected) 1.5.dp else 0.5.dp, if (selected) FnColors.Coral else Color(0xFF454B4D)),
+                BorderStroke(if (selected) 1.5.dp else 0.5.dp, if (selected) FnColors.Coral else FnColors.Hairline),
                 shape = shape,
             ),
             focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
@@ -494,11 +492,11 @@ private fun SettingsActionButton(
             focusedContentColor = FnColors.Text,
             pressedContainerColor = FnColors.Coral,
             pressedContentColor = FnColors.Text,
-            disabledContainerColor = Color(0xFF24282B),
+            disabledContainerColor = FnColors.Disabled,
             disabledContentColor = FnColors.Muted,
         ),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(0.5.dp, Color(0xFF454B4D)), shape = shape),
+            border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = shape),
             focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
             pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
         ),
@@ -529,7 +527,7 @@ internal fun SettingsCheckbox(
             .background(SettingsControl, RoundedCornerShape(5.dp))
             .border(
                 if (focused) 1.5.dp else 0.5.dp,
-                if (focused) FnColors.Coral else Color(0xFF454B4D),
+                if (focused) FnColors.Coral else FnColors.Hairline,
                 RoundedCornerShape(5.dp),
             )
             .toggleable(
@@ -550,7 +548,7 @@ internal fun SettingsCheckbox(
             contentAlignment = Alignment.Center,
         ) {
             if (selected) {
-                Text("✓", color = Color(0xFF17201E), fontSize = 12.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold)
+                Text("✓", color = FnColors.InkOnWarning, fontSize = 12.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
         Text(label, fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
