@@ -498,10 +498,11 @@ private fun SettingsChoiceButton(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.025f),
         colors = ButtonDefaults.colors(
-            containerColor = if (selected) FnColors.AccentSoft else SettingsControl,
+            // 选中 = 主色底 + 主色描边 + 加粗；未选中 = 不填色 + 亮细线（与设置页
+            // 其它按钮同一风格）；主色只用在“选中”上，未选中项聚焦时只做中性提亮，
+            // 否则未选中项一旦聚焦反而比选中项更抢眼。
+            containerColor = if (selected) FnColors.AccentSoft else Color.Transparent,
             contentColor = FnColors.Text,
-            // 焦点只用中性提亮 + 主色描边表示：未选中项若也填主色调，
-            // 看起来会比“选中项”更亮，导致分不清哪个是当前选项。
             focusedContainerColor = if (selected) FnColors.AccentSoftFocused else FnColors.CardFocused,
             focusedContentColor = FnColors.Text,
             pressedContainerColor = if (selected) FnColors.AccentSoftFocused else FnColors.CardFocused,
@@ -509,11 +510,11 @@ private fun SettingsChoiceButton(
         ),
         border = ButtonDefaults.border(
             border = Border(
-                BorderStroke(if (selected) 1.5.dp else 0.5.dp, if (selected) FnColors.Coral else FnColors.Hairline),
+                BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) FnColors.Coral else FnColors.Hairline),
                 shape = shape,
             ),
-            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
-            pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = shape),
+            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Muted), shape = shape),
+            pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Muted), shape = shape),
         ),
         contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp),
     ) {
