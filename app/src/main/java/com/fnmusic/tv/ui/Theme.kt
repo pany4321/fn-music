@@ -441,7 +441,8 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val text = Color(0xFFF2F4F8)
         val muted = Color(0xFFA5AEBB)
         val accent = Color(0xFF5B9BF5)
-        val secondary = Color(0xFF55C5A5)
+        // 副色必须与其它主题不同：漫游等图标用副色，若与默认主题同值会看不出变化。
+        val secondary = Color(0xFF9CC7F0)
         val warning = Color(0xFFE8C36A)
         val card = Color(0xFF181E26)
         val cardFocused = Color(0xFF2C3644)

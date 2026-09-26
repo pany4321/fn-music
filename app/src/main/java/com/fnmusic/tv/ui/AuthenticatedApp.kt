@@ -1433,11 +1433,8 @@ private data class DeckPlacement(
 
 @Composable
 private fun FeatureGlyph(kind: HomeArtworkKind, modifier: Modifier = Modifier) {
-    val accent = when (kind) {
-        HomeArtworkKind.Roam -> FnColors.Teal
-        HomeArtworkKind.Recent -> FnColors.Warning
-        else -> FnColors.Coral
-    }
+    // 三个卡片图标统一使用主题主色，保证随主题一致变化。
+    val accent = FnColors.Coral
     Box(
         modifier
             .background(FnColors.ControlStrong.copy(alpha = 0.92f), CircleShape)
