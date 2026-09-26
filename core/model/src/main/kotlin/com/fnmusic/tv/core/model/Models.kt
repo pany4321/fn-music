@@ -106,7 +106,7 @@ data class RoamWindow(val previous: RoamNode?, val current: RoamNode, val next: 
 enum class PlayerStyle { Cover, Poster }
 
 /** 界面配色主题（设备级偏好）。 */
-enum class AppTheme { CoralNight, Jade, ForestGreen, Violet, SakuraPink, GraphiteBlue }
+enum class AppTheme { CoralNight, Jade, ForestGreen, Violet, SakuraPink, GraphiteBlue, Ink, Mocha }
 
 /** 界面缩放档位：自动按设备密度判定，其余为固定倍数（车机以 1.5 倍为标准）。 */
 enum class UiScaleMode { Auto, Standard, Large, Larger }

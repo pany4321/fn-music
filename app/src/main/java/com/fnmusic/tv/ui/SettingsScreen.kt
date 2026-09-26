@@ -500,7 +500,7 @@ private fun SettingsChoiceButton(
         colors = ButtonDefaults.colors(
             // 与设置页其它控件同一套描边策略：
             //   未聚焦 = 控件底 + 0.5dp 亮细线（无论是否选中）
-            //   聚焦   = 提亮底 + 1.5dp 亮线；胶囊的主色只用来表示“选中”，
+            //   聚焦   = 提亮底 + 同样粗细的亮线（未选中不加粗）；胶囊的主色只用来表示“选中”，
             //            所以未选中项聚焦时不用主色描边（否则比选中项还抢眼）
             //   选中   = 主色底 + 1.5dp 主色线 + 加粗
             containerColor = if (selected) FnColors.AccentSoft else SettingsControl,
@@ -515,12 +515,14 @@ private fun SettingsChoiceButton(
                 BorderStroke(if (selected) 1.5.dp else 0.5.dp, if (selected) FnColors.Coral else FnColors.Hairline),
                 shape = shape,
             ),
+            // 未选中项聚焦时线宽保持与其它按钮一致的 0.5dp（只把线调亮 + 底色提亮），
+            // 线加粗会显得比旁边的按钮“更粗一档”。
             focusedBorder = Border(
-                BorderStroke(1.5.dp, if (selected) FnColors.Coral else FnColors.Muted),
+                BorderStroke(if (selected) 1.5.dp else 0.5.dp, if (selected) FnColors.Coral else FnColors.Muted),
                 shape = shape,
             ),
             pressedBorder = Border(
-                BorderStroke(1.5.dp, if (selected) FnColors.Coral else FnColors.Muted),
+                BorderStroke(if (selected) 1.5.dp else 0.5.dp, if (selected) FnColors.Coral else FnColors.Muted),
                 shape = shape,
             ),
         ),

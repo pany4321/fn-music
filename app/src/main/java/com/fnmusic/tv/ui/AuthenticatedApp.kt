@@ -896,6 +896,42 @@ private fun BrowseHome(
             }
         }
     }
+    // 启动预热：首屏各行的数据一到位，就先把封面图取回缓存（并发由缓存自己限流），
+    // 卡片真正绘制时直接命中内存/磁盘缓存，不再等网络。顺序按“从上到下”的可见优先级排。
+    LaunchedEffect(
+        roamArtwork,
+        favoriteArtwork,
+        recentArtwork,
+        allPlaylistsDeckCovers,
+        playlists,
+        playlistCovers,
+        randomAlbums,
+        randomSongs,
+        recentlyAdded,
+    ) {
+        val gridCovers = buildList {
+            addAll(roamArtwork.mapNotNull { it.coverId })
+            addAll(favoriteArtwork.mapNotNull { it.coverId })
+            addAll(recentArtwork.mapNotNull { it.coverId })
+            addAll(allPlaylistsDeckCovers)
+            playlists.take(12).forEach { playlist ->
+                playlist.coverId?.let(::add)
+                // 歌单拼排封面（3 张组合）也一并预热。
+                addAll(playlistCovers[playlist.guid.value].orEmpty())
+            }
+        }
+        val thumbCovers = buildList {
+            randomAlbums.take(12).forEach { album -> album.coverId?.let(::add) }
+            randomSongs.take(12).forEach { track -> track.coverId?.let(::add) }
+            recentlyAdded.take(12).forEach { track -> track.coverId?.let(::add) }
+        }
+        gridCovers.filter(String::isNotBlank).distinct().take(HOME_PREFETCH_LIMIT).forEach { coverId ->
+            container.artworkBitmapCache.prefetch(coverId, CoverVariant.Grid)
+        }
+        thumbCovers.filter(String::isNotBlank).distinct().take(HOME_PREFETCH_LIMIT).forEach { coverId ->
+            container.artworkBitmapCache.prefetch(coverId, CoverVariant.Compact)
+        }
+    }
     var actionError by remember { mutableStateOf<AppError?>(null) }
     var roamActionRunning by remember { mutableStateOf(false) }
     var focusedKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1515,6 +1551,7 @@ private const val RANDOM_DECK_ATTEMPTS = 2
 private const val RANDOM_DECK_RETRY_DELAY_MS = 700L
 
 /** 卡片叠层封面在偏好里的键：随机漫游 / 全部歌单各存一组，供下次启动秒出。 */
+private const val HOME_PREFETCH_LIMIT = 48
 private const val ROAM_DECK_KEY = "roam"
 private const val ALL_PLAYLISTS_DECK_KEY = "all-playlists"
 
