@@ -749,7 +749,7 @@ private fun BrowseHome(
     LaunchedEffect(Unit) {
         if (!roamCoverState.snapshot.initialLoadCompleted) {
             retainedStore.scope.launch {
-                var deck = randomTrackDeck { container.musicRepository.randomTracks(16) }
+                var deck = randomTrackDeck { container.musicRepository.randomTrackSample(24) }
                 if (deck.isEmpty()) {
                     // 首启请求偶发失败：退回专辑/歌单封面，保证卡片不会是空的。
                     deck = featureArtworkSlots(
@@ -791,7 +791,7 @@ private fun BrowseHome(
     LaunchedEffect(Unit) {
         if (!allPlaylistsDeckState.snapshot.initialLoadCompleted) {
             retainedStore.scope.launch {
-                val deck = randomTrackDeck { container.musicRepository.randomTracks(16) }
+                val deck = randomTrackDeck { container.musicRepository.randomTrackSample(24) }
                 if (deck.isNotEmpty()) {
                     allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
                 }
@@ -808,7 +808,7 @@ private fun BrowseHome(
         if (randomAlbumsLoading) return
         randomAlbumsLoading = true
         retainedStore.scope.launch {
-            runCatching { container.musicRepository.randomAlbums(16) }
+            runCatching { container.musicRepository.randomAlbumSample(24) }
                 .onSuccess { randomAlbumState.snapshot = retainLoadedList(randomAlbumState.snapshot, it) }
             randomAlbumsLoading = false
         }
@@ -821,7 +821,7 @@ private fun BrowseHome(
         if (randomSongsLoading) return
         randomSongsLoading = true
         randomSongScope.launch {
-            runCatching { container.musicRepository.randomTracks(16) }
+            runCatching { container.musicRepository.randomTrackSample(24) }
                 .onSuccess { randomSongState.snapshot = retainLoadedList(randomSongState.snapshot, it) }
             randomSongsLoading = false
         }
@@ -2141,6 +2141,7 @@ private fun BandLockup(entry: BandEntry, modifier: Modifier = Modifier) {
         BandKind.Genre -> GenreLockup(
             entry.title,
             entry.subtitle,
+            entry.coverId,
             modifier = modifier,
             enabled = entry.action != null,
         ) { entry.action?.invoke() }
@@ -4310,7 +4311,57 @@ private fun LockupLabels(title: String, subtitle: String, modifier: Modifier = M
     }
 }
 
-/** 风格卡片：均衡器渐变背景铺满整卡，左下角标题，选中态与其它卡片一致。 */
+/**
+ * 风格卡片：与专辑/歌手卡片同一种展示格式——左侧封面缩略图（无封面时用均衡器插画占位），
+ * 右侧标题与副标题，卡片底色/描边/聚焦态与其它目录卡片一致。
+ */
+@Composable
+private fun GenreLockup(
+    title: String,
+    subtitle: String,
+    coverId: String?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val container = LocalAuthenticatedDependencies.current
+    val shape = RoundedCornerShape(8.dp)
+    val artworkShape = RoundedCornerShape(4.dp)
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+        modifier = modifier.size(width = 165.dp, height = 95.dp),
+        shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
+        scale = ButtonDefaults.scale(focusedScale = 1.025f),
+        colors = lockupButtonColors(),
+        border = lockupButtonBorder(shape),
+        contentPadding = PaddingValues(7.dp),
+    ) {
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(73.dp)) {
+                Image(
+                    painter = painterResource(R.drawable.bg_genre_equalizer),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize().clip(artworkShape),
+                )
+                if (coverId != null) {
+                    RemoteArtwork(
+                        container = container,
+                        coverId = coverId,
+                        variant = CoverVariant.Compact,
+                        fallbackVariant = CoverVariant.Grid,
+                        modifier = Modifier.matchParentSize(),
+                        shape = artworkShape,
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+            }
+            Spacer(Modifier.width(9.dp))
+            LockupLabels(title, subtitle, Modifier.weight(1f))
+        }
+    }
+}
 @Composable
 private fun GenreLockup(
     title: String,
@@ -4640,6 +4691,7 @@ private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, 
         GenreLockup(
             title = genre.name,
             subtitle = (genre.trackCount ?: 0).toString() + " 首歌曲",
+            coverId = genre.coverId,
             modifier = modifier,
             onClick = { onGenre(genre) },
         )

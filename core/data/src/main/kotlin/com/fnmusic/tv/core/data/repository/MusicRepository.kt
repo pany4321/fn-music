@@ -59,6 +59,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlin.random.Random
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 private const val MAX_ARTWORK_DOWNLOAD_BYTES = 20 * 1024 * 1024
 private const val MAX_ARTWORK_EDGE = 8_192
@@ -216,6 +219,7 @@ class MusicRepository internal constructor(
     private val _playlistCovers = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     val playlistCovers: StateFlow<Map<String, List<String>>> = _playlistCovers.asStateFlow()
     private val playlistCoverFetchInFlight = mutableSetOf<String>()
+    private val playlistCoverSemaphore = Semaphore(PLAYLIST_COVER_PARALLELISM)
     private val artworkCache = ArtworkCache(
         root = context.cacheDir.resolve("artwork"),
         memoryCapacityBytes = ARTWORK_MEMORY_CAPACITY_BYTES,
@@ -256,7 +260,10 @@ class MusicRepository internal constructor(
             playlistCoverFetchInFlight += guid
         }
         val covers = try {
-            session.authenticated { it.playlistTracks(guid, page = 1, size = 50) }
+            // 首页/歌单页会为每个歌单各拉一次候选封面；不限制并发时十几二十个请求
+            // 同时打向 NAS，把首页首屏一起拖慢。这里串行化到固定并发数。
+            playlistCoverSemaphore.withPermit {
+            session.authenticated { it.playlistTracks(guid, page = 1, size = COVER_CANDIDATE_PAGE_SIZE) }
                 .list
                 .asSequence()
                 .mapNotNull { track -> track.coverId?.trim()?.takeIf(String::isNotEmpty) }
@@ -264,6 +271,7 @@ class MusicRepository internal constructor(
                 .shuffled()
                 .take(size)
                 .toList()
+            }
         } catch (cause: CancellationException) {
             synchronized(playlistCoverFetchInFlight) { playlistCoverFetchInFlight -= guid }
             throw cause
@@ -304,20 +312,6 @@ class MusicRepository internal constructor(
      * the total, then each album comes from a randomly picked server page so the
      * set changes on every call.
      */
-    suspend fun randomAlbums(count: Int = 12): List<Album> {
-        val probe = albums(page = 1, size = 1)
-        val total = probe.total ?: return probe.items.shuffled()
-        if (total <= count) {
-            return albums(page = 1, size = count).items.shuffled().take(count)
-        }
-        val lastPage = (total + count - 1) / count
-        val pages = (1..lastPage).shuffled().take(count)
-        val collected = coroutineScope {
-            pages.map { page -> async { albums(page = page, size = count).items } }.awaitAll().flatten()
-        }
-        return collected.shuffled().take(count)
-    }
-
     suspend fun albums(page: Int, size: Int = 50) = cachedPage<AlbumDto, Album>(
         sourceKey = sizedPageSourceKey("albums", size),
         page = page,
@@ -343,23 +337,28 @@ class MusicRepository internal constructor(
         fetch = { session.authenticated { it.allTracks(page, size) } },
     ) { it.toDomain() }.also(::observeFavoriteTracks)
 
+    /** 卡片封面用的轻量随机采样：探测总数后只随机取一页（共 2 次请求）。 */
+    suspend fun randomAlbumSample(size: Int = 24): List<Album> {
+        val pageSize = size.coerceAtLeast(1)
+        val probe = albums(page = 1, size = 1)
+        val total = probe.total ?: return probe.items
+        if (total <= pageSize) return albums(page = 1, size = pageSize).items
+        val lastPage = (total + pageSize - 1) / pageSize
+        return albums(page = Random.nextInt(1, lastPage + 1), size = pageSize).items
+    }
+
     /**
-     * Up to [count] tracks sampled across the whole library: one probe call reads
-     * the total, then each track comes from a randomly picked server page so the
-     * set changes on every call.
+     * 卡片封面用的轻量随机采样：探测总数后只随机取一页（共 2 次请求）。
+     * [randomTracks] 为了拿到 count 首会并发拉 count 页，用在只需要 3 张封面的
+     * 卡片上过重（17 次请求换 3 张封面），这里改成单页随机。
      */
-    suspend fun randomTracks(count: Int = 12): List<Track> {
+    suspend fun randomTrackSample(size: Int = 24): List<Track> {
+        val pageSize = size.coerceAtLeast(1)
         val probe = allTracks(page = 1, size = 1)
-        val total = probe.total ?: return probe.items.shuffled()
-        if (total <= count) {
-            return allTracks(page = 1, size = count).items.shuffled().take(count)
-        }
-        val lastPage = (total + count - 1) / count
-        val pages = (1..lastPage).shuffled().take(count)
-        val collected = coroutineScope {
-            pages.map { page -> async { allTracks(page = page, size = count).items } }.awaitAll().flatten()
-        }
-        return collected.shuffled().take(count)
+        val total = probe.total ?: return probe.items
+        if (total <= pageSize) return allTracks(page = 1, size = pageSize).items
+        val lastPage = (total + pageSize - 1) / pageSize
+        return allTracks(page = Random.nextInt(1, lastPage + 1), size = pageSize).items
     }
 
     suspend fun recentlyAddedTracks(page: Int, size: Int = 16) = cachedPage<TrackDto, Track>(
@@ -846,3 +845,9 @@ internal suspend fun resolveLyricsWithFallback(
         firstParty()
     }
 }
+
+/** 歌单候选封面的最大并发请求数：NAS 是家用设备，并发过高会把首屏一起拖慢。 */
+private const val PLAYLIST_COVER_PARALLELISM = 4
+
+/** 取候选封面时的取样页大小：3 张封面用不着整页 50 首。 */
+private const val COVER_CANDIDATE_PAGE_SIZE = 12
