@@ -39,9 +39,9 @@ fun SyncedLineText(
     activeTextColor: Color = Color.Unspecified,
     currentPositionMs: (() -> Int)? = null,
 ) {
-    // 活动行不换色也不加粗：切换行时若颜色/字重变化，会先出现白光再加
-    // 文本重排抖动；这里让所有行颜色、字重完全一致。
-    val mainColor = textColor
+    // 活动行使用按背景对比度算出的强调色；字重保持不变——此前的白闪与抖动
+    // 来自透明度/缩放过渡与字重变化，颜色瞬时切换不会引起重排。
+    val mainColor = if (isActive && activeTextColor != Color.Unspecified) activeTextColor else textColor
     val mainStyle = textStyle
 
     Column(

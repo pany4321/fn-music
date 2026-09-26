@@ -98,6 +98,9 @@ internal fun FnMusicApp(container: AppUiDependencies, onExitApplication: () -> U
     val session by container.sessionRepository.state.collectAsStateWithLifecycle()
     val playback by container.playbackController.state.collectAsStateWithLifecycle()
     val updateState by container.updateController.state.collectAsStateWithLifecycle()
+    // 主题即时生效：偏好一改，FnColors 的可见状态随之更新，所有读取处立即换色。
+    val theme by container.appPreferences.theme.collectAsStateWithLifecycle()
+    LaunchedEffect(theme) { FnColors.applyTheme(themeColors(theme)) }
     FnMusicTheme {
         BoxWithConstraints(Modifier.fillMaxSize().background(FnColors.Background)) {
             CompositionLocalProvider(

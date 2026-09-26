@@ -317,6 +317,13 @@ internal fun ImmersivePlayer(
     val artworkBitmap = artwork?.bitmap
     val ambienceColor = artwork?.ambienceColor ?: fallbackAmbienceColor()
     val posterPanelColor = artwork?.posterSurfaceColor ?: posterSurfaceColor(ambienceColor)
+    // 歌词当前行颜色（方案 A）：歌词所在区域的实际底色 → 主题强调色/封面主色按对比度择优。
+    val lyricBackground = if (preferences.playerStyle == PlayerStyle.Poster) posterPanelColor else ambienceColor
+    val lyricActiveColor = lyricAccentColor(
+        background = lyricBackground,
+        accent = FnColors.Coral,
+        ambience = ambienceColor,
+    )
     val previousEnabled = playback.canPrevious && !playback.roamBusy
     val nextEnabled = playback.canNext && !playback.roamBusy
     val statusRetryAvailable = playerStatus(
@@ -418,6 +425,7 @@ internal fun ImmersivePlayer(
             statusRetryFocus = statusRetryFocus,
             statusRetryReturnFocus = progressFocus,
             onStatusInteraction = ::revealControls,
+            lyricsActiveColor = lyricActiveColor,
         )
         if (controlsVisible && !queueVisible) {
             PlaybackProgressValues(playbackProgress) { positionMs, durationMs ->
@@ -671,6 +679,7 @@ private fun PlayerPosterBackdrop(targetColor: Color, modifier: Modifier = Modifi
 @Composable
 private fun PlayerMainContent(
     poster: Boolean,
+    lyricsActiveColor: Color,
     controlsVisible: Boolean,
     artworkBitmap: Bitmap?,
     placeholderAccent: Color,
@@ -765,6 +774,7 @@ private fun PlayerMainContent(
                 statusRetryReturnFocus = statusRetryReturnFocus,
                 onStatusInteraction = onStatusInteraction,
                 poster = true,
+                lyricsActiveColor = lyricsActiveColor,
                 modifier = Modifier.fillMaxWidth(0.46f).fillMaxHeight().align(Alignment.CenterEnd)
                     .padding(
                         start = 10.dp,
@@ -810,6 +820,7 @@ private fun PlayerMainContent(
                 statusRetryReturnFocus = statusRetryReturnFocus,
                 onStatusInteraction = onStatusInteraction,
                 poster = false,
+                lyricsActiveColor = lyricsActiveColor,
                 modifier = Modifier.weight(0.51f).fillMaxHeight()
                     .padding(
                         start = 26.dp,
@@ -850,6 +861,7 @@ private fun PlayerDetails(
     statusRetryReturnFocus: FocusRequester,
     onStatusInteraction: () -> Unit,
     poster: Boolean,
+    lyricsActiveColor: Color,
     controlsVisible: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -891,6 +903,7 @@ private fun PlayerDetails(
                     loading = lyricsLoading,
                     failed = lyricsFailed,
                     poster = poster,
+                    activeTextColor = lyricsActiveColor,
                     controlsVisible = controlsVisible,
                     modifier = Modifier.weight(1f),
                 )
@@ -1096,6 +1109,7 @@ internal fun TvLyrics(
     poster: Boolean,
     modifier: Modifier = Modifier,
     controlsVisible: Boolean = false,
+    activeTextColor: Color = Color.Unspecified,
 ) {
     Box(
         modifier
@@ -1140,7 +1154,7 @@ internal fun TvLyrics(
                             fontWeight = FontWeight.SemiBold,
                         ),
                         textColor = FnColors.Text,
-                        activeTextColor = FnColors.Coral,
+                        activeTextColor = activeTextColor,
                         blendMode = BlendMode.SrcOver,
                         useBlurEffect = false,
                         showTranslation = true,

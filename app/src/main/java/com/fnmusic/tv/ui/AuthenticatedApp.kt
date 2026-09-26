@@ -301,6 +301,7 @@ internal fun AuthenticatedApp(
         )
         LibraryRoute.Search -> SearchRoute(
             container = container,
+            historyNamespace = "${session.server.guid.value}:${session.user.guid.value}",
             onBack = back,
             onArtist = { open(LibraryRoute.ArtistDetail(it)) },
             onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
@@ -1598,6 +1599,10 @@ private fun BrowseMy(
                 add("all-artists")
                 addAll(albums.take(8).map { "album:${it.guid.value}" })
                 add("all-albums")
+                // 风格键必须在这里：否则从“全部风格/风格详情”返回时保存的
+                // focusedKey 被判为无效，焦点会回落到标签而不是原来的卡片。
+                addAll(genres.take(8).map { "genre:${it.guid.value}" })
+                add("all-genres")
                 add("all-tracks")
             }
             if (playback.hasMedia) add("now-playing")
@@ -2225,6 +2230,7 @@ private fun <T> PagedCatalogPage(
     var initialFocusRequested by remember(stateKey) { mutableStateOf(false) }
     val previousPageFocus = remember(stateKey) { FocusRequester() }
     val nextPageFocus = remember(stateKey) { FocusRequester() }
+    val backFocus = remember(stateKey) { FocusRequester() }
 
     fun load(target: Int) {
         if (retained.loading || target > 1 && !retained.snapshot.hasNext) return
@@ -2358,7 +2364,18 @@ private fun <T> PagedCatalogPage(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 onBack?.let { onBack ->
-                    DetailBackButton(onClick = onBack)
+                    DetailBackButton(
+                        modifier = Modifier
+                            .focusRequester(backFocus)
+                            .focusProperties {
+                                // 左右与上均不移动；下键进入网格首行。
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                                up = FocusRequester.Cancel
+                                down = itemFocuses.getOrNull(0) ?: FocusRequester.Cancel
+                            },
+                        onClick = onBack,
+                    )
                     Spacer(Modifier.width(16.dp))
                 }
                 Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
@@ -2403,7 +2420,9 @@ private fun <T> PagedCatalogPage(
                                         right = itemFocuses.getOrNull(index + 1)
                                             ?.takeIf { column < columns - 1 && index + 1 < visibleEntries.size }
                                             ?: FocusRequester.Cancel
-                                        up = itemFocuses.getOrNull(index - columns) ?: FocusRequester.Cancel
+                                        // 首行向上到返回按钮（此前为 Cancel，导致返回按钮遥控器够不到）。
+                                        up = itemFocuses.getOrNull(index - columns)
+                                            ?: if (onBack != null) backFocus else FocusRequester.Cancel
                                         down = if (nextRowIndex < visibleEntries.size) {
                                             itemFocuses[nextRowIndex]
                                         } else {
@@ -2463,6 +2482,8 @@ private fun <T> GridPage(
     var focusedKey by rememberSaveable(title) { mutableStateOf<String?>(null) }
     var initialFocusRequested by remember(title) { mutableStateOf(false) }
     val contentFocus = remember(title) { FocusRequester() }
+    val backFocus = remember(title) { FocusRequester() }
+    val firstItemFocus = remember(title) { FocusRequester() }
     val gridState = rememberLazyGridState()
     LaunchedEffect(entries, focusedKey) {
         if (entries.isEmpty() || initialFocusRequested) return@LaunchedEffect
@@ -2481,7 +2502,17 @@ private fun <T> GridPage(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
-                DetailBackButton(onClick = onBack)
+                DetailBackButton(
+                    modifier = Modifier
+                        .focusRequester(backFocus)
+                        .focusProperties {
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                            down = firstItemFocus
+                        },
+                    onClick = onBack,
+                )
                 Spacer(Modifier.width(16.dp))
             }
             Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
@@ -2511,11 +2542,14 @@ private fun <T> GridPage(
                     item(
                         entry,
                         Modifier
+                            .then(if (index == 0) Modifier.focusRequester(firstItemFocus) else Modifier)
                             .focusProperties {
                                 if (column == 0) left = FocusRequester.Cancel
                                 if (column == columns - 1 || index == entries.lastIndex) {
                                     right = FocusRequester.Cancel
                                 }
+                                // 首行向上到返回按钮（此前无接线，返回按钮遥控器够不到）。
+                                if (index < columns && onBack != null) up = backFocus
                             }
                             .then(if (focusedKey == entryKey) Modifier.focusRequester(contentFocus) else Modifier)
                             .onFocusChanged { if (it.isFocused) focusedKey = entryKey },
@@ -4555,6 +4589,7 @@ private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, 
 @Composable
 private fun SearchRoute(
     container: AuthenticatedAppDependencies,
+    historyNamespace: String,
     onBack: () -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
@@ -4569,6 +4604,19 @@ private fun SearchRoute(
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     val fieldFocus = remember { FocusRequester() }
     val resultsFocus = remember { FocusRequester() }
+    val clearHistoryFocus = remember { FocusRequester() }
+    val historyChipFocuses = remember { List(5) { FocusRequester() } }
+    // 最近搜索：设备级持久化、按账号隔离；点击搜索结果时记录（避免存入半截关键词）。
+    var history by remember(historyNamespace) {
+        mutableStateOf(container.appPreferences.searchHistory(historyNamespace))
+    }
+    fun refreshHistory() {
+        history = container.appPreferences.searchHistory(historyNamespace)
+    }
+    fun recordSearch(value: String) {
+        container.appPreferences.recordSearch(historyNamespace, value)
+        refreshHistory()
+    }
 
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     LaunchedEffect(query) {
@@ -4614,6 +4662,26 @@ private fun SearchRoute(
         var fieldFocused by remember { mutableStateOf(false) }
         // 无结果时向下不指向任何目标，显式取消，避免焦点搜索落到未挂载的 FocusRequester。
         val hasResults = artists.isNotEmpty() || albums.isNotEmpty() || tracks.isNotEmpty()
+        // 历史条目最多 5 条 + “清空”一格，固定两行三列等宽（ellipsis）——永不溢出。
+        val historySlots = remember(history) { history.take(5) }
+        val historyRows = remember(historySlots) { historySlots.chunked(3) }
+        val hasHistory = historySlots.isNotEmpty()
+        fun slotIndex(row: Int, column: Int) = row * 3 + column
+        fun chipDown(row: Int, column: Int): FocusRequester {
+            val nextRow = historyRows.getOrNull(row + 1)
+            if (nextRow != null) {
+                return historyChipFocuses.getOrNull(slotIndex(row + 1, column.coerceAtMost(nextRow.lastIndex)))
+                    ?: FocusRequester.Cancel
+            }
+            // 最后一行向下：有结果去结果区，无结果取消。
+            return if (hasResults) resultsFocus else FocusRequester.Cancel
+        }
+        fun chipUp(row: Int, column: Int): FocusRequester {
+            if (row == 0) return fieldFocus
+            val prevRow = historyRows.getOrNull(row - 1) ?: return fieldFocus
+            return historyChipFocuses.getOrNull(slotIndex(row - 1, column.coerceAtMost(prevRow.lastIndex)))
+                ?: fieldFocus
+        }
         BasicTextField(
             value = query,
             onValueChange = { query = it },
@@ -4624,7 +4692,16 @@ private fun SearchRoute(
                 .fillMaxWidth()
                 .height(56.dp)
                 .focusRequester(fieldFocus)
-                .focusProperties { down = if (hasResults) resultsFocus else FocusRequester.Cancel }
+                .focusProperties {
+                    // 下键：先进入最近搜索首项，其次结果区（都没有则取消）。
+                    down = if (hasHistory) {
+                        historyChipFocuses.first()
+                    } else if (hasResults) {
+                        resultsFocus
+                    } else {
+                        FocusRequester.Cancel
+                    }
+                }
                 .onFocusChanged { state -> fieldFocused = state.isFocused }
                 .background(Color(0xFF1B201F), fieldShape)
                 .border(
@@ -4646,7 +4723,64 @@ private fun SearchRoute(
                 }
             },
         )
-        Spacer(Modifier.height(18.dp))
+        if (hasHistory) {
+            Spacer(Modifier.height(14.dp))
+            Text("最近搜索", color = FnColors.Muted, fontSize = 14.sp)
+            Spacer(Modifier.height(8.dp))
+            historyRows.forEachIndexed { rowIndex, rowItems ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rowItems.forEachIndexed { column, item ->
+                        SearchHistoryChip(
+                            label = item,
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(historyChipFocuses[slotIndex(rowIndex, column)])
+                                .focusProperties {
+                                    // 左右键只在本行内移动；上下键跨行（第二行末格是“清空”）。
+                                    if (column == 0) left = FocusRequester.Cancel
+                                    if (column == rowItems.lastIndex) right = FocusRequester.Cancel
+                                    up = chipUp(rowIndex, column)
+                                    down = chipDown(rowIndex, column)
+                                },
+                            onClick = {
+                                query = item
+                                recordSearch(item)
+                                runCatching { fieldFocus.requestFocus() }
+                            },
+                        )
+                    }
+                    // 补齐空槽，保证同一行的胶囊等宽对齐。
+                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            // “清空”：与历史胶囊同一套左右/上下接线，位于第二行最后一格。
+            Box(Modifier.fillMaxWidth().height(44.dp)) {
+                SearchHistoryClearButton(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .focusRequester(clearHistoryFocus)
+                        .focusProperties {
+                            left = historyChipFocuses[slotIndex(1, 0)]
+                            right = FocusRequester.Cancel
+                            up = if (historyRows.size > 1) {
+                                historyChipFocuses[slotIndex(0, 2)]
+                            } else {
+                                FocusRequester.Cancel
+                            }
+                            down = if (hasResults) resultsFocus else FocusRequester.Cancel
+                        },
+                    onClick = {
+                        container.appPreferences.clearSearchHistory(historyNamespace)
+                        refreshHistory()
+                        runCatching { fieldFocus.requestFocus() }
+                    },
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+        } else {
+            Spacer(Modifier.height(18.dp))
+        }
         Column(
             Modifier
                 .fillMaxSize()
@@ -4710,7 +4844,10 @@ private fun SearchRoute(
                                                     startIndex = 0,
                                                     source = null,
                                                 )
-                                            }.onSuccess { onPlayer(prepared[0].track) }
+                                            }.onSuccess {
+                                                recordSearch(searched)
+                                                onPlayer(prepared[0].track)
+                                            }
                                         }
                                     },
                                 )
@@ -4756,7 +4893,10 @@ private fun SearchRoute(
                                                     startIndex = 0,
                                                     source = null,
                                                 )
-                                            }.onSuccess { onPlayer(prepared[0].track) }
+                                            }.onSuccess {
+                                                recordSearch(searched)
+                                                onPlayer(prepared[0].track)
+                                            }
                                         }
                                     },
                                 )
@@ -4788,7 +4928,10 @@ private fun SearchRoute(
                                                     startIndex = start,
                                                     source = null,
                                                 )
-                                            }.onSuccess { onPlayer(track) }
+                                            }.onSuccess {
+                                                recordSearch(searched)
+                                                onPlayer(track)
+                                            }
                                         }
                                     }
                                 },
@@ -4805,6 +4948,51 @@ private fun SearchRoute(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SearchHistoryChip(
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier
+            .height(44.dp)
+            .background(Color(0xFF1B201F), RoundedCornerShape(22.dp))
+            .border(0.5.dp, Color(0xFF3A4145), RoundedCornerShape(22.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = FnColors.Text,
+            fontSize = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 14.dp),
+        )
+    }
+}
+
+@Composable
+private fun SearchHistoryClearButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .height(40.dp)
+            .background(Color(0xFF1B201F), RoundedCornerShape(20.dp))
+            .border(0.5.dp, Color(0xFF3A4145), RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "清空",
+            color = FnColors.Muted,
+            fontSize = 14.sp,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
     }
 }
 

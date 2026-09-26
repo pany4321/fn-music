@@ -53,6 +53,7 @@ import androidx.tv.material3.Text
 import com.fnmusic.tv.AuthenticatedAppDependencies
 import com.fnmusic.tv.BuildConfig
 import com.fnmusic.tv.R
+import com.fnmusic.tv.core.model.AppTheme
 import com.fnmusic.tv.core.model.PlayerStyle
 import com.fnmusic.tv.core.model.preferences.CacheBudget
 import com.fnmusic.tv.core.model.preferences.CacheUsage
@@ -74,12 +75,14 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
     val scope = LocalLibraryRetainedState.current.scope
     val window = LocalAdaptiveWindow.current
     val backgroundBackExit by container.appPreferences.backgroundBackExit.collectAsStateWithLifecycle()
+    val preferencesTheme by container.appPreferences.theme.collectAsStateWithLifecycle()
     val coverStyleFocus = remember { FocusRequester() }
     val posterStyleFocus = remember { FocusRequester() }
     val backgroundExitFocus = remember { FocusRequester() }
     val onlineLyricsFocus = remember { FocusRequester() }
     val cacheFocuses = remember { List(CacheBudget.entries.size) { FocusRequester() } }
     val clearCacheFocus = remember { FocusRequester() }
+    val themeFocuses = remember { List(AppTheme.entries.size) { FocusRequester() } }
     val updateFocus = remember { FocusRequester() }
     var usage by remember { mutableStateOf(CacheUsage(artworkBytes = 0, indexBytes = 0)) }
 
@@ -267,16 +270,50 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                             .width(166.dp)
                             .focusProperties {
                                 up = onlineLyricsFocus
-                                down = if (container.updateController.enabled) {
-                                    updateFocus
-                                } else {
-                                    FocusRequester.Cancel
-                                }
+                                // 下方是主题行。
+                                down = themeFocuses.first()
                                 left = cacheFocuses.last()
                                 right = FocusRequester.Cancel
                             }
                             .focusRequester(clearCacheFocus),
                     )
+                }
+                SettingsDivider()
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "主题",
+                        color = FnColors.Muted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.width(144.dp),
+                    )
+                    // 六个主题：窄屏自动换行；左右键行内移动，行首/行尾取消，上下接缓存行与更新按钮。
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        AppTheme.entries.forEachIndexed { index, theme ->
+                            SettingsChoiceButton(
+                                label = themeLabel(theme),
+                                selected = preferencesTheme == theme,
+                                onClick = { container.appPreferences.setTheme(theme) },
+                                modifier = Modifier
+                                    .width(104.dp)
+                                    .focusProperties {
+                                        up = clearCacheFocus
+                                        down = if (container.updateController.enabled) {
+                                            updateFocus
+                                        } else {
+                                            FocusRequester.Cancel
+                                        }
+                                        left = themeFocuses.getOrNull(index - 1)
+                                            ?: FocusRequester.Cancel
+                                        right = themeFocuses.getOrNull(index + 1)
+                                            ?: FocusRequester.Cancel
+                                    }
+                                    .focusRequester(themeFocuses[index]),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -341,7 +378,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                                         .width(128.dp)
                                         .height(48.dp)
                                 .focusProperties {
-                                    up = clearCacheFocus
+                                    up = themeFocuses.last()
                                     down = FocusRequester.Cancel
                                     left = FocusRequester.Cancel
                                     right = FocusRequester.Cancel

@@ -495,7 +495,12 @@ fun KaraokeLyricsView(
                                             normalLineTextStyle = stableNormalTextStyle,
                                             accompanimentLineTextStyle = stableAccompanimentTextStyle,
                                             phoneticTextStyle = stablePhoneticTextStyle,
-                                            activeColor = textColor,
+                                            // 已唱部分用当前歌词强调色（未指定时回落正文色）。
+                                            activeColor = if (activeTextColor != Color.Unspecified) {
+                                                activeTextColor
+                                            } else {
+                                                textColor
+                                            },
                                             blendMode = stableBlendMode,
                                             showDebugRectangles = showDebugRectangles,
                                             showTranslation = showTranslation,
