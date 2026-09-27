@@ -1,5 +1,6 @@
 package com.fnmusic.tv.core.data.backend
 
+import android.util.Log
 import com.fnmusic.tv.core.data.api.ApiDecoder
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
@@ -23,6 +24,8 @@ import okhttp3.Response
  * 只做"发请求 + 解 JSON"，映射与播放策略在 [JellyfinMusicBackend]；
  * 形态依据实测契约（.trellis/spec/backend/jellyfin-contracts.md，10.10.7）。
  */
+private const val TAG = "JellyfinApi"
+
 internal class JellyfinApi(
     private val origin: HttpUrl,
     private val client: OkHttpClient,
@@ -35,6 +38,10 @@ internal class JellyfinApi(
     private fun authorizationHeader(token: String?): String =
         jellyfinAuthorizationHeader(token, deviceId, clientName, clientVersion)
 
+    /** [currentUserId] 的缓存：一次会话内用户不会变。 */
+    @Volatile
+    private var cachedUserId: String? = null
+
     /** 免登录的服务器信息：用于自动识别服务器类型与版本。 */
     suspend fun publicInfo(): JellyfinPublicInfoDto =
         request(Request.Builder().url(url("System/Info/Public")).get(), token = null)
@@ -44,16 +51,36 @@ internal class JellyfinApi(
         val body = ApiDecoder.json.encodeToString(
             JellyfinAuthRequest(Username = username, Pw = password),
         )
-        return request(
+        val result: JellyfinAuthResultDto = request(
             Request.Builder()
                 .url(url("Users/AuthenticateByName"))
                 .post(body.toRequestBody("application/json".toMediaType())),
             token = null,
         )
+        cachedUserId = result.User.Id
+        return result
     }
 
     suspend fun me(): JellyfinUserDto =
-        request(Request.Builder().url(url("Users/Me")).get(), token = requireToken())
+        request<JellyfinUserDto>(
+            Request.Builder().url(url("Users/Me")).get(),
+            token = requireToken(),
+        ).also { cachedUserId = it.Id }
+
+    /**
+     * 当前用户 id：登录响应里有，但"令牌恢复/跨源切换"时连接是先探测、后凭令牌用的，
+     * 那条路径上 userId 永远是空 —— 向服务端问一次（`/Users/Me`）并缓存。
+     */
+    private suspend fun currentUserId(): String =
+        cachedUserId ?: me().Id.takeIf(String::isNotBlank)
+            ?: throw AppException(AppError.Unauthenticated)
+
+    /**
+     * 空的 userId 一律解析成当前用户：
+     * 否则会拼出 `/Users//FavoriteItems/{id}` 这类必然 404 的地址（实测收藏就这样失败）。
+     */
+    private suspend fun uid(userId: String): String =
+        userId.takeIf(String::isNotBlank) ?: currentUserId()
 
     /** 登出：作废当前访问令牌（失败不阻塞本地清理，由调用方决定）。 */
     suspend fun logout() {
@@ -72,7 +99,7 @@ internal class JellyfinApi(
         items(
             Request.Builder().url(
                 url("Items").newBuilder()
-                    .addQueryParameter("userId", userId)
+                    .addQueryParameter("userId", uid(userId))
                     .addQueryParameter("IncludeItemTypes", "Audio")
                     .addQueryParameter("Recursive", "true")
                     .addQueryParameter("SortBy", "Random")
@@ -105,7 +132,7 @@ internal class JellyfinApi(
     ): JellyfinItemsDto = items(
         Request.Builder().url(
             url("Items").newBuilder().apply {
-                addQueryParameter("userId", userId)
+                addQueryParameter("userId", uid(userId))
                 addQueryParameter("Recursive", "true")
                 includeItemTypes?.let { addQueryParameter("IncludeItemTypes", it) }
                 parentId?.let { addQueryParameter("ParentId", it) }
@@ -129,7 +156,7 @@ internal class JellyfinApi(
     suspend fun albumArtists(userId: String, startIndex: Int, limit: Int): JellyfinItemsDto = items(
         Request.Builder().url(
             url("Artists/AlbumArtists").newBuilder()
-                .addQueryParameter("userId", userId)
+                .addQueryParameter("userId", uid(userId))
                 .addQueryParameter("Recursive", "true")
                 .addQueryParameter("SortBy", "SortName")
                 .addQueryParameter("StartIndex", startIndex.toString())
@@ -143,7 +170,7 @@ internal class JellyfinApi(
     suspend fun musicGenres(userId: String, startIndex: Int, limit: Int): JellyfinItemsDto = items(
         Request.Builder().url(
             url("MusicGenres").newBuilder()
-                .addQueryParameter("userId", userId)
+                .addQueryParameter("userId", uid(userId))
                 .addQueryParameter("SortBy", "SortName")
                 .addQueryParameter("StartIndex", startIndex.toString())
                 .addQueryParameter("Limit", limit.toString())
@@ -161,7 +188,7 @@ internal class JellyfinApi(
     ): JellyfinItemsDto = items(
         Request.Builder().url(
             url("Playlists/$playlistId/Items").newBuilder()
-                .addQueryParameter("userId", userId)
+                .addQueryParameter("userId", uid(userId))
                 .addQueryParameter("StartIndex", startIndex.toString())
                 .addQueryParameter("Limit", limit.toString())
                 .addQueryParameter("Fields", LIST_ITEM_FIELDS)
@@ -172,7 +199,7 @@ internal class JellyfinApi(
     /** 收藏/取消收藏（`POST`/`DELETE /Users/{userId}/FavoriteItems/{itemId}`）。 */
     suspend fun setFavorite(userId: String, itemId: String, favorite: Boolean) {
         val request = Request.Builder()
-            .url(url("Users/$userId/FavoriteItems/$itemId"))
+            .url(url("Users/${uid(userId)}/FavoriteItems/$itemId"))
             .method(if (favorite) "POST" else "DELETE", EMPTY_BODY)
             .build()
         execute(
@@ -188,7 +215,7 @@ internal class JellyfinApi(
         items(
             Request.Builder().url(
                 url("Items").newBuilder()
-                    .addQueryParameter("userId", userId)
+                    .addQueryParameter("userId", uid(userId))
                     .addQueryParameter("Ids", itemId)
                     .addQueryParameter("Fields", FULL_ITEM_FIELDS)
                     .build(),
@@ -254,7 +281,7 @@ internal class JellyfinApi(
     /** 新建歌单：`POST /Playlists`（`Ids` 留空＝先建空歌单，再由上层把当前曲目加进去）。 */
     suspend fun createPlaylist(name: String, userId: String): JellyfinItemDto {
         val body = ApiDecoder.json.encodeToString(
-            JellyfinCreatePlaylistRequest(Name = name, UserId = userId, MediaType = "Audio"),
+            JellyfinCreatePlaylistRequest(Name = name, UserId = uid(userId), MediaType = "Audio"),
         )
         return item(
             Request.Builder()
@@ -269,7 +296,7 @@ internal class JellyfinApi(
             .url(
                 url("Playlists/$playlistId/Items").newBuilder()
                     .addQueryParameter("ids", itemIds.joinToString(","))
-                    .addQueryParameter("userId", userId)
+                    .addQueryParameter("userId", uid(userId))
                     .build(),
             )
             .post(EMPTY_BODY)
@@ -293,8 +320,8 @@ internal class JellyfinApi(
     /** 媒体库列表（`/Users/{id}/Views`）；当前 UI 没用到，接口先留着。 */
     suspend fun views(userId: String): JellyfinItemsDto = items(
         Request.Builder().url(
-            url("Users/$userId/Views").newBuilder()
-                .addQueryParameter("userId", userId)
+            url("Users/${uid(userId)}/Views").newBuilder()
+                .addQueryParameter("userId", uid(userId))
                 .build(),
         ).get(),
     )
@@ -385,6 +412,7 @@ internal class JellyfinApi(
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    Log.w(TAG, "IO ${call.request().method} ${call.request().url.encodedPath}: ${e.javaClass.simpleName} ${e.message}")
                     if (continuation.isCancelled) return
                     continuation.resumeWithException(
                         AppException(AppError.NetworkUnavailable),
@@ -397,6 +425,12 @@ internal class JellyfinApi(
                         if (it.isSuccessful) {
                             continuation.resume(text)
                         } else {
+                            // 只记路径与状态，不记查询串（避免把令牌写进日志）。
+                            Log.w(
+                                TAG,
+                                "HTTP ${it.code} ${call.request().method} ${call.request().url.encodedPath}: " +
+                                    text.take(200),
+                            )
                             continuation.resumeWithException(
                                 AppException(classify(it.code, text)),
                             )
@@ -412,6 +446,7 @@ internal class JellyfinApi(
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    Log.w(TAG, "IO ${call.request().method} ${call.request().url.encodedPath}: ${e.javaClass.simpleName} ${e.message}")
                     if (continuation.isCancelled) return
                     continuation.resumeWithException(
                         AppException(AppError.NetworkUnavailable),

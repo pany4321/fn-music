@@ -48,8 +48,14 @@ internal sealed interface ServerConnection {
         override val normalized: NormalizedServer,
         override val identity: ServerIdentity,
         val api: JellyfinApi,
-        val userId: String,
+        userId: String,
     ) : ServerConnection {
+        /**
+         * 用户 id：密码登录来自登录响应；"令牌恢复/跨源切换"的连接是先探测后建的，
+         * 那时还不知道 —— 由 [JellyfinConnector.me] 用 `/Users/Me` 的结果回填。
+         */
+        var userId: String = userId
+
         override val kind: ServerKind get() = ServerKind.Jellyfin
         override val persistentServer: String get() = normalized.origin.toString()
         override val apiBase: String get() = normalized.origin.toString()
@@ -296,6 +302,9 @@ internal class JellyfinConnector(
         val jellyfin = connection as? ServerConnection.Jellyfin
             ?: throw AppException(AppError.Unauthenticated)
         val me = jellyfin.api.me()
+        // 令牌路径建起来的连接 userId 是空的：这里验身份顺手把它补上，
+        // 之后 requireJellyfinSession() 交给后端的就不是空值了。
+        if (jellyfin.userId.isBlank()) jellyfin.userId = me.Id
         return User(UserGuid(me.Id), me.Name, null)
     }
 

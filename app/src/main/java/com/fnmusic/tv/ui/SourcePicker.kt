@@ -83,7 +83,14 @@ internal fun SourceRow(
                 },
             selected = active,
         ) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.Center) {
+            // 胶囊按钮（50% 圆角）左右两端是弧线：文字必须留内边距，
+            // 否则首字压在弧上、看着"跑出按钮"（真机反馈）。
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (active) {
                         Text("▶", color = FnColors.Coral, fontSize = 13.sp)

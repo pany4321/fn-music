@@ -1,6 +1,9 @@
 package com.fnmusic.tv.core.data.backend
 
 import com.fnmusic.tv.core.data.api.ApiDecoder
+import kotlinx.coroutines.runBlocking
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -224,5 +227,54 @@ class JellyfinMappingTest {
         // 同上：不带 token
         assertFalse(url.contains("api_key"))
         assertFalse(url.contains("TOKEN123"))
+    }
+
+    /**
+     * 令牌恢复/跨源切换建起来的连接没有 userId（先探测、后凭令牌）。
+     * 空 userId 绝不能拼出 `/Users//FavoriteItems/{id}`：那正是真机上"收藏失败"的原因（实测 404）。
+     */
+    @Test
+    fun `favorite with blank user id resolves the current user first`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse.Builder().body("""{"Id":"USER9","Name":"pan"}""").build())
+            server.enqueue(MockResponse.Builder().code(200).body("").build())
+            val api = JellyfinApi(
+                origin = server.url("/").toString().trimEnd('/').toHttpUrl(),
+                client = OkHttpClient(),
+                deviceId = "test-device",
+                tokenProvider = { "TOKEN123" },
+            )
+
+            api.setFavorite(userId = "", itemId = "ITEM1", favorite = true)
+
+            assertEquals("/Users/Me", server.takeRequest().target)
+            val favorite = server.takeRequest()
+            assertEquals("POST", favorite.method)
+            assertEquals("/Users/USER9/FavoriteItems/ITEM1", favorite.target)
+        }
+    }
+
+    /** 已知 userId 时不多发一次 `/Users/Me`（登录后每条收藏都带真实 id）。 */
+    @Test
+    fun `favorite with a known user id skips the lookup`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse.Builder().code(200).body("").build())
+            val api = JellyfinApi(
+                origin = server.url("/").toString().trimEnd('/').toHttpUrl(),
+                client = OkHttpClient(),
+                deviceId = "test-device",
+                tokenProvider = { "TOKEN123" },
+            )
+
+            api.setFavorite(userId = "USER9", itemId = "ITEM1", favorite = false)
+
+            val request = server.takeRequest()
+            assertEquals("DELETE", request.method)
+            assertEquals("/Users/USER9/FavoriteItems/ITEM1", request.target)
+            // 已知 id 就不该再问一次 /Users/Me
+            assertEquals(1, server.requestCount)
+        }
     }
 }

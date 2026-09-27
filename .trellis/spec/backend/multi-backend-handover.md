@@ -153,7 +153,8 @@
 
 | 坑 | 现象 | 正确做法 |
 |---|---|---|
-| HLS 端点选错 | `/Audio/{id}/stream?...transcodingProtocol=hls` 返回**裸 TS 流**（`video/mp2t`，0x47 开头），ExoPlayer 报 "Input does not start with the #EXTM3U header" | 打 **`/Audio/{id}/master.m3u8`**，并带 `api_key` + `MediaSourceId`（缺 MediaSourceId 直接 400）+ 转码参数 |
+| HLS 端点选错 | `/Audio/{id}/stream?...transcodingProtocol=hls` 返回**裸 TS 流**（`video/mp2t`，0x47 开头），ExoPlayer 报 "Input does not start with the #EXTM3U header" | 打 **`/Audio/{id}/master.m3u8`**，带 `MediaSourceId`（缺了直接 400）+ 转码参数；鉴权走请求头，**不要** `api_key` |
+| **空 userId 拼出 `/Users//…`** | 令牌恢复/跨源切换建起来的连接是"先探测、后凭令牌"的，那时还没有 userId：`/Items?userId=` 照样能用（服务端按令牌解析用户），但**路径式**接口 `/Users//FavoriteItems/{id}` 直接 **404** —— 真机表现就是"点收藏提示收藏失败" | `JellyfinApi` 统一兜底：空 userId 先问 **`/Users/Me`** 并缓存（登录响应里的 id 也缓存），所有带 userId 的接口过 `uid()`；`JellyfinConnector.me()` 顺手把解析到的 id 回填到连接上 |
 | 新建歌单返回体 | `POST /Playlists` 只回 `{"Id":"…"}`，按完整条目解会得到空名字 | 名字用调用方传进去的那个，别解返回体 |
 | 歌手/风格没有计数 | `/Artists/AlbumArtists`、`/MusicGenres` 不返回 `ChildCount/RecursiveItemCount` | 计数缺失时 UI 不显示（别显示"0 首歌曲"） |
 | 歌单混着视频 | `IncludeItemTypes=Playlist` 会把"电影/电视剧"这类视频歌单也列出来 | 按条目 `MediaType == Audio` 过滤 |
@@ -275,6 +276,22 @@
 13. ⏳ **真机双后端串行验收**：Jellyfin 侧已跑（见 §3.2 验证状态），飞牛侧在本版改动后**只差登录 + 全流程复验**
    （已知踩点在 §3.2：登录页 BACK 会退出页面、登录按钮 disabled 时焦点不移动）。发版：**1.5.1**。
 14. 之后再单独做 **2.0.0**：改名「音乐坞」+ `applicationId com.musicdock.tv` + 同步 CI 产物名/更新清单/UA/README + 旧包最后一次发布里写明"请安装新版音乐坞"（换包名后旧版无法自更新）。
+
+### 3.4 用户反馈的两个缺陷（1.6.2）
+
+| 现象 | 根因 | 修复 |
+|---|---|---|
+| **点收藏提示"收藏失败"**（Jellyfin；浏览/播放都正常） | 连接是"先探测、后凭令牌"建的（重装/重启后的令牌恢复、跨源切换都是这条路径），那时 `userId` 还是空：`/Items?userId=` 照样能用（服务端按令牌认人），但**路径式**接口 `/Users//FavoriteItems/{id}` 直接 404。日志一行锁定：`HTTP 404 POST /Users//FavoriteItems/{id}` | `JellyfinApi.uid()`：空 userId 先 `/Users/Me` 再缓存（登录响应里的 id 也缓存），所有带 userId 的接口统一过它；`JellyfinConnector.me()` 顺手回填连接上的 userId。**真机验证**：令牌恢复会话下点收藏 → 服务端 `IsFavorite` False→True、无 404，再点一次 → True→False（服务端状态已还原） |
+| **音乐源窗口按钮文字"跑到按钮外"**（手机上） | 源行按钮是胶囊形（`LoginActionButton` 默认 `RoundedCornerShape(50)`，80dp 高 = 40dp 圆角），而行内文字**没有横向内边距**：首字正好压在圆角的弧线上，视觉上像出界 | 源行内容加 `padding(horizontal = 22.dp)`。设置页那两个按钮（12sp 标签）本身没问题，一并核对过 ✓ |
+
+#### 已知问题（本轮未修，与改动无关）
+
+- `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报
+  "configured to open a database named 'migration-test.db' but '<绝对路径>' was requested"。
+  证据：干净 HEAD（1.6.1 发布版本）上同样失败、单独跑该类的同样失败、room/sqlite 无版本混用；
+  同一天早些时候同一命令曾全绿 → 环境性 flake（Robolectric + Room `MigrationTestHelper`）。
+  CI 只跑 `:app:assembleSideloadRelease`，不跑单测，所以不影响发布。下次真机/单测验收时若仍是红的，
+  值得单独查（候选：给该测试加 `robolectric.sqliteMode` 配置）。
 
 ---
 
