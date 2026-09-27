@@ -178,6 +178,32 @@
 - **观察（未定因）**：飞牛档案在某次 `adb install -r` 后从登录历史里消失（登录页回到空表单），
   同期 Jellyfin 档案跨多次安装都保持；没找到确定原因，下次真机验收留意是否复现。
 
+#### 1.5.2 空封面兜底（已实现 + 真机截图核对）
+
+- 首页「收藏 / 最近播放 / 随机漫游」在**没有可摊封面**时，摊位上画对应主题插画
+  （心形 / 时钟 / 黑胶）——实现点在 `FeatureCoverDeck`（`app/.../ui/AuthenticatedApp.kt`），
+  `deckPlacements(kind, artwork.size.coerceAtLeast(1))` + `item == null` 分支。
+- 歌单卡片与歌单详情页：既没有自身封面、也拼不出派生封面组时用「歌单」拼贴插画
+  （`CollectionArtworkFallback.PlaylistGrid`）；「最近播放」详情页兜底改用
+  `CollectionArtworkFallback.Recent`（时钟）。
+- **真机核对（1.5.2，Jellyfin 侧 0 收藏）**：收藏卡显示心形插画 ✓、空歌单卡片显示拼贴插画 ✓
+  （截图已核对，临时截图不入库）。发布：v1.5.2（CI Release 含 universal APK）。
+- 顺带核实：**飞牛地址的 `/System/Info/Public` 返回 404** → 登录页探测会立刻按飞牛兜底 ✓；
+  Jellyfin 服务器上我早前用 API 建的 3 个空测试歌单**已删除**（`DELETE /Items/{id}` 才是正确接口，
+  `DELETE /Playlists/{id}` 返回 405），服务器歌单回到用户自己的状态。
+- ⚠️ 注意：Jellyfin 的 `IncludeItemTypes=Playlist` 在 `Recursive=false` 时会返回**媒体库目录**
+  （CollectionFolder，如「电影/电视剧」），**必须 `Recursive=true`** 才是真歌单（当前实现是对的）。
+
+#### 仍未在真机验证（本轮受自动化限制）
+
+- **飞牛登录 + 全流程回归**：登录页在 adb 下难以走完 —— 输入框 IME 与 BACK 的组合会让页面直接退回
+  （`input text` 之后按 BACK 有时被当成"退出页面"而不是"收起键盘"）。人工点按没问题；
+  真机确认时用真手或按"点字段→输入→点下一个字段"的方式逐步截图确认。
+- **HLS 端到端**：URL 修复已用真实服务器验证 + 单测锁定；端到端播放（dsf 曲目）还没在 1.5.1/1.5.2 上复跑。
+- **App 内收藏 ♡ / 歌单新建的点击链路**：`JellyfinApi.setFavorite` 与歌单读写已在真实服务器上
+  用 App 的查询形状验证；播放器控制条在 adb 下点不中（自动隐藏 + 无 UI Automator 语义），
+  人工点一次即可确认。
+
 #### 真机环境坑（接续会话必读）
 
 - **手机锁屏时 `adb install` 必然失败**（`Failure [-99]`，ColorOS 要弹安装确认但锁屏下弹不出来）。
