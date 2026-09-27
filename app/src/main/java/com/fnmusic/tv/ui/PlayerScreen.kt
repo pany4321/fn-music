@@ -2372,9 +2372,15 @@ private fun AddToPlaylistDialog(
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    val retainedStore = LocalLibraryRetainedState.current
+    // 与首页歌单行/全部歌单页读同一份保留列表：新建歌单写穿后，
+    // 弹窗重新打开也能看到（此前弹窗自己再拉一次索引，会读回旧的缓存列表把它盖掉）。
+    val playlistRetainedState = retainedStore.list<Playlist>("playlists")
+    val playlists = playlistRetainedState.snapshot.entries
     var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember {
+        mutableStateOf(!playlistRetainedState.snapshot.initialLoadCompleted && playlists.isEmpty())
+    }
     var pendingGuid by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var creatingPlaylist by remember { mutableStateOf(false) }
@@ -2382,8 +2388,7 @@ private fun AddToPlaylistDialog(
     var createError by remember { mutableStateOf<String?>(null) }
     val addActionFocus = remember { FocusRequester() }
     val rowFocuses = remember(playlists) { List(playlists.size) { FocusRequester() } }
-    // 首页歌单行与全部歌单页读这份保留列表：新建后写穿，列表立刻能看到新歌单。
-    val playlistRetainedState = LocalLibraryRetainedState.current.list<Playlist>("playlists")
+
 
     /** 新建歌单 → 直接把当前歌曲加进去；两步分开报告失败原因。 */
     fun createPlaylistAndAdd(name: String) {
@@ -2401,11 +2406,10 @@ private fun AddToPlaylistDialog(
                 container.musicRepository.addToPlaylist(created.guid.value, trackGuid)
             }
             creatingBusy = false
-            // 无论添加是否成功，都把新歌单写穿到保留列表与弹窗列表：
-            // 首页歌单行 / 全部歌单页立刻出现，弹窗里也能马上选到它。
+            // 无论添加是否成功，都把新歌单写穿到共用的保留列表：
+            // 首页歌单行 / 全部歌单页 / 本弹窗（下次打开）都会看到它。
             playlistRetainedState.snapshot =
                 playlistRetainedState.snapshot.prepend(listOf(created)) { it.guid.value }
-            playlists = (listOf(created) + playlists).distinctBy { it.guid.value }
             if (added.isSuccess) {
                 creatingPlaylist = false
                 message = "已创建「${created.name}」并添加"
@@ -2431,12 +2435,19 @@ private fun AddToPlaylistDialog(
     }
 
     LaunchedEffect(Unit) {
-        val loaded = runCatching { container.musicRepository.playlists() }
-            .getOrDefault(emptyList())
-        playlists = loaded
-        loading = false
-        runCatching { container.musicRepository.playlistTrackCounts(loaded.map { it.guid.value }) }
-            .onSuccess { counts = it }
+        retainedStore.loadListOnce(playlistRetainedState, container.musicRepository::playlists)
+    }
+    // 列表就绪（或就有内容）后收起"正在加载"；新建/刷新带来的变化会自动跟随保留列表。
+    LaunchedEffect(playlists, playlistRetainedState.snapshot.initialLoadCompleted) {
+        if (playlistRetainedState.snapshot.initialLoadCompleted || playlists.isNotEmpty()) {
+            loading = false
+        }
+    }
+    LaunchedEffect(playlists) {
+        if (playlists.isNotEmpty()) {
+            runCatching { container.musicRepository.playlistTrackCounts(playlists.map { it.guid.value }) }
+                .onSuccess { counts = it }
+        }
     }
 
     Dialog(onDismissRequest = onDismiss) {

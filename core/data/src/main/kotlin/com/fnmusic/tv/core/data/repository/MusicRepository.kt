@@ -464,7 +464,9 @@ class MusicRepository internal constructor(
         require(trimmed.isNotEmpty())
         val coverId = newPlaylistCoverId()
         val guid = session.authenticated { it.createPlaylist(coverId, trimmed) }
-        runCatching { responses.invalidateSource(session.cacheNamespace(), "index") }
+        // 缓存键是 (namespace, kind, businessKey)：歌单索引登记在 businessKey="playlists" 上，
+        // 用 "index"（那是 kind）失效不掉，会导致重新打开弹窗时又读到旧列表。
+        runCatching { responses.invalidateSource(session.cacheNamespace(), "playlists") }
         return Playlist(CollectionGuid(guid), trimmed, coverId)
     }
 
