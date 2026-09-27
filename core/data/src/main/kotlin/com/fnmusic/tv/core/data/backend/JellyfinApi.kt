@@ -76,6 +76,104 @@ internal class JellyfinApi(
             ).get(),
         ).Items
 
+    /**
+     * 统一的条目查询：各目录/搜索/收藏/最近都用它，参数按需组合。
+     * 分页用 Jellyfin 的 StartIndex/Limit（与我们的 page/size 是 1:1 换算）。
+     */
+    suspend fun items(
+        userId: String,
+        includeItemTypes: String? = null,
+        parentId: String? = null,
+        albumIds: String? = null,
+        artistIds: String? = null,
+        albumArtistIds: String? = null,
+        genreIds: String? = null,
+        searchTerm: String? = null,
+        filters: String? = null,
+        sortBy: String? = null,
+        sortOrder: String? = null,
+        startIndex: Int = 0,
+        limit: Int = 50,
+    ): JellyfinItemsDto = items(
+        Request.Builder().url(
+            url("Items").newBuilder().apply {
+                addQueryParameter("userId", userId)
+                addQueryParameter("Recursive", "true")
+                includeItemTypes?.let { addQueryParameter("IncludeItemTypes", it) }
+                parentId?.let { addQueryParameter("ParentId", it) }
+                albumIds?.let { addQueryParameter("AlbumIds", it) }
+                artistIds?.let { addQueryParameter("ArtistIds", it) }
+                albumArtistIds?.let { addQueryParameter("AlbumArtistIds", it) }
+                genreIds?.let { addQueryParameter("GenreIds", it) }
+                searchTerm?.let { addQueryParameter("SearchTerm", it) }
+                filters?.let { addQueryParameter("Filters", it) }
+                sortBy?.let { addQueryParameter("SortBy", it) }
+                sortOrder?.let { addQueryParameter("SortOrder", it) }
+                addQueryParameter("StartIndex", startIndex.toString())
+                addQueryParameter("Limit", limit.toString())
+                addQueryParameter("Fields", ITEM_FIELDS)
+            }.build(),
+        ).get(),
+    )
+
+    /** 歌手列表走专门的端点（Jellyfin 的"专辑艺术家"）。 */
+    suspend fun albumArtists(userId: String, startIndex: Int, limit: Int): JellyfinItemsDto = items(
+        Request.Builder().url(
+            url("Artists/AlbumArtists").newBuilder()
+                .addQueryParameter("userId", userId)
+                .addQueryParameter("Recursive", "true")
+                .addQueryParameter("SortBy", "SortName")
+                .addQueryParameter("StartIndex", startIndex.toString())
+                .addQueryParameter("Limit", limit.toString())
+                .addQueryParameter("Fields", ITEM_FIELDS)
+                .build(),
+        ).get(),
+    )
+
+    /** 风格列表走专门的端点。 */
+    suspend fun musicGenres(userId: String, startIndex: Int, limit: Int): JellyfinItemsDto = items(
+        Request.Builder().url(
+            url("MusicGenres").newBuilder()
+                .addQueryParameter("userId", userId)
+                .addQueryParameter("SortBy", "SortName")
+                .addQueryParameter("StartIndex", startIndex.toString())
+                .addQueryParameter("Limit", limit.toString())
+                .addQueryParameter("Fields", ITEM_FIELDS)
+                .build(),
+        ).get(),
+    )
+
+    /** 歌单内曲目：条目上带 PlaylistItemId（删条目时要用）。 */
+    suspend fun playlistItems(
+        playlistId: String,
+        userId: String,
+        startIndex: Int,
+        limit: Int,
+    ): JellyfinItemsDto = items(
+        Request.Builder().url(
+            url("Playlists/$playlistId/Items").newBuilder()
+                .addQueryParameter("userId", userId)
+                .addQueryParameter("StartIndex", startIndex.toString())
+                .addQueryParameter("Limit", limit.toString())
+                .addQueryParameter("Fields", ITEM_FIELDS)
+                .build(),
+        ).get(),
+    )
+
+    /** 收藏/取消收藏（`POST`/`DELETE /Users/{userId}/FavoriteItems/{itemId}`）。 */
+    suspend fun setFavorite(userId: String, itemId: String, favorite: Boolean) {
+        val request = Request.Builder()
+            .url(url("Users/$userId/FavoriteItems/$itemId"))
+            .method(if (favorite) "POST" else "DELETE", EMPTY_BODY)
+            .build()
+        execute(
+            request.newBuilder()
+                .header("Accept", "application/json")
+                .header("Authorization", authorizationHeader(requireToken()))
+                .build(),
+        )
+    }
+
     /** 按 id 取单个条目（拿 MediaSources 判断能不能直连）。 */
     suspend fun item(itemId: String, userId: String): JellyfinItemDto? =
         items(
@@ -195,9 +293,11 @@ internal class JellyfinApi(
     }
 
     private companion object {
+        val EMPTY_BODY = ByteArray(0).toRequestBody(null, 0, 0)
+
         const val ITEM_FIELDS =
             "MediaSources,DateCreated,UserData,RunTimeTicks,Container,AlbumArtist,Artists," +
-                "IndexNumber,ParentIndexNumber,ChildCount,RecursiveItemCount"
+                "IndexNumber,ParentIndexNumber,ChildCount,RecursiveItemCount,ProductionYear,AlbumCount"
     }
 }
 

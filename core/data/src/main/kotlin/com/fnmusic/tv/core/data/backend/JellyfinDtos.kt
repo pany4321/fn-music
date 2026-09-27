@@ -1,5 +1,11 @@
 package com.fnmusic.tv.core.data.backend
 
+import com.fnmusic.tv.core.model.Album
+import com.fnmusic.tv.core.model.Artist
+import com.fnmusic.tv.core.model.CollectionGuid
+import com.fnmusic.tv.core.model.Genre
+import com.fnmusic.tv.core.model.Page
+import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.TrackGuid
 import kotlinx.serialization.Serializable
@@ -63,9 +69,13 @@ internal data class JellyfinItemDto(
     val IndexNumber: Int? = null,
     val ParentIndexNumber: Int? = null,
     val ImageTags: Map<String, String> = emptyMap(),
+    /** 歌单内条目的 id：Jellyfin 从歌单移除曲目要用它（`DELETE ...?entryIds=`）。 */
+    val PlaylistItemId: String? = null,
     val UserData: JellyfinUserDataDto? = null,
     val ChildCount: Int? = null,
     val RecursiveItemCount: Int? = null,
+    val ProductionYear: Int? = null,
+    val AlbumCount: Int? = null,
     val MediaSources: List<JellyfinMediaSourceDto> = emptyList(),
 )
 
@@ -92,3 +102,52 @@ internal fun JellyfinItemDto.toTrack(): Track = Track(
         ?.uppercase(),
     isFavorite = UserData?.IsFavorite == true,
 )
+
+/** 专辑条目 → 领域模型：Jellyfin 的专辑也是 Item，曲目数在 `ChildCount`/`RecursiveItemCount`。 */
+internal fun JellyfinItemDto.toAlbum(): Album = Album(
+    guid = CollectionGuid(Id),
+    name = Name,
+    artistName = AlbumArtist ?: Artists.firstOrNull(),
+    coverId = Id.takeIf { ImageTags.containsKey("Primary") },
+    trackCount = RecursiveItemCount ?: ChildCount,
+    releaseDate = ProductionYear?.toString(),
+)
+
+/** 歌手条目 → 领域模型（Jellyfin 的"专辑艺术家"）。 */
+internal fun JellyfinItemDto.toArtist(): Artist = Artist(
+    guid = CollectionGuid(Id),
+    name = Name,
+    coverId = Id.takeIf { ImageTags.containsKey("Primary") },
+    trackCount = RecursiveItemCount ?: ChildCount,
+    albumCount = AlbumCount,
+)
+
+/** 风格条目 → 领域模型。 */
+internal fun JellyfinItemDto.toGenre(): Genre = Genre(
+    guid = CollectionGuid(Id),
+    name = Name,
+    coverId = Id.takeIf { ImageTags.containsKey("Primary") },
+    trackCount = RecursiveItemCount ?: ChildCount,
+)
+
+/**
+ * 歌单条目 → 领域模型。
+ * Jellyfin 的歌单通常没有自己的封面（ImageTags 里没有 Primary），
+ * 此时 coverId 为空，上层沿用"用前三首歌拼排"的既有逻辑。
+ */
+internal fun JellyfinItemDto.toPlaylist(): Playlist = Playlist(
+    guid = CollectionGuid(Id),
+    name = Name,
+    coverId = Id.takeIf { ImageTags.containsKey("Primary") },
+    trackCount = RecursiveItemCount ?: ChildCount,
+)
+
+/** Items 响应 → 统一分页模型（page/size 是 1-based 页号与每页条数）。 */
+internal fun <T> JellyfinItemsDto.toPage(page: Int, size: Int, map: (JellyfinItemDto) -> T): Page<T> =
+    Page(
+        items = Items.map(map),
+        page = page,
+        pageSize = size,
+        total = TotalRecordCount.takeIf { it > 0 } ?: Items.size,
+        sort = "",
+    )
