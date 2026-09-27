@@ -140,3 +140,86 @@ cut -d= -f2- .trellis/local/test-credentials.properties \
 rm -f /tmp/staged.patch
 ```
 输出为空才算干净。凭据历史上泄露过两次、Git 历史重写过两次，这条检查不要省。
+
+---
+
+## 9. 既定规则与限制条件（必读，违反会返工或出事）
+
+### 9.1 仓库与发布规则（项目硬性约定）
+- **每个改动批次结束必须升版 + 发布**：`version.properties` 的 `VERSION_NAME`（patch+1）与 `VERSION_CODE`（+1）；
+  提交 `chore: prepare <版本> release`；push `main` 后 CI 自动出 Release。
+- **CI 只在 tag `v<VERSION_NAME>` 不存在时才发布**；**已发布过的版本号绝不复用**。
+- `CHANGELOG.md` 必须同步写条目（版式：`## 版本 - 日期` + `### 新增 / 优化 / 修复 / 说明`，中文、面向用户）。
+- **版本号语义**：patch = 修补与内部重构；minor = 用户可见的新能力（本次多后端 = **1.5.0**）；
+  major = 破坏性变更（改包名/改名 = **2.0.0**）。
+- 分支策略：`main` 主线；`release/1.4` 维护历史发布版（1.4.x 小修在这里 bump 出包）；功能开发走 `feature/*` 分支后合入 `main`。
+- 项目由 **Trellis** 管理：写代码前先读 `.trellis/spec/`，工作流见 `.trellis/workflow.md`；
+  `.trellis/tasks/`（任务）与 `.trellis/local/`、`.trellis/tmp/` 都在 `.gitignore` 里，**不要往里提交任何东西**。
+
+### 9.2 安全与凭据（用户多次强调，历史泄露过两次）
+- NAS 与 Jellyfin 的**地址、账号、密码永不出现在任何入库文件**：文档、注释、测试代码、CI 配置、README 一律不行；
+  只允许放在 `.trellis/local/test-credentials.properties`。
+- **连"校验命令/示例"都不能含明文片段**（本项目曾把密码片段写进文档，必须改写提交并 force-push 清理）。
+- 截图、抓包、临时脚本不得入库（曾误提交 `.trellis/*.png`、`*.sh`，已清理）。
+- CI 的 FN Connect 密钥走 GitHub Secrets（`FN_CONNECT_API_KEY` / `FN_CONNECT_AUTHX_PREFIX`），与本地测试凭据无关。
+- 万一泄露：立即改密码 + 重写 Git 历史（流程参照 `.trellis` 内既有记录）。
+
+### 9.3 代码铁律（改 UI/播放/缓存时必须遵守）
+1. **焦点**（用户拷问最多的点）：左右键只在**行内**移动、上下键跨行、**不跳过、不逃逸**；
+   行首/行尾用 `FocusRequester.Cancel` 明确取消；跨行用显式 `FocusRequester` 或 `getOrNull(...) ?: Cancel`。
+   - **不要把 Lazy 容器（LazyRow/LazyColumn/LazyVerticalGrid）里会被回收的 item 当作 `focusProperties` 的目标**：
+     目标被回收后 requester 会变成未挂载，方向键会**静默失效（焦点冻结）**。
+     现有首页行、媒体带、网格都已改成非 lazy（`Row + horizontalScroll` / `Column + verticalScroll`）——改回 lazy 前先想清楚焦点。
+   - 所有 `requestFocus()` 必须 `runCatching` 包住（未挂载会抛 `IllegalStateException`）。
+   - 弹窗（Dialog）关闭后要显式把焦点还给触发它的按钮（见 `AddToPlaylistDialog` 的 `dialogWasVisible` 写法）。
+2. **配色**：UI 层（`app/.../ui/` 除 `Theme.kt` 外）**不允许出现任何颜色字面量**；
+   一律用 `FnColors` 的主题 token（插画用 `FnArt`）。新增颜色必须：加 `ThemeColors` 字段 → 在**每套主题**里派生（现在 12 套）→ 加 `FnColors` 字段 → 在 `applyTheme` 里赋值。
+   - **色值必须写 8 位 ARGB**（`Color(0xFFRRGGBB)`）；写成 6 位会被 Compose 当作 alpha=0（全透明），
+     本项目曾因此让"卡片底色/描边/面板底色"在六套主题下全部画不出来。
+3. **尺寸与缩放**：全局缩放已实现（`LocalDensity` 覆盖，设置页 标准 1.35 / 较大 1.5 / 更大 1.75；自动档：车机 1.25、电视与手机 1.0）。
+   新 UI 直接写普通 dp/sp 即可被统一缩放；**不要再写"按屏幕密度分支"的尺寸逻辑**。
+   10 英尺 UI：可点元素 ≥ 48dp、正文字号 ≥ 14sp 起步（本项目已在 1.4.x 统一放大过一轮）。
+4. **Compose lint 规则**：`Modifier` 必须是第一个可选参数；公共函数不要暴露 `internal` 类型；改了签名要跑 lint。
+5. **播放内核语义**：`mediaId` = 曲目 id；`QueueSource.sort` 是**队列/快照身份的一部分**（改动必须按后端隔离，快照已按 namespace 隔离）；
+   漫游是内核的一等状态（`QueueKind.Roam`、`RoamWindow`、`PlaybackTransportOwnership.Roam`），换后端时**只换数据来源，别动状态机**。
+6. **缓存语义（Step 1b 的关键约束）**：`cachedPage` 缓存**原始 JSON**并持久化到 Room；
+   `invalidateSource(namespace, businessKey)` 的键是 `(namespace, kind, businessKey)` 三段——
+   本项目曾把 `kind`（"index"）当 `businessKey`（"playlists"）传，导致**歌单索引缓存没被清掉、#新建歌单后列表不刷新**。
+   改缓存相关代码前先读 `SerializedResponseCache` 的键定义。
+7. **服务端是家用设备，后端要克制**：封面并发 4、列表取样单页、卡片封面写穿复用、随机取歌一次成片；
+   不要引入"一次发几十个请求"的实现（本项目为此专门优化过一轮）。
+8. **老设备（Android 6 电视，堆 96–192MB）**：不要把大量条目一次性铺开（搜索已改 `LazyColumn`）；
+   图片内存缓存按堆封顶（`min(40MB, heap/8)`）、小堆时并发解码 3→2 且跳过渐进加载；Manifest 已开 `largeHeap`；
+   解码要能扛 `OutOfMemoryError`（失败退化成占位图，不许崩）。
+
+### 9.4 环境与工具限制
+- **JDK 必须显式设置**：`JAVA_HOME="D:/research/android/env/jdk-21.0.12.1+1"`（默认环境的 JDK 版本不对）。
+- **不要用模拟器**（早期用户明确要求：会影响其他项目的模拟器测试）；TV AVD `tv_36` 在本机起不来（进程仅 12MB、长期 offline），
+  如需模拟器验证请先与用户确认。**以真机为准**。
+- `heredoc` 写长脚本会被截断 → **长脚本/长补丁用 Write 工具写文件再执行**（本项目多次踩坑）。
+- 截图用 `adb exec-out screencap -p`（不要 `adb shell cat`，CRLF 会破坏二进制）；`uiautomator dump` 不稳，优先截图 + `input keyevent`。
+- 真机登录（debug 包每次重装都退出登录）：CENTER → 输入 → **BACK 退出编辑** → DOWN 到下一个字段 ……（编辑态会吞方向键；BACK 多按一次会退出 App）。
+- Windows 上 `core:data` 的 `AppDatabaseMigrationTest` **必然失败**（Robolectric 临时路径），与改动无关，CI/Linux 为绿。
+
+### 9.5 与用户协作的约定
+- **先方案后动手**：涉及 UI/命名/大重构，先把方案讲清楚等确认（用户会说"待我批准再修改"）。
+- **改完必须自测**：UI 改动要真机截图核对；**动到用户数据前先想清楚**（验证歌单/收藏这类写操作要用可逆操作并清理，验完告知）。
+- 回复用中文；文档与说明"越详细越好"。
+- 每次发布后要确认 CI 真的产出了 Release（`gh release list`），而不是只看 push 成功。
+
+---
+
+## 10. 已踩过的坑（不要重复）
+
+| 坑 | 症状 | 正确做法 |
+|---|---|---|
+| 6 位色值 | 卡片/描边/面板在部分主题下"消失" | 一律 8 位 ARGB |
+| 缓存失效键 | 新建歌单后首页/弹窗不刷新 | 用 `businessKey`（如 `playlists`），不是 `kind` |
+| Lazy item 作焦点目标 | 方向键静默失效、焦点冻死 | 容器改非 lazy，或只把 requester 挂在稳定节点 |
+| effect 自己改自己的 key | 历史胶囊点击被自我取消、结果被清空 | 拆成两个互不影响的 effect |
+| 输入框吞方向键 | 遥控器下不到结果区/历史胶囊 | 输入框显式 `onPreviewKeyEvent` 接管上下键 |
+| 页面/列表一次性铺开 | 老电视 OOM 崩退 | `LazyColumn` + 按堆封顶的图片缓存 + OOM 兜底 |
+| `Modifier` 位置 | lint 报 `ModifierParameter` | 参数顺序：必填 → `modifier` → 其它可选 |
+| 公开函数暴露 internal 类型 | 编译报错 | 类型改成 public 或函数改 internal（`applyTheme` 就是这么处理的） |
+| 文档里写明文片段 | 等于泄露 | 校验命令从 `.trellis/local/` 读匹配模式 |
+| 只 push 不看 CI | 以为发了版其实没出 Release | `gh release list` 确认 |
