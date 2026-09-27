@@ -1,10 +1,15 @@
 package com.fnmusic.tv.ui
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -26,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.ui.FnColors
@@ -68,7 +74,7 @@ internal fun SourceRow(
             onClick = { if (!active) onSelect() },
             modifier = Modifier
                 .weight(1f)
-                .height(72.dp)
+                .height(80.dp)
                 .semantics { contentDescription = "音乐源：${sourceTitle(entry)}" }
                 .focusProperties {
                     right = deleteFocus ?: FocusRequester.Cancel
@@ -111,8 +117,8 @@ internal fun SourceRow(
             LoginActionButton(
                 onClick = onDelete,
                 modifier = Modifier
-                    .height(72.dp)
-                    .width(72.dp)
+                    .height(76.dp)
+                    .width(76.dp)
                     .semantics { contentDescription = "删除音乐源：${sourceTitle(entry)}" }
                     .then(if (deleteFocus != null) Modifier.focusRequester(deleteFocus) else Modifier),
             ) {
@@ -140,15 +146,24 @@ internal fun SourcePickerDialog(
     val deleteFocuses = remember(sources) { List(sources.size) { FocusRequester() } }
     val addFocus = remember { FocusRequester() }
     val closeFocus = remember { FocusRequester() }
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .widthIn(max = 640.dp)
-                .fillMaxWidth(0.92f)
-                .background(FnColors.Surface, RoundedCornerShape(10.dp))
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        // 平台对话框窗口默认会限制宽度（真机上只有屏宽的四成左右），关掉它自己定宽。
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // 源列表要放下"服务器名 / 类型 · 地址 · 账号"，给宽一些：屏宽的 0.86，最多 1000dp。
+            val dialogWidth = minOf(maxWidth * 0.86f, 1000.dp)
+            Column(
+                Modifier
+                    .width(dialogWidth)
+                    // 横屏电视/车机的可视高度很矮，内容必须能滚，否则「关闭」会被切在屏幕外。
+                    .heightIn(max = maxHeight * 0.92f)
+                    .verticalScroll(rememberScrollState())
+                    .background(FnColors.Surface, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 26.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             Text("音乐源", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
             if (sources.isEmpty()) {
                 Text("还没有添加音乐源", color = FnColors.Muted, fontSize = 15.sp)
@@ -168,26 +183,31 @@ internal fun SourcePickerDialog(
                 }
             }
             Spacer(Modifier.height(2.dp))
-            LoginActionButton(
-                onClick = onAdd,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .semantics { contentDescription = "添加音乐源" }
-                    .focusProperties { down = closeFocus }
-                    .focusRequester(addFocus),
-            ) {
-                Text("＋ 添加音乐源", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            // 添加与关闭并排：横屏电视/车机的可视高度很矮，竖着放会把"关闭"挤到屏幕外。
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LoginActionButton(
+                    onClick = onAdd,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(62.dp)
+                        .semantics { contentDescription = "添加音乐源" }
+                        .focusProperties { right = closeFocus }
+                        .focusRequester(addFocus),
+                ) {
+                    Text("＋ 添加音乐源", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                }
+                LoginActionButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .width(150.dp)
+                        .height(62.dp)
+                        .semantics { contentDescription = "关闭" }
+                        .focusProperties { left = addFocus }
+                        .focusRequester(closeFocus),
+                ) {
+                    Text("关闭", color = FnColors.Muted, fontSize = 17.sp)
+                }
             }
-            LoginActionButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .semantics { contentDescription = "关闭" }
-                    .focusRequester(closeFocus),
-            ) {
-                Text("关闭", color = FnColors.Muted, fontSize = 17.sp)
             }
         }
     }
