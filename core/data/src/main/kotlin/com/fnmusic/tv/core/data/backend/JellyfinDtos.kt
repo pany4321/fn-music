@@ -72,6 +72,8 @@ internal data class JellyfinItemDto(
     /** 歌单内条目的 id：Jellyfin 从歌单移除曲目要用它（`DELETE ...?entryIds=`）。 */
     val PlaylistItemId: String? = null,
     val UserData: JellyfinUserDataDto? = null,
+    /** 歌单的媒体类型（`Audio`/`Video`）：音乐 App 只该列出音频歌单。 */
+    val MediaType: String? = null,
     val ChildCount: Int? = null,
     val RecursiveItemCount: Int? = null,
     val ProductionYear: Int? = null,

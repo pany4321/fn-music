@@ -211,6 +211,9 @@ class JellyfinMappingTest {
     fun `hls transcode url matches the verified parameter set`() {
         val url = api.hlsTranscodeUrl("ITEM1")
 
+        // 实测：必须是 master.m3u8（/stream?...hls 返回裸 TS，HLS 解析器解不了）
+        assertTrue(url.contains("/Audio/ITEM1/master.m3u8"))
+        assertTrue(url.contains("MediaSourceId=ITEM1"))
         assertTrue(url.contains("transcodingProtocol=hls"))
         assertTrue(url.contains("audioCodec=aac"))
         assertTrue(url.contains("container=ts"))

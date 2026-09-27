@@ -63,8 +63,8 @@ interface MusicBackend {
    （前缀而不是判定函数：跨 Media3 Bundle 只能传字符串）；`PlaybackService` 头注入与 `PlaybackRehoming` 随之泛化。
 4. ⏳ 真机飞牛回归：主要通路已验证（见交接文档 §5 Step 1b 第 4 条），搜索/写入类与全新登录待补验；合入 `main` 待定版本口径。
 
-### Step 2b（Jellyfin 接线）
-5. `JellyfinConnector`：`/System/Info/Public` 识别 + 登录 + 令牌持久化
+### Step 2b（Jellyfin 接线）✅ 已完成（`27a63a7`）
+5. ✅ `JellyfinConnector`：`/System/Info/Public` 识别 + 登录 + 令牌持久化
    （`SecureTokenStore` payload 加 `kind` 字段，兼容老数据）+ namespace = `ServerId:UserId`。
    ⚠️ 同时要泛化 `ServerConnection`（现在直接带 `TrimMusicApi`）与 `SessionRepository.requireApi()/authenticated{}`。
 6. 登录页：提交时先 probe 识别后端；FNID/安全码仅飞牛显示；错误文案泛化。
@@ -74,8 +74,10 @@ interface MusicBackend {
    播放内核零改动。
 9. HLS 接通：`PlaybackTrack` 带 `StreamMode`，`PlaybackController` 用已有的
    `PlaybackSource.Hls` + `media3-exoplayer-hls` 建 HLS media item。
-10. Jellyfin 的歌单/收藏/最近播放接到既有缓存与 `favoriteState` 状态机上
+10. ✅ Jellyfin 的歌单/收藏/最近播放接到既有缓存与 `favoriteState` 状态机上
     （`PlaylistItemId` → `Track.playlistEntryId`）。
+    - ⚠️ HLS 必须打 `/Audio/{id}/master.m3u8`（`/stream?...hls` 是裸 TS 流）；新建歌单 `POST /Playlists`
+      只回 id；`AlbumArtists`/`MusicGenres` 不给计数；歌单要按 `MediaType=Audio` 过滤。细节见交接文档 §3.2 坑表。
     - 计划文档（`.zcode/plans/…`）里还剩两处没落地，别漏：`MusicBackend` 增加
       `probe(origin): ServerIdentity?`（登录页识别类型/版本用）；`Track` 增加
       `playlistEntryId: String?` 承载 Jellyfin 的歌单条目 id。

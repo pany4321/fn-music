@@ -124,7 +124,9 @@ internal class JellyfinMusicBackend(
         val rawJson = call {
             when (source) {
                 CatalogIndexSource.Playlists -> ApiDecoder.json.encodeToString(
-                    api.items(userId, includeItemTypes = PLAYLIST, sortBy = SORT_NAME, limit = INDEX_LIMIT),
+                    api.items(userId, includeItemTypes = PLAYLIST, sortBy = SORT_NAME, limit = INDEX_LIMIT)
+                        // 音乐 App 只列音频歌单：Jellyfin 的歌单里混着"电影/电视剧"这类视频歌单。
+                        .let { page -> page.copy(Items = page.Items.filter { it.isAudioPlaylist() }) },
                 )
                 is CatalogIndexSource.PlaylistDetail -> encodeItem(requireItem(source.guid))
                 is CatalogIndexSource.ArtistDetail -> encodeItem(requireItem(source.guid))
@@ -220,8 +222,15 @@ internal class JellyfinMusicBackend(
         call { api.setFavorite(userId, trackGuid, favorite) }
     }
 
-    override suspend fun createPlaylist(name: String): Playlist =
-        call { api.createPlaylist(name, userId) }.toPlaylist()
+    /**
+     * 新建歌单并返回它。
+     * ⚠️ 实测：`POST /Playlists` 只回 `{"Id":"…"}`（不是完整条目），
+     * 所以名字用我们传进去的那个，别去解返回体（否则会拿到空名字）。
+     */
+    override suspend fun createPlaylist(name: String): Playlist {
+        val created = call { api.createPlaylist(name, userId) }
+        return Playlist(CollectionGuid(created.Id), name, coverId = null, trackCount = 0)
+    }
 
     override suspend fun addToPlaylist(playlistGuid: String, trackGuid: String) {
         call { api.addToPlaylist(playlistGuid, listOf(trackGuid), userId) }
@@ -485,6 +494,10 @@ internal class JellyfinMusicBackend(
         )
     }
 }
+
+/** 音频歌单（`MediaType` 缺省时按音频处理，宁可多留也不要漏）。 */
+private fun JellyfinItemDto.isAudioPlaylist(): Boolean =
+    MediaType == null || MediaType.equals("Audio", ignoreCase = true)
 
 private fun <Domain> JellyfinItemsDto.decoded(
     sort: String,

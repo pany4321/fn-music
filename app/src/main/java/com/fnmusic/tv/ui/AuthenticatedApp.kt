@@ -1831,7 +1831,7 @@ private fun BrowseMy(
                 "歌手",
                     artists.take(8).map {
                         val key = "artist:${it.guid.value}"
-                        BandEntry(it.name, "${it.trackCount ?: 0} 首歌曲", it.coverId, BandKind.Artist, key) {
+                        BandEntry(it.name, artistCountLabel(it.trackCount), it.coverId, BandKind.Artist, key) {
                             focusedKey = key
                             onArtist(it)
                         }
@@ -2308,7 +2308,7 @@ private fun ArtistGrid(
         key = { it.guid.value },
         onBack = onBack,
     ) { artist, modifier ->
-        ArtistLockup(artist.name, "${artist.trackCount ?: 0} 首歌曲", artist.coverId, modifier = modifier) { onOpen(artist) }
+        ArtistLockup(artist.name, artistCountLabel(artist.trackCount), artist.coverId, modifier = modifier) { onOpen(artist) }
     }
 }
 
@@ -4949,7 +4949,7 @@ private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, 
     GridPage("全部风格", genres, { it.guid.value }, onBack = onBack) { genre, modifier ->
         GenreLockup(
             title = genre.name,
-            subtitle = (genre.trackCount ?: 0).toString() + " 首歌曲",
+            subtitle = genre.trackCount?.let { "$it 首歌曲" }.orEmpty(),
             coverId = genre.coverId,
             modifier = modifier,
             onClick = { onGenre(genre) },
@@ -5243,7 +5243,7 @@ private fun SearchRoute(
                             artists.forEachIndexed { index, artist ->
                                 AlbumLockup(
                                     title = artist.name,
-                                    subtitle = (artist.trackCount ?: 0).toString() + " 首歌曲",
+                                    subtitle = artistCountLabel(artist.trackCount),
                                     coverId = artist.coverId,
                                     modifier = Modifier
                                         .then(
@@ -5508,3 +5508,10 @@ private fun TrackResultRow(
         }
     }
 }
+
+/**
+ * 歌手条目的副标题：曲目数可能不存在——Jellyfin 的 `/Artists/AlbumArtists` 不返回计数，
+ * 这时宁可什么都不显示，也不要写"0 首歌曲"骗人。
+ */
+private fun artistCountLabel(trackCount: Int?): String =
+    trackCount?.let { "$it 首歌曲" }.orEmpty()

@@ -317,10 +317,19 @@ internal class JellyfinApi(
             .addQueryParameter("api_key", requireToken())
             .build().toString()
 
-    /** HLS 转码（可拖动）；参数来自实测可用的那一组。 */
+    /**
+     * HLS 转码（可拖动）。
+     *
+     * ⚠️ 实测（10.10.7）：必须打 **`/Audio/{id}/master.m3u8`** ——
+     * `/Audio/{id}/stream?...transcodingProtocol=hls` 返回的是裸 TS 流（`video/mp2t`，
+     * 以 0x47 同步字节开头），HLS 解析器会报 "Input does not start with the #EXTM3U header"。
+     * `MediaSourceId` 是必需的（缺了直接 400），`api_key` 会写进变体播放列表里。
+     */
     fun hlsTranscodeUrl(itemId: String, maxStreamingBitrate: Int = 192_000): String =
-        url("Audio/$itemId/stream").newBuilder()
+        url("Audio/$itemId/master.m3u8").newBuilder()
             .addQueryParameter("api_key", requireToken())
+            .addQueryParameter("MediaSourceId", itemId)
+            .addQueryParameter("DeviceId", deviceId)
             .addQueryParameter("container", "ts")
             .addQueryParameter("audioCodec", "aac")
             .addQueryParameter("transcodingContainer", "ts")

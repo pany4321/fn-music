@@ -14,7 +14,7 @@
 
 | 分支 | 用途 | 状态 |
 |---|---|---|
-| `main` | 主线 | **1.5.0 已发布**（Step 1b 合入 `ff1976e` + 版本改名为 1.5.0，CI 已出 Release）+ CI 触发规则（`on.push.branches: [main, "release/*"]`） |
+| `main` | 主线 | **1.5.0（多后端骨架）/ 1.5.1（Jellyfin 接入）已发布** + CI 触发规则（`on.push.branches: [main, "release/*"]`） |
 | `release/1.4` | **上个发布版的维护分支**，1.4.x 小修在这里 bump 出包 | 已推送，tag `v1.4.3` 已存在 |
 | `feature/multi-backend` | 多后端工作分支（本次改造） | 已推送并与 `main` 同步（`ff1976e`）；Step 2b 从这里继续 |
 
@@ -57,6 +57,9 @@
 | `4b26c3c` | CI：允许从 `release/*` 维护分支出包（已存在的 tag 会跳过，不会重复发布） |
 | `c11481a` | 路线图与 **Step 1b 关键设计决策**（见下） |
 | `4086a86` | `.gitignore` 忽略 `.zcode/`（会话/计划草稿里会写测试服务器地址） |
+| `c2bffa3` | **Step 1b**（详见 §3.1） |
+| `9f8aef7`+`05cb0ef` | 版本改名 1.5.0（多后端第一步）+ 删除被取代的 v1.4.4 |
+| `27a63a7` | **Step 2b**：Jellyfin 接线（会话层泛化 + 全量 Jellyfin 后端 + 客户端漫游 + HLS + 登录识别），详见 §3.2 |
 | `c2bffa3` | **Step 1b**：飞牛侧抽取（行为不变）——`RawPage/RawIndex/DecodedPage` + `CatalogPageSource/CatalogIndexSource`（目录查询返回可缓存原始体、后端负责解码），`MusicRepository.cachedPage/cachedIndex` 改为吃原始体；`FnOsMusicBackend` 收拢全部飞牛 endpoint/排序串/DTO 映射；新增 `ServerConnector`+`FnOsConnector`；`PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, streamPathPrefix)`，`PlaybackRehoming` 前缀随之下发。详见 §3.1 |
 
 ### 3.1 Step 1b 落地细节（Step 2b 会用到）
@@ -126,26 +129,74 @@
 > App 没有删除歌单的接口，需要在 NAS/飞牛客户端里手动删掉；同页还有更早会话留下的 `ZCode-Test3`。
 > 收藏与 `black` 歌单都已恢复到验证前的状态。
 
-### Step 2b —— Jellyfin 接线
-6. `JellyfinConnector`：`GET /System/Info/Public` 识别 + `POST /Users/AuthenticateByName` 登录 +
-   令牌持久化（`SecureTokenStore` payload 加 `kind` 字段，兼容老数据）+ namespace 用 `ServerId:UserId`。
-7. 登录页：地址提交时先 probe 识别后端（命中 Public Info 即 Jellyfin，页面显示"已识别 Jellyfin 10.x"）；
-   FNID/安全码字段仅飞牛显示；错误文案泛化（"NAS 暂时不可用"→"服务器暂时不可用"）。
-8. `AppContainer`/会话按 `ServerKind` 构造并注入 `FnOsMusicBackend` 或 `JellyfinMusicBackend`。
-9. **客户端漫游** `LocalRoamStrategy`：`SortBy=Random` 或 `/Items/{id}/InstantMix` 取种子 →
-   本地 prev/current/next 游标 → 合成 `RoamWindow`；由 `capabilities.serverSideRoam` 选择实现，播放内核零改动。
-10. **HLS 接通**：`PlaybackTrack` 带 `StreamMode`，`PlaybackController` 用已有的 `PlaybackSource.Hls` +
-   `media3-exoplayer-hls`（依赖已在）建 HLS media item。
-11. Jellyfin 的歌单/收藏/最近播放接到既有缓存与 `favoriteState` 状态机上
-    （`PlaylistItemId` → `Track.playlistEntryId`；收藏列表用 `Filters=IsFavorite`，最近播放用 `Filters=IsPlayed&SortBy=DatePlayed`，均已实测）。
-12. 计划文档（`.zcode/plans/…`）里还剩这几处没落地，别漏：
+
+### 3.2 Step 2b 落地细节（Jellyfin 接入）
+
+- **会话层**：`ServerKind` 移到 `:core:model`（`ServerIdentity` 带 kind）；登录档案加 `kind` 字段
+  （字符串 + 默认值，`SecureSessionPayload.version` 仍是 1，老数据自动按飞牛解释）；
+  `ServerConnection` 改成 sealed（FnOs 带 `TrimMusicApi`+安全码，Jellyfin 带 `JellyfinApi`+userId）；
+  `ServerConnector` 增加 `probe/connect(ConnectRequest)/login/reLogin/me/logout`；
+  `SessionBackends` 按"当前会话的 kind"解析后端并复用实例（Jellyfin 的漫游游标要跨调用保持）。
+- **登录识别**：`SessionRepository.probeServer` 命中 `/System/Info/Public` 即 Jellyfin（FNID 与探测失败都按飞牛兜底）；
+  探测客户端用 **3 秒超时**，避免在飞牛地址上拖慢登录。地址没写端口时补试 8096/8920。
+- **Jellyfin 鉴权差异**：没有服务端密码哈希 → 免密重登只能靠 AccessToken（`reLogin` 返回 null，
+  用户重新输密码）；播放流地址自带 `api_key`，另外注入 `MediaBrowser` 头。
+- **目录映射**：`CatalogPageSource/CatalogIndexSource` → Items/Artists/AlbumArtists/MusicGenres/
+  Playlists/{id}/Items/Views；每个来源固定排序键（后端不透明游标）。rawJson 仍是可缓存的原始响应。
+- **客户端漫游**：`startRoam` 取一批 `SortBy=Random` 种子（30 首），本地 prev/current/next 游标；
+  越界时**换一批并排除当前曲目**（否则 roamId 不变会让播放内核报 `CollectionChanged`）。
+- **HLS**：`PlaybackTrack.streamMode` → Media3 显式 `setMimeType(application/x-mpegURL)`；
+  快照持久化流形态（冷启动续播不丢 HLS 标记）；队列装填走 `queueStreamPlan`
+  （Jellyfin 按条目已知容器白光名单决定直连/HLS，不逐首协商）。
+
+#### 实测踩坑（Jellyfin 10.10.7，务必按这个来）
+
+| 坑 | 现象 | 正确做法 |
+|---|---|---|
+| HLS 端点选错 | `/Audio/{id}/stream?...transcodingProtocol=hls` 返回**裸 TS 流**（`video/mp2t`，0x47 开头），ExoPlayer 报 "Input does not start with the #EXTM3U header" | 打 **`/Audio/{id}/master.m3u8`**，并带 `api_key` + `MediaSourceId`（缺 MediaSourceId 直接 400）+ 转码参数 |
+| 新建歌单返回体 | `POST /Playlists` 只回 `{"Id":"…"}`，按完整条目解会得到空名字 | 名字用调用方传进去的那个，别解返回体 |
+| 歌手/风格没有计数 | `/Artists/AlbumArtists`、`/MusicGenres` 不返回 `ChildCount/RecursiveItemCount` | 计数缺失时 UI 不显示（别显示"0 首歌曲"） |
+| 歌单混着视频 | `IncludeItemTypes=Playlist` 会把"电影/电视剧"这类视频歌单也列出来 | 按条目 `MediaType == Audio` 过滤 |
+| 删歌单条目 | `DELETE /Playlists/{id}/Items?entryIds=` 要的是 **PlaylistItemId** 不是曲目 id | `Track.playlistEntryId`（歌单页取回时自带；缺失则回源查一次） |
+
+#### Step 2b 验证状态
+
+- **门禁**：`:app` 单测 + lint 通过；`core:data` 132（仅 Windows 必失败的迁移两例）；`core:playback` 49 全绿。
+- **真机（Jellyfin 侧，已验证）**：地址识别（回显"已识别 Jellyfin 10.10.7"）+ 全新登录 + 重装后会话恢复；
+  首页三卡片与歌单/随机专辑/随机歌曲/最近添加四行；我的页（服务器名、歌手行、风格行）；搜索（专辑/歌曲）；
+  直连播放（FLAC 徽标、缓冲正常）；**客户端漫游 start/next/previous**（含边界换批）；歌词（服务端/在线，含双语）；
+  收藏页空态。**接口层验证**（真实服务器，跑完清理干净）：收藏 create/read/delete、歌单 create/add/删条目/删歌单、
+  歌单批量计数、`/Audio/{id}/master.m3u8` 返回合法播放列表。
+- **真机（Jellyfin 侧，未验证）**：HLS 修复后的**端到端**播放（修复前的尝试已经证明播放器走了 HLS 解析器，
+  修复本身用真实服务器 + 单测锁定）；收藏 ♡ 与歌单新建在 App 内的点击链路（控制器/弹窗的 D-pad 命中率问题，
+  与飞牛侧踩的是同一个坑）。
+- **真机（飞牛侧，本版后未复验）**：Step 2b 改了会话层与后端选择，飞牛侧代码路径是"形状变化"（连接器抽取、
+  按 kind 取后端、`PlaybackAuth`、`streamMode=Direct`），单测（`SessionRepositoryTest`/`FnOsConnectorTest`/
+  `MusicRepository*Test`）全绿，但**登录一件与全流程回归没在真机跑完**——下次真机验收要补。
+- **观察（未定因）**：飞牛档案在某次 `adb install -r` 后从登录历史里消失（登录页回到空表单），
+  同期 Jellyfin 档案跨多次安装都保持；没找到确定原因，下次真机验收留意是否复现。
+
+### Step 2b —— Jellyfin 接线 ✅ 已完成（`27a63a7` + HLS/文案修复）
+6. ✅ `JellyfinConnector`：识别 + 登录 + 令牌持久化都做了（`kind` 字段兼容老数据；namespace 仍用
+   `serverGUID:userGUID`，Jellyfin 侧 serverGUID 取 `Public Info` 的 `Id`）；差异见 §3.2。
+7. ✅ 登录页提交时先 probe 并回显"已识别 Jellyfin x.y.z"；识别为 Jellyfin 时隐藏安全码栏、抬头改为 Jellyfin；
+   文案泛化（NAS → 服务器）。
+8. ✅ 没走"AppContainer 按 kind 构造"这条路：改成 `SessionBackends` 按当前会话解析后端（`MusicRepository.backend`
+   变成按会话拉取），避免"会话切了后端还是旧的"竞态，App 侧零改动。
+9. ✅ 客户端漫游落在 `JellyfinMusicBackend` 里（随机种子 + 本地游标 + 越界换批），仍合成 `RoamWindow`；
+   用的是 `SortBy=Random`（`InstantMix` 留作后续可选优化）。
+10. ✅ HLS 接通（`PlaybackTrack.streamMode` + 显式 m3u8 MIME + 快照持久化）；端点必须用 `master.m3u8`（见 §3.2 坑表）。
+11. ✅ 歌单/收藏/最近播放都接到既有缓存与 `favoriteState` 上；`Track.playlistEntryId` 落地并用于删条目。
+12. ✅ 已落地：`probe` 在 `SessionConnector` 层实现（`SessionRepository.probeServer`）、`Track.playlistEntryId`、
+   `ServerConnection` 按 kind 分叉。提醒：
     `MusicBackend` 增加 `probe(origin): ServerIdentity?`（登录页识别类型/版本用）；
     `Track` 增加 `playlistEntryId: String?`；`ServerConnection` 改成按 `ServerKind` 分叉
     （现在直接带 `TrimMusicApi`），`SessionRepository.requireApi()/authenticated{}` 同步泛化；
     `QueueSource.sort` 按"后端不透明游标"的语义写注释（飞牛沿用现有排序串，Jellyfin 用自家键）。
 
 ### 收尾
-13. **真机双后端串行验收**（同一台设备先飞牛后 Jellyfin，跑全流程）→ 合入 `main` → 发 **1.5.0**（CHANGELOG + 版本号 +1 + push，CI 自动出 Release）。
+13. ⏳ **真机双后端串行验收**：Jellyfin 侧已跑（见 §3.2 验证状态），飞牛侧在本版改动后**只差登录 + 全流程复验**
+   （已知踩点在 §3.2：登录页 BACK 会退出页面、登录按钮 disabled 时焦点不移动）。发版：**1.5.1**。
 14. 之后再单独做 **2.0.0**：改名「音乐坞」+ `applicationId com.musicdock.tv` + 同步 CI 产物名/更新清单/UA/README + 旧包最后一次发布里写明"请安装新版音乐坞"（换包名后旧版无法自更新）。
 
 ---

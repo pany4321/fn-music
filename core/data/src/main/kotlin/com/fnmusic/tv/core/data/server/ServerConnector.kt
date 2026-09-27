@@ -12,6 +12,7 @@ import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.User
 import com.fnmusic.tv.core.model.UserGuid
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
@@ -238,7 +239,12 @@ internal class JellyfinConnector(
      * 地址没写端口时补试一次 Jellyfin 默认端口（8096/8920）——用户常常只输 IP。
      */
     override suspend fun probe(input: String, useHttps: Boolean): ServerIdentity? {
-        val client = clientFactory()
+        // 探测失败要"快速失败"：飞牛地址上这个端点通常 404，超时也不该拖住登录页。
+        val client = clientFactory().newBuilder()
+            .connectTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
         for (origin in probeOrigins(input, useHttps)) {
             val identity = runCatching { publicIdentity(origin, client) }.getOrNull()
             if (identity != null) return identity
@@ -325,5 +331,6 @@ internal class JellyfinConnector(
     private companion object {
         const val JELLYFIN_HTTP_PORT = 8096
         const val JELLYFIN_HTTPS_PORT = 8920
+        const val PROBE_TIMEOUT_SECONDS = 3L
     }
 }
