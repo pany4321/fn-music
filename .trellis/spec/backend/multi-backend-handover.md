@@ -14,9 +14,9 @@
 
 | 分支 | 用途 | 状态 |
 |---|---|---|
-| `main` | 主线 | 1.4.3 + CI 触发规则（`on.push.branches: [main, "release/*"]`） |
+| `main` | 主线 | **1.4.4 已发布**（Step 1b 合入 `ff1976e`，CI 已出 Release）+ CI 触发规则（`on.push.branches: [main, "release/*"]`） |
 | `release/1.4` | **上个发布版的维护分支**，1.4.x 小修在这里 bump 出包 | 已推送，tag `v1.4.3` 已存在 |
-| `feature/multi-backend` | 多后端工作分支（本次改造） | 已推送，最新 `c11481a`，可编译、`:app` 门禁全绿 |
+| `feature/multi-backend` | 多后端工作分支（本次改造） | 已推送并与 `main` 同步（`ff1976e`）；Step 2b 从这里继续 |
 
 版本安排（已与用户确认）：
 - **1.5.0** = 多后端这一整批（骨架 + Jellyfin 接入）；`1.4.x` 只留给上个发布版的小修。
@@ -107,32 +107,43 @@
    `MusicRepository` 里已无飞牛接口与 DTO。
 3. ✅ `ServerConnector` + `FnOsConnector` 拆出；`PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, streamPathPrefix)`；
    `PlaybackService` 的头注入与 `PlaybackRehoming` 前缀判定随之泛化（细节见 §3.1）。
-4. ⏳ **真机回归（飞牛侧）**：门禁全绿（`:app` 单测 115 + lint 通过；`core:data` 130 中仅 Windows 必失败的
-   `AppDatabaseMigrationTest` 两例；`core:playback` 47 全绿）。真机（3B1F5VEA9BBV3NFR，1.4.3 sideload debug）**已验**：
-   重装后会话恢复、首页四行（歌单索引/随机专辑/随机歌曲/最近添加）与三张卡片封面、我的页（用户信息 + 歌手行）、
-   收藏页列表与计数、歌单详情页（名称/计数/派生封面/曲目）、播放（直连 URL + 头注入，MediaSession PLAYING 且缓冲远超播放位，
-   FLAC 徽标）、漫游（服务端 start/next）、歌词通路（无歌词曲目显示占位）、全程无 FATAL。
-   **未在真机验证**：搜索、收藏写入（♡/✕）、歌单写入（新建/加歌/删歌）、主题缩放设置页、全新登录（`FnOsConnector.login` 本身）。
-   → 合 main 前若要补验，按 §4 的 D-pad 流程；这几项在代码上都是薄委托 + 既有单测覆盖。
-5. ⏳ 合入 `main`：**已与用户确认：Step 1b 单独发 `1.4.4`**（patch = 内部重构，符合 §9.1 语义），
-   1.5.0 留给 Step 2b（Jellyfin 接入）。上面第 4 条里「未在真机验证」的 5 项**留到 Step 2b 结束时的真机双后端串行验收一起跑**。
+4. ✅ **真机回归（飞牛侧）已全绿**：门禁（`:app` 单测 115 + lint 通过；`core:data` 130 中仅 Windows 必失败的
+   `AppDatabaseMigrationTest` 两例；`core:playback` 47 全绿）。真机（3B1F5VEA9BBV3NFR，`1.4.4-debug (55)`）逐项验过：
+   - **全新登录**：卸载重装（清数据）→ 走 D-pad 填地址/账号/密码 → 登录直达首页（`FnOsConnector.connect` + `login` + `me` 全链路）；
+   - **首页四行**（歌单索引/随机专辑/随机歌曲/最近添加）与三张卡片封面、我的页（用户信息 + 歌手行 + 歌手详情页）；
+   - **搜索**：无结果文案 + 命中歌手（Bandari 186 首）与歌曲行；**最近播放页** 7 首（`recentTracks`）；
+   - **收藏读写**：播放页 ♡ 收藏（30 → 31，收藏页置顶可见）→ 收藏页 ✕ 取消（31 → 30，恢复原状）；
+   - **歌单读写**：加到歌单（black 1 → 2 首）→ 歌单页 ✕ 删曲目（2 → 1 首，恢复原状）；**新建歌单** ZCode-Test-1.4.4（含当前曲目）；
+   - **设置页**：界面缩放改「较大」立即生效 → 改回「自动」；缓存用量读数、关于页版本号正常；
+   - **播放/漫游/歌词**：直连 URL + 头注入（MediaSession PLAYING、缓冲远超播放位、FLAC 徽标）、服务端漫游 start/next、无歌词曲目占位；全程无 FATAL。
+5. ✅ 已合入 `main` 并发布 **1.4.4**（`ff1976e`，CI 出 Release 已用 `gh release list` 确认）；
+   下个版本 **1.5.0** 留给 Step 2b（Jellyfin 接入）。
+
+> ⚠️ **待清理（用户侧）**：验证新建歌单时留下一个测试歌单 **`ZCode-Test-1.4.4`**（含 1 首 Bandari 曲目）。
+> App 没有删除歌单的接口，需要在 NAS/飞牛客户端里手动删掉；同页还有更早会话留下的 `ZCode-Test3`。
+> 收藏与 `black` 歌单都已恢复到验证前的状态。
 
 ### Step 2b —— Jellyfin 接线
-5. `JellyfinConnector`：`GET /System/Info/Public` 识别 + `POST /Users/AuthenticateByName` 登录 +
+6. `JellyfinConnector`：`GET /System/Info/Public` 识别 + `POST /Users/AuthenticateByName` 登录 +
    令牌持久化（`SecureTokenStore` payload 加 `kind` 字段，兼容老数据）+ namespace 用 `ServerId:UserId`。
-6. 登录页：地址提交时先 probe 识别后端（命中 Public Info 即 Jellyfin，页面显示"已识别 Jellyfin 10.x"）；
+7. 登录页：地址提交时先 probe 识别后端（命中 Public Info 即 Jellyfin，页面显示"已识别 Jellyfin 10.x"）；
    FNID/安全码字段仅飞牛显示；错误文案泛化（"NAS 暂时不可用"→"服务器暂时不可用"）。
-7. `AppContainer`/会话按 `ServerKind` 构造并注入 `FnOsMusicBackend` 或 `JellyfinMusicBackend`。
-8. **客户端漫游** `LocalRoamStrategy`：`SortBy=Random` 或 `/Items/{id}/InstantMix` 取种子 →
+8. `AppContainer`/会话按 `ServerKind` 构造并注入 `FnOsMusicBackend` 或 `JellyfinMusicBackend`。
+9. **客户端漫游** `LocalRoamStrategy`：`SortBy=Random` 或 `/Items/{id}/InstantMix` 取种子 →
    本地 prev/current/next 游标 → 合成 `RoamWindow`；由 `capabilities.serverSideRoam` 选择实现，播放内核零改动。
-9. **HLS 接通**：`PlaybackTrack` 带 `StreamMode`，`PlaybackController` 用已有的 `PlaybackSource.Hls` +
+10. **HLS 接通**：`PlaybackTrack` 带 `StreamMode`，`PlaybackController` 用已有的 `PlaybackSource.Hls` +
    `media3-exoplayer-hls`（依赖已在）建 HLS media item。
-10. Jellyfin 的歌单/收藏/最近播放接到既有缓存与 `favoriteState` 状态机上
+11. Jellyfin 的歌单/收藏/最近播放接到既有缓存与 `favoriteState` 状态机上
     （`PlaylistItemId` → `Track.playlistEntryId`；收藏列表用 `Filters=IsFavorite`，最近播放用 `Filters=IsPlayed&SortBy=DatePlayed`，均已实测）。
+12. 计划文档（`.zcode/plans/…`）里还剩这几处没落地，别漏：
+    `MusicBackend` 增加 `probe(origin): ServerIdentity?`（登录页识别类型/版本用）；
+    `Track` 增加 `playlistEntryId: String?`；`ServerConnection` 改成按 `ServerKind` 分叉
+    （现在直接带 `TrimMusicApi`），`SessionRepository.requireApi()/authenticated{}` 同步泛化；
+    `QueueSource.sort` 按"后端不透明游标"的语义写注释（飞牛沿用现有排序串，Jellyfin 用自家键）。
 
 ### 收尾
-11. **真机双后端串行验收**（同一台设备先飞牛后 Jellyfin，跑全流程）→ 合入 `main` → 发 **1.5.0**（CHANGELOG + 版本号 +1 + push，CI 自动出 Release）。
-12. 之后再单独做 **2.0.0**：改名「音乐坞」+ `applicationId com.musicdock.tv` + 同步 CI 产物名/更新清单/UA/README + 旧包最后一次发布里写明"请安装新版音乐坞"（换包名后旧版无法自更新）。
+13. **真机双后端串行验收**（同一台设备先飞牛后 Jellyfin，跑全流程）→ 合入 `main` → 发 **1.5.0**（CHANGELOG + 版本号 +1 + push，CI 自动出 Release）。
+14. 之后再单独做 **2.0.0**：改名「音乐坞」+ `applicationId com.musicdock.tv` + 同步 CI 产物名/更新清单/UA/README + 旧包最后一次发布里写明"请安装新版音乐坞"（换包名后旧版无法自更新）。
 
 ---
 
