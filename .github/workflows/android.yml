@@ -2,7 +2,9 @@ name: Android Package
 
 on:
   push:
-    branches: [main]
+    # main 走新功能版本；release/* 是历史发布版的维护分支，用于打小版本补丁（版本号各自独立，
+    # 已存在的 tag 会被下面的检查跳过，不会重复发布）。
+    branches: [main, "release/*"]
   workflow_dispatch:
 
 permissions:
