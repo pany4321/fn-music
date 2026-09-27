@@ -3,11 +3,13 @@ package com.fnmusic.tv.core.playback
 import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.MediaMetadata
 import com.fnmusic.tv.core.model.RoamNode
 import com.fnmusic.tv.core.model.RoamWindow
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.TrackGuid
+import com.fnmusic.tv.core.model.StreamMode
 import com.fnmusic.tv.core.model.playback.PlayMode
 import com.fnmusic.tv.core.model.playback.QueueKind
 import com.fnmusic.tv.core.model.playback.QueuePageItem
@@ -212,6 +214,45 @@ class PlaybackSnapshotCodecTest {
                     .toString(),
             ),
         )
+    }
+
+    @Test
+    fun `hls stream mode survives snapshot round trip`() {
+        val snapshot = PlaybackSnapshot(
+            generation = 1,
+            revision = 2,
+            items = listOf(
+                MediaItem.Builder()
+                    .setMediaId("hls-a")
+                    .setUri("https://example.test/Audio/hls-a/stream?transcodingProtocol=hls")
+                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .build(),
+            ),
+            index = 0,
+            positionMs = 0,
+            source = null,
+            window = null,
+            kind = QueueKind.Normal,
+            mode = PlayMode.ListRepeat,
+            shuffleOrder = emptyList(),
+            roamWindow = null,
+            currentRoamId = null,
+            frozen = null,
+            playIntent = PlaybackPlayIntent.Pause,
+        )
+
+        val decoded = requireNotNull(PlaybackSnapshotCodec.decode(PlaybackSnapshotCodec.encode(snapshot)))
+
+        // 冷启动续播时 HLS 标记不能丢，否则会被当成渐进式下载而放不出来
+        assertEquals(MimeTypes.APPLICATION_M3U8, decoded.items.single().localConfiguration?.mimeType)
+    }
+
+    @Test
+    fun `stream mode maps to the media3 mime type the player needs`() {
+        assertEquals(MimeTypes.APPLICATION_M3U8, StreamMode.Hls.media3MimeType())
+        // 直连（含飞牛的全部）不给 MIME：让 ExoPlayer 按内容自己判断
+        assertNull(StreamMode.Direct.media3MimeType())
+        assertNull(StreamMode.HttpTranscode.media3MimeType())
     }
 
     private fun mediaItem(id: String): MediaItem = MediaItem.Builder()

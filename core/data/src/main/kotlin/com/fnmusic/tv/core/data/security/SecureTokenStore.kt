@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.fnmusic.tv.core.model.ServerKind
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -24,7 +25,26 @@ internal data class StoredLoginProfile(
     val accessCode: String? = null,
     val userToken: String? = null,
     val lastUsedAt: Long,
-)
+    /**
+     * 后端类型（[SERVER_KIND_FNOS] / [SERVER_KIND_JELLYFIN]）。
+     * 用字符串而不是枚举是为了让老数据（没有这个字段）解码后落到默认值上；
+     * 未知值按飞牛处理（`ignoreUnknownKeys` 也让旧版本能读新数据）。
+     */
+    val kind: String = SERVER_KIND_FNOS,
+) {
+    val serverKind: ServerKind
+        get() = if (kind == SERVER_KIND_JELLYFIN) ServerKind.Jellyfin else ServerKind.FnOs
+
+    companion object {
+        const val SERVER_KIND_FNOS = "fnos"
+        const val SERVER_KIND_JELLYFIN = "jellyfin"
+
+        fun kindId(kind: ServerKind): String = when (kind) {
+            ServerKind.FnOs -> SERVER_KIND_FNOS
+            ServerKind.Jellyfin -> SERVER_KIND_JELLYFIN
+        }
+    }
+}
 
 @Serializable
 internal data class SecureSessionPayload(

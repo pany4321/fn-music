@@ -3,6 +3,7 @@ package com.fnmusic.tv.core.playback
 import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.MediaMetadata
 import com.fnmusic.tv.core.model.RoamNode
 import com.fnmusic.tv.core.model.RoamWindow
@@ -40,6 +41,7 @@ internal data class PlaybackSnapshot(
 internal object PlaybackSnapshotCodec {
     const val Version = 2
     private const val MaxItems = 250
+    private const val STREAM_MODE_HLS = "hls"
 
     fun encode(snapshot: PlaybackSnapshot): String = encodeSnapshot(snapshot, depth = 0).toString()
 
@@ -175,6 +177,11 @@ internal object PlaybackSnapshotCodec {
                 ?.getLong(DECLARED_DURATION_MS_KEY),
         )
         .put("art", item.mediaMetadata.artworkUri?.toString())
+        // 流形态：只有 HLS 需要显式记录（老快照没有这个字段 → 按直连）。
+        .put(
+            "streamMode",
+            if (item.localConfiguration?.mimeType == MimeTypes.APPLICATION_M3U8) STREAM_MODE_HLS else null,
+        )
 
     private fun decodeMediaItem(value: JSONObject): MediaItem {
         val id = value.getString("id")
@@ -183,6 +190,9 @@ internal object PlaybackSnapshotCodec {
         return MediaItem.Builder()
             .setMediaId(id)
             .setUri(uri)
+            .setMimeType(
+                if (value.optNullableString("streamMode") == STREAM_MODE_HLS) MimeTypes.APPLICATION_M3U8 else null,
+            )
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(value.optNullableString("title"))

@@ -241,12 +241,15 @@ class SessionRepositoryTest {
         val tokenStore = FakeTokenStore(initialToken = null)
         val repository = repository(tokenStore)
 
+        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "alice-token-1")
         repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true)
+        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("bob", "bob-token")
         repository.login(server.url("music/api/v1/").toString(), false, "bob", "bravo".toCharArray(), true)
+        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "alice-token-2")
         repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha-2".toCharArray(), true)
@@ -260,6 +263,7 @@ class SessionRepositoryTest {
     @Test fun `clearing login history does not terminate the current memory session`() = runBlocking {
         val tokenStore = FakeTokenStore(initialToken = null)
         val repository = repository(tokenStore)
+        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "alice-token")
         repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true)
@@ -277,6 +281,7 @@ class SessionRepositoryTest {
         val tokenStore = FakeTokenStore(initialToken = null)
         val repository = repository(tokenStore)
         repeat(6) { index ->
+            enqueueProbeNotJellyfin()
             enqueueSystemConfig()
             enqueueLogin("user-$index", "token-$index")
             repository.login(
@@ -312,6 +317,7 @@ class SessionRepositoryTest {
         enqueueUser()
         repository.restore()
         repository.showLogin()
+        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "memory-token")
 
@@ -352,6 +358,11 @@ class SessionRepositoryTest {
         tokenStore = tokenStore,
         clientFactory = TrimMusicApi::client,
     )
+
+    /** 登录页会先探测后端：给一个"不是 Jellyfin"的 404，随后按飞牛流程走。 */
+    private fun enqueueProbeNotJellyfin() {
+        server.enqueue(MockResponse.Builder().code(404).build())
+    }
 
     private fun enqueueSystemConfig() {
         server.enqueue(MockResponse.Builder().code(204).build())

@@ -27,19 +27,13 @@ internal class JellyfinApi(
     private val origin: HttpUrl,
     private val client: OkHttpClient,
     private val deviceId: String,
-    private val clientName: String = "MusicDock",
-    private val clientVersion: String = "0.1.0",
+    private val clientName: String = DEFAULT_CLIENT_NAME,
+    private val clientVersion: String = DEFAULT_CLIENT_VERSION,
     private val tokenProvider: () -> String? = { null },
 ) {
 
-    private fun authorizationHeader(token: String?): String = buildString {
-        append("MediaBrowser ")
-        if (!token.isNullOrBlank()) append("Token=\"").append(token).append("\", ")
-        append("Client=\"").append(clientName).append("\", ")
-        append("Device=\"Android\", ")
-        append("DeviceId=\"").append(deviceId).append("\", ")
-        append("Version=\"").append(clientVersion).append("\"")
-    }
+    private fun authorizationHeader(token: String?): String =
+        jellyfinAuthorizationHeader(token, deviceId, clientName, clientVersion)
 
     /** 免登录的服务器信息：用于自动识别服务器类型与版本。 */
     suspend fun publicInfo(): JellyfinPublicInfoDto =
@@ -60,6 +54,18 @@ internal class JellyfinApi(
 
     suspend fun me(): JellyfinUserDto =
         request(Request.Builder().url(url("Users/Me")).get(), token = requireToken())
+
+    /** 登出：作废当前访问令牌（失败不阻塞本地清理，由调用方决定）。 */
+    suspend fun logout() {
+        execute(
+            Request.Builder()
+                .url(url("Sessions/Logout"))
+                .post(EMPTY_BODY)
+                .header("Accept", "application/json")
+                .header("Authorization", authorizationHeader(requireToken()))
+                .build(),
+        )
+    }
 
     /** 随机取歌：`SortBy=Random` 一次成片（比飞牛的"探测 + 随机页"更省）。 */
     suspend fun randomTracks(userId: String, limit: Int): List<JellyfinItemDto> =
@@ -89,6 +95,7 @@ internal class JellyfinApi(
         albumArtistIds: String? = null,
         genreIds: String? = null,
         searchTerm: String? = null,
+        ids: String? = null,
         filters: String? = null,
         sortBy: String? = null,
         sortOrder: String? = null,
@@ -106,6 +113,7 @@ internal class JellyfinApi(
                 albumArtistIds?.let { addQueryParameter("AlbumArtistIds", it) }
                 genreIds?.let { addQueryParameter("GenreIds", it) }
                 searchTerm?.let { addQueryParameter("SearchTerm", it) }
+                ids?.let { addQueryParameter("Ids", it) }
                 filters?.let { addQueryParameter("Filters", it) }
                 sortBy?.let { addQueryParameter("SortBy", it) }
                 sortOrder?.let { addQueryParameter("SortOrder", it) }
@@ -186,6 +194,23 @@ internal class JellyfinApi(
             ).get(),
         ).Items.firstOrNull()
 
+    /** 单个条目请求（`Ids=` 查询与新建歌单的返回体都能解出条目）。 */
+    private suspend fun item(builder: Request.Builder): JellyfinItemDto {
+        val body = execute(withAuthorization(builder.build()))
+        return try {
+            ApiDecoder.json.decodeFromString<JellyfinItemDto>(body)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: Exception) {
+            throw AppException(AppError.Unknown("jellyfin_invalid_json"), cause)
+        }
+    }
+
+    private fun withAuthorization(request: Request): Request = request.newBuilder()
+        .header("Accept", "application/json")
+        .header("Authorization", authorizationHeader(requireToken()))
+        .build()
+
     /**
      * 服务端歌词（Jellyfin 10.9+）。
      * 实测：该曲没有歌词时端点返回 404 —— 这不是错误，返回 null 让在线的歌词源接管。
@@ -224,6 +249,54 @@ internal class JellyfinApi(
                 .get()
                 .build(),
         )
+
+    /** 新建歌单：`POST /Playlists`（`Ids` 留空＝先建空歌单，再由上层把当前曲目加进去）。 */
+    suspend fun createPlaylist(name: String, userId: String): JellyfinItemDto {
+        val body = ApiDecoder.json.encodeToString(
+            JellyfinCreatePlaylistRequest(Name = name, UserId = userId, MediaType = "Audio"),
+        )
+        return item(
+            Request.Builder()
+                .url(url("Playlists"))
+                .post(body.toRequestBody("application/json".toMediaType())),
+        )
+    }
+
+    /** 往歌单加条目（`POST /Playlists/{id}/Items?ids=`）。 */
+    suspend fun addToPlaylist(playlistId: String, itemIds: List<String>, userId: String) {
+        val request = Request.Builder()
+            .url(
+                url("Playlists/$playlistId/Items").newBuilder()
+                    .addQueryParameter("ids", itemIds.joinToString(","))
+                    .addQueryParameter("userId", userId)
+                    .build(),
+            )
+            .post(EMPTY_BODY)
+            .build()
+        execute(withAuthorization(request))
+    }
+
+    /** 从歌单删条目：必须用 `entryIds`（歌单条目的 PlaylistItemId，不是曲目 id）。 */
+    suspend fun removeFromPlaylist(playlistId: String, entryIds: List<String>) {
+        val request = Request.Builder()
+            .url(
+                url("Playlists/$playlistId/Items").newBuilder()
+                    .addQueryParameter("entryIds", entryIds.joinToString(","))
+                    .build(),
+            )
+            .delete()
+            .build()
+        execute(withAuthorization(request))
+    }
+
+    /** 媒体库列表（`/Users/{id}/Views`）；当前 UI 没用到，接口先留着。 */
+    suspend fun views(userId: String): JellyfinItemsDto = items(
+        Request.Builder().url(
+            url("Users/$userId/Views").newBuilder()
+                .addQueryParameter("userId", userId)
+                .build(),
+        ).get(),
+    )
 
     // ---- URL 构造（实测：PlaybackInfo 不返回 URL，客户端自己拼） ----
 
@@ -368,3 +441,24 @@ internal class JellyfinApi(
 
 @kotlinx.serialization.Serializable
 internal data class JellyfinAuthRequest(val Username: String, val Pw: String)
+
+internal const val DEFAULT_CLIENT_NAME = "MusicDock"
+internal const val DEFAULT_CLIENT_VERSION = "0.1.0"
+
+/**
+ * Jellyfin 的鉴权头：`MediaBrowser Token="…", Client="…", Device="Android", DeviceId="…", Version="…"`。
+ * 接口调用与播放器请求头共用这一份格式（见 `.trellis/spec/backend/jellyfin-contracts.md` §2）。
+ */
+internal fun jellyfinAuthorizationHeader(
+    token: String?,
+    deviceId: String,
+    clientName: String = DEFAULT_CLIENT_NAME,
+    clientVersion: String = DEFAULT_CLIENT_VERSION,
+): String = buildString {
+    append("MediaBrowser ")
+    if (!token.isNullOrBlank()) append("Token=\"").append(token).append("\", ")
+    append("Client=\"").append(clientName).append("\", ")
+    append("Device=\"Android\", ")
+    append("DeviceId=\"").append(deviceId).append("\", ")
+    append("Version=\"").append(clientVersion).append("\"")
+}

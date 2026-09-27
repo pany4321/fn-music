@@ -21,6 +21,9 @@ import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.LyricDocument
 import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.RoamWindow
+import com.fnmusic.tv.core.model.ServerKind
+import com.fnmusic.tv.core.model.StreamMode
+import com.fnmusic.tv.core.model.StreamPlan
 import com.fnmusic.tv.core.model.SharedLibrary
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.User
@@ -207,8 +210,8 @@ internal class FnOsMusicBackend(
         session.authenticated { it.addToPlaylist(playlistGuid, listOf(trackGuid)) }
     }
 
-    override suspend fun removeFromPlaylist(playlistGuid: String, trackGuid: String) {
-        session.authenticated { it.removeFromPlaylist(playlistGuid, listOf(trackGuid)) }
+    override suspend fun removeFromPlaylist(playlistGuid: String, track: Track) {
+        session.authenticated { it.removeFromPlaylist(playlistGuid, listOf(track.guid.value)) }
     }
 
     /** 原始歌词响应体（`LyricListDto` 的 JSON）：与改动前写进缓存/本地库的内容一致。 */

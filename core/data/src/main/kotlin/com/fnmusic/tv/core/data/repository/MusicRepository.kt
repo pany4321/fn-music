@@ -5,8 +5,8 @@ import android.graphics.BitmapFactory
 import com.fnmusic.tv.core.data.backend.CatalogIndexSource
 import com.fnmusic.tv.core.data.backend.CatalogPageSource
 import com.fnmusic.tv.core.data.backend.DecodedPage
-import com.fnmusic.tv.core.data.backend.FnOsMusicBackend
 import com.fnmusic.tv.core.data.backend.MusicBackend
+import com.fnmusic.tv.core.data.backend.SessionBackends
 import com.fnmusic.tv.core.data.api.isRetryableRequestFailure
 import com.fnmusic.tv.core.data.local.CachedIndexEntity
 import com.fnmusic.tv.core.data.local.CachedLyricEntity
@@ -167,9 +167,12 @@ class MusicRepository internal constructor(
     metadataCapacityBytes: Int,
     repositoryScope: CoroutineScope,
     onlineLyricsMatcher: suspend (LyricsMatchRequest) -> LyricsMatchResult,
-    /** 当前服务器后端：抽取阶段默认飞牛，后续按会话的服务器类型选择。 */
-    private val backend: MusicBackend = FnOsMusicBackend(session),
+    /** 当前会话的后端（按会话的后端类型解析，同一会话内复用）。 */
+    private val backends: SessionBackends = SessionBackends(session),
 ) {
+    /** 当前后端：飞牛或 Jellyfin，由会话决定（见 [SessionBackends]）。 */
+    private val backend: MusicBackend get() = backends.current()
+
     constructor(
         context: Context,
         session: SessionRepository,
@@ -349,8 +352,9 @@ class MusicRepository internal constructor(
         invalidatePlaylistPages(playlistGuid)
     }
 
-    suspend fun removeFromPlaylist(playlistGuid: String, trackGuid: String) {
-        backend.removeFromPlaylist(playlistGuid, trackGuid)
+    /** 移除歌单里的曲目：传整首曲目是因为 Jellyfin 要用条目 id（[Track.playlistEntryId]）。 */
+    suspend fun removeFromPlaylist(playlistGuid: String, track: Track) {
+        backend.removeFromPlaylist(playlistGuid, track)
         invalidatePlaylistPages(playlistGuid)
     }
 
@@ -444,10 +448,12 @@ class MusicRepository internal constructor(
         if (track.accessStatus != null && track.accessStatus != 0) throw AppException(AppError.UnavailableTrack)
         val refreshed = trackMetadata(track.guid.value)
         if (refreshed.isCue) throw AppException(AppError.TranscodeUnavailable)
+        val plan = backend.streamPlan(refreshed)
         return PlaybackTrack(
             refreshed,
-            backend.streamPlan(refreshed).url,
+            plan.url,
             refreshed.coverId?.let { backend.artworkUrl(it, CoverVariant.Player.width) },
+            plan.mode,
         )
     }
 
@@ -457,10 +463,12 @@ class MusicRepository internal constructor(
             .filterNot(Track::isCue)
             .take(250)
             .map { track ->
+                val plan = backend.queueStreamPlan(track)
                 PlaybackTrack(
                     track,
-                    backend.directStreamUrl(track),
+                    plan.url,
                     track.coverId?.let { backend.artworkUrl(it, CoverVariant.Player.width) },
+                    plan.mode,
                 )
             }
             .toList()

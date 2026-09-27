@@ -135,16 +135,32 @@ class JellyfinMappingTest {
     }
 
     @Test
-    fun `items response converts to paged domain model`() {
+    fun `playlist track keeps its entry id for removal`() {
+        val json = """{"Id":"track-1","Name":"Song","PlaylistItemId":"entry-9","ImageTags":{"Primary":"x"}}"""
+
+        val track = ApiDecoder.json.decodeFromString<JellyfinItemDto>(json).toTrack()
+
+        // 删歌单条目要用 PlaylistItemId（不是曲目 id）
+        assertEquals("entry-9", track.playlistEntryId)
+    }
+
+    @Test
+    fun `track outside a playlist has no entry id`() {
+        val track = ApiDecoder.json.decodeFromString<JellyfinItemDto>(itemJson).toTrack()
+
+        assertNull(track.playlistEntryId)
+    }
+
+    @Test
+    fun `items response carries the total count used for paging`() {
         val json = """{"Items":[$itemJson],"TotalRecordCount":27577,"StartIndex":100}"""
 
-        val page = ApiDecoder.json.decodeFromString<JellyfinItemsDto>(json)
-            .toPage(page = 3, size = 50) { it.toTrack() }
+        val response = ApiDecoder.json.decodeFromString<JellyfinItemsDto>(json)
 
-        assertEquals(3, page.page)
-        assertEquals(50, page.pageSize)
-        assertEquals(27_577, page.total)
-        assertEquals(1, page.items.size)
+        // 分页元信息来自响应体（仓库按 RawPage/DecodedPage 走，页号由请求侧决定）。
+        assertEquals(27_577, response.TotalRecordCount)
+        assertEquals(100, response.StartIndex)
+        assertEquals("#SELFIE (Caked Up Remix)", response.Items.single().toTrack().title)
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.fnmusic.tv.core.data.preferences.AppPreferences
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.MusicRepository
 import com.fnmusic.tv.core.data.repository.SessionRepository
+import com.fnmusic.tv.core.data.repository.ServerProbe
 import com.fnmusic.tv.core.data.repository.SessionState
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.playback.PlaybackController
@@ -20,6 +21,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal interface AuthenticatedAppActions {
+    /** 登录页用：识别地址对应哪种后端（Jellyfin 命中 Public Info；其余按飞牛）。 */
+    suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe
     suspend fun verifyCurrentSession()
     suspend fun retrySessionRestore()
     suspend fun showLogin()
@@ -105,6 +108,9 @@ internal class AuthenticatedAppCoordinator(
         }
         launchSessionRestore()
     }
+
+    override suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe =
+        sessionRepository.probeServer(input, useHttps)
 
     override suspend fun verifyCurrentSession() {
         sessionRepository.verifyCurrentSession()

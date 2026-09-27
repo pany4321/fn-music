@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -17,6 +18,7 @@ import com.fnmusic.tv.core.model.AppException
 import com.fnmusic.tv.core.model.PlaybackAuth
 import com.fnmusic.tv.core.model.PlaybackTrack
 import com.fnmusic.tv.core.model.RoamWindow
+import com.fnmusic.tv.core.model.StreamMode
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.playback.NowPlayingIdentity
 import com.fnmusic.tv.core.model.playback.PlayMode
@@ -46,6 +48,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+/**
+ * 播放队列里这条 URL 的形态 → Media3 的 MIME。
+ * 直连（包含飞牛的一切）不给 MIME：让 ExoPlayer 按内容/后缀自己判断。
+ */
+internal fun StreamMode.media3MimeType(): String? = when (this) {
+    StreamMode.Direct -> null
+    StreamMode.Hls -> MimeTypes.APPLICATION_M3U8
+    StreamMode.HttpTranscode -> null
+}
 
 internal data class QueueRemovalPlan(
     val removeIndex: Int,
@@ -1152,6 +1164,8 @@ class PlaybackController(
     private fun mediaItem(playback: PlaybackTrack): MediaItem = MediaItem.Builder()
         .setMediaId(playback.track.guid.value)
         .setUri(playback.streamUrl)
+        // HLS 流要显式声明 MIME：Jellyfin 的转码地址没有 .m3u8 后缀，只靠 URI 推断会当成渐进式下载。
+        .setMimeType(playback.streamMode.media3MimeType())
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(playback.track.title)

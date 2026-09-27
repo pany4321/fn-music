@@ -90,7 +90,9 @@ import com.fnmusic.tv.core.data.repository.SessionState
 import com.fnmusic.tv.core.data.server.ConnectionResolver
 import com.fnmusic.tv.core.data.server.ServerUrlNormalizer
 import com.fnmusic.tv.core.data.server.ServerUrlResult
+import com.fnmusic.tv.core.data.repository.ServerProbe
 import com.fnmusic.tv.core.model.AppError
+import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.AppException
 import com.fnmusic.tv.core.model.factor
 import kotlinx.coroutines.delay
@@ -247,6 +249,8 @@ internal fun LoginScreen(
     onHistoryDelete: suspend (String) -> Unit = {},
     onHistoryClear: suspend () -> Unit = {},
     historyDraft: (String) -> LoginDraft? = { null },
+    /** 提交前识别这台服务器是哪类后端（命中 Jellyfin 的 Public Info 即 Jellyfin）。 */
+    onProbe: suspend (String, Boolean) -> ServerProbe = { _, _ -> ServerProbe(ServerKind.FnOs) },
     /** 应用内“切换账号”时提供返回入口；为 null 表示登录页是顶层界面。 */
     onBack: (() -> Unit)? = null,
 ) {
@@ -270,6 +274,7 @@ internal fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var showServerHistory by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
+    var probe by remember { mutableStateOf<ServerProbe?>(null) }
     var loginAttempted by remember { mutableStateOf(false) }
     var error by remember(initialError) { mutableStateOf(initialError) }
     val scope = rememberCoroutineScope()
@@ -283,6 +288,8 @@ internal fun LoginScreen(
     val httpsFocus = remember { FocusRequester() }
     val loginFocus = remember { FocusRequester() }
     val fnIdInput = ConnectionResolver.isFnId(server)
+    // Jellyfin 没有安全码/中继概念：识别出来之后就把这一栏收掉，焦点链也跟着退化。
+    val accessCodeVisible = probe?.kind != ServerKind.Jellyfin
     val validServer = fnIdInput || ServerUrlNormalizer.normalize(server, https) is ServerUrlResult.Valid
     // 表单是否已填齐（与“是否正在提交”无关）。登录按钮的可聚焦状态只看它：
     // 若提交时把按钮置为 disabled，焦点会回落到第一个可聚焦控件（NAS 地址栏）。
@@ -320,7 +327,12 @@ internal fun LoginScreen(
                 }
                 Spacer(Modifier.height(6.dp))
             }
-            Text("飞牛音乐", color = FnColors.Teal, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (probe?.kind == ServerKind.Jellyfin) "Jellyfin" else "飞牛音乐",
+                color = FnColors.Teal,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
             Text("登录", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Row(
                 Modifier.fillMaxWidth(),
@@ -337,7 +349,7 @@ internal fun LoginScreen(
                         selectedProfileId = null
                         hasSavedPassword = false
                     },
-                    label = "NAS 地址或 FNID",
+                    label = "服务器地址或 FNID",
                     modifier = Modifier.weight(1f),
                     downFocus = usernameFocus,
                     rightFocus = historyFocus.takeIf { loginHistory.isNotEmpty() || recentServers.isNotEmpty() },
@@ -379,25 +391,27 @@ internal fun LoginScreen(
                     rightFocus = accessCodeFocus,
                     inputModifier = Modifier.focusRequester(usernameFocus).focusProperties {
                         up = serverFocus
-                        right = accessCodeFocus
+                        right = if (accessCodeVisible) accessCodeFocus else FocusRequester.Cancel
                         down = passwordFocus
                     },
                 )
-                TvTextField(
-                    value = accessCode,
-                    onValueChange = { accessCode = it },
-                    label = "安全码（未启用可留空）",
-                    modifier = Modifier.weight(1f),
-                    upFocus = serverFocus,
-                    downFocus = passwordFocus,
-                    leftFocus = usernameFocus,
-                    inputModifier = Modifier.focusRequester(accessCodeFocus).focusProperties {
-                        up = serverFocus
-                        left = usernameFocus
-                        down = passwordFocus
-                    },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                if (accessCodeVisible) {
+                    TvTextField(
+                        value = accessCode,
+                        onValueChange = { accessCode = it },
+                        label = "安全码（未启用可留空）",
+                        modifier = Modifier.weight(1f),
+                        upFocus = serverFocus,
+                        downFocus = passwordFocus,
+                        leftFocus = usernameFocus,
+                        inputModifier = Modifier.focusRequester(accessCodeFocus).focusProperties {
+                            up = serverFocus
+                            left = usernameFocus
+                            down = passwordFocus
+                        },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
             }
             Row(
                 Modifier.fillMaxWidth(),
@@ -469,14 +483,20 @@ internal fun LoginScreen(
             val statusMessage = error?.let {
                 if (loginAttempted && it == AppError.Unauthenticated) "账号或密码错误" else errorMessage(it)
             } ?: when {
-                serverInvalid -> "NAS 地址格式不正确，请检查是否混入全角符号"
+                serverInvalid -> "服务器地址格式不正确，请检查是否混入全角符号"
                 fnIdInput -> "FNID 将自动选择可用连接"
                 !https -> "局域网 HTTP 连接未加密"
                 else -> ""
             }
             Text(
-                statusMessage,
-                color = if (error == null && !serverInvalid) FnColors.Warning else FnColors.Coral,
+                probe?.takeIf { it.kind == ServerKind.Jellyfin }?.identity?.let { identity ->
+                    "已识别 Jellyfin ${identity.serverVersion}"
+                } ?: statusMessage,
+                color = when {
+                    probe?.kind == ServerKind.Jellyfin && error == null -> FnColors.Teal
+                    error == null && !serverInvalid -> FnColors.Warning
+                    else -> FnColors.Coral
+                },
                 fontSize = 19.sp,
                 maxLines = 1,
             )
@@ -493,6 +513,10 @@ internal fun LoginScreen(
                     password = ""
                     accessCode = ""
                     scope.launch {
+                        // 地址提交时先识别后端：命中 Jellyfin 的 Public Info 就按 Jellyfin 登录，
+                        // 页面同时把"已识别 Jellyfin x.y.z"回显出来（识别失败/FNID 一律按飞牛）。
+                        probe = runCatching { onProbe(server, https) }.getOrNull()
+                        error = null
                         runCatching {
                             if (savedProfileId != null) {
                                 submittedPassword.fill('\u0000')
@@ -986,7 +1010,7 @@ private fun errorMessage(error: AppError): String = when (error) {
     AppError.AccountDisabled -> "账号已禁用"
     AppError.AccessCodeRequired -> "此服务器需要安全码"
     AppError.InvalidAccessCode -> "安全码错误"
-    AppError.NetworkUnavailable -> "无法连接 NAS，请检查地址和网络"
+    AppError.NetworkUnavailable -> "无法连接服务器，请检查地址和网络"
     AppError.NotFound -> "服务器接口不可用"
     AppError.FnIdUnavailable -> "FNID 无可用连接，请检查输入或网络"
     else -> "连接失败，请重试"

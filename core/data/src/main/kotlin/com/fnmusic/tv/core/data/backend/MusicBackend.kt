@@ -7,14 +7,12 @@ import com.fnmusic.tv.core.model.LyricDocument
 import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.RoamWindow
 import com.fnmusic.tv.core.model.ServerIdentity
+import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.SharedLibrary
+import com.fnmusic.tv.core.model.StreamPlan
+import com.fnmusic.tv.core.model.StreamMode
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.User
-
-/**
- * 音乐服务器类型。新增后端时在这里加一项，并在 [MusicBackend] 提供实现。
- */
-enum class ServerKind { FnOs, Jellyfin }
 
 /**
  * 后端能力声明：把"某些服务器有、某些没有"的差异集中在这里，
@@ -31,19 +29,6 @@ data class BackendCapabilities(
     val transcoding: Boolean,
     /** 收藏有"收藏时间"排序（飞牛有；Jellyfin 只能按创建时间）。 */
     val favoriteTimeSort: Boolean,
-)
-
-/** 播放方式：直连原文件 / HLS 转码 / HTTP 转码流。 */
-enum class StreamMode { Direct, Hls, HttpTranscode }
-
-/** 一次播放的落地结果：交给 Media3 的 URL 与它的形态。 */
-data class StreamPlan(val url: String, val mode: StreamMode)
-
-/** 登录成功后的会话材料：身份、用户、以及后续请求要带的头。 */
-data class AuthSession(
-    val identity: ServerIdentity,
-    val user: User,
-    val headers: Map<String, String>,
 )
 
 /**
@@ -199,6 +184,12 @@ interface MusicBackend {
      */
     suspend fun streamPlan(track: Track): StreamPlan
 
+    /**
+     * 批量装队列时的播放计划：默认与 [directStreamUrl] 相同（飞牛），
+     * 能转码的后端可以按曲目已知信息直接决定走直连还是 HLS，不必逐首协商。
+     */
+    fun queueStreamPlan(track: Track): StreamPlan = StreamPlan(directStreamUrl(track), StreamMode.Direct)
+
     /** 随机取 [size] 首歌（首页卡片封面、随机行用），各后端用自己最省的方式实现。 */
     suspend fun randomTracks(size: Int): List<Track>
 
@@ -241,7 +232,11 @@ interface MusicBackend {
 
     suspend fun addToPlaylist(playlistGuid: String, trackGuid: String)
 
-    suspend fun removeFromPlaylist(playlistGuid: String, trackGuid: String)
+    /**
+     * 从歌单移除一首曲目。
+     * 飞牛用曲目 guid；Jellyfin 必须用歌单条目 id（见 [Track.playlistEntryId]），所以要传整首曲目。
+     */
+    suspend fun removeFromPlaylist(playlistGuid: String, track: Track)
 
     // ---- 歌词 ----
 

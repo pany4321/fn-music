@@ -3,21 +3,27 @@ package com.fnmusic.tv.core.data.repository
 import android.content.Context
 import com.fnmusic.tv.core.data.api.PasswordHash
 import com.fnmusic.tv.core.data.api.TrimMusicApi
+import com.fnmusic.tv.core.data.backend.JellyfinApi
 import com.fnmusic.tv.core.data.api.isRetryableRequestFailure
 import com.fnmusic.tv.core.data.security.SecureSessionPayload
 import com.fnmusic.tv.core.data.security.SecureSessionRead
 import com.fnmusic.tv.core.data.security.SecureTokenStore
 import com.fnmusic.tv.core.data.security.StoredLoginProfile
 import com.fnmusic.tv.core.data.security.TokenStore
+import com.fnmusic.tv.core.data.server.ConnectRequest
 import com.fnmusic.tv.core.data.server.ConnectionAccess
+import com.fnmusic.tv.core.data.server.ConnectionResolver
 import com.fnmusic.tv.core.data.server.FnOsConnector
+import com.fnmusic.tv.core.data.server.JellyfinConnector
 import com.fnmusic.tv.core.data.server.ServerConnection
 import com.fnmusic.tv.core.data.server.ServerConnector
+import com.fnmusic.tv.core.data.server.ServerLoginResult
 import com.fnmusic.tv.core.data.server.ServerUrlNormalizer
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
 import com.fnmusic.tv.core.model.PlaybackAuth
 import com.fnmusic.tv.core.model.ServerIdentity
+import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.User
 import java.io.IOException
 import java.util.UUID
@@ -37,6 +43,7 @@ data class LoginHistoryEntry(
     val server: String,
     val username: String,
     val useHttps: Boolean,
+    val kind: ServerKind = ServerKind.FnOs,
 )
 
 /** Remembered playback credentials for media-button resume; read-only projection. */
@@ -51,7 +58,14 @@ data class LoginDraft(
     val useHttps: Boolean,
     val accessCode: String,
     val hasSavedPassword: Boolean = true,
+    val kind: ServerKind = ServerKind.FnOs,
 )
+
+/** 登录页识别结果：地址对应哪种后端，以及能免登录拿到的身份（Jellyfin 有，飞牛要登录后才知道）。 */
+data class ServerProbe(val kind: ServerKind, val identity: ServerIdentity? = null)
+
+/** 当前 Jellyfin 会话的客户端与用户 id（构造 `JellyfinMusicBackend` 用）。 */
+internal class JellyfinSession(val api: JellyfinApi, val userId: String)
 
 sealed interface SessionState {
     data object Loading : SessionState
@@ -68,7 +82,9 @@ sealed interface SessionState {
         val selectedProfileId: String? = null,
         val error: AppError? = null,
     ) : SessionState
-    data class SignedIn(val server: ServerIdentity, val user: User) : SessionState
+    data class SignedIn(val server: ServerIdentity, val user: User) : SessionState {
+        val kind: ServerKind get() = server.kind
+    }
 }
 
 class SessionRepository internal constructor(
@@ -94,9 +110,17 @@ class SessionRepository internal constructor(
 
     /**
      * 与具体服务器形态相关的一切（地址解析、安全码、FNID 中继、登录、播放请求头）都在
-     * connector 里；接入 Jellyfin 时换成按会话类型选择的实现即可。
+     * connector 里；按会话/探测结果选用哪一份。
      */
-    private val connector: ServerConnector = FnOsConnector(clientFactory) { memoryToken }
+    private val fnOsConnector: ServerConnector = FnOsConnector(clientFactory) { memoryToken }
+
+    private fun connectorFor(kind: ServerKind): ServerConnector = when (kind) {
+        ServerKind.FnOs -> fnOsConnector
+        ServerKind.Jellyfin -> jellyfinConnector
+    }
+
+    /** 当前会话的后端类型（未登录时按默认飞牛解释旧档案）。 */
+    val serverKind: ServerKind get() = connection?.kind ?: activeProfile()?.serverKind ?: ServerKind.FnOs
 
     private val authVerification = Mutex()
     private val credentialsMutex = Mutex()
@@ -110,6 +134,11 @@ class SessionRepository internal constructor(
         preferences.getString(DEVICE, null) ?: UUID.randomUUID().toString().also {
             preferences.edit().putString(DEVICE, it).apply()
         }
+    }
+
+    // deviceId 初始化之后再建（Jellyfin 的设备标识要带进 Client 头）。
+    private val jellyfinConnector: ServerConnector by lazy {
+        JellyfinConnector(clientFactory, { memoryToken }, deviceId)
     }
 
     suspend fun restore() {
@@ -152,6 +181,18 @@ class SessionRepository internal constructor(
         }
     }
 
+    /**
+     * 登录页用：识别地址对应哪种后端。命中 Jellyfin 的 `/System/Info/Public` 即 Jellyfin，
+     * 否则（含 FNID、探测失败）按飞牛处理——飞牛是兜底分支，不需要额外探测。
+     */
+    suspend fun probeServer(serverInput: String, useHttps: Boolean): ServerProbe {
+        val input = serverInput.trim()
+        if (input.isEmpty() || ConnectionResolver.isFnId(input)) return ServerProbe(ServerKind.FnOs)
+        val identity = runCatching { jellyfinConnector.probe(input, useHttps) }.getOrNull()
+            ?: return ServerProbe(ServerKind.FnOs)
+        return ServerProbe(ServerKind.Jellyfin, identity)
+    }
+
     suspend fun login(
         serverInput: String,
         useHttps: Boolean,
@@ -162,12 +203,17 @@ class SessionRepository internal constructor(
     ) {
         try {
             loadRememberedCredentials()
-            val passwordHash = PasswordHash.fromPlaintext(password)
+            val probe = probeServer(serverInput, useHttps)
+            // 明文只在这一次登录里用得到：飞牛会用它的 SHA-256（记住密码后可免密重登），
+            // Jellyfin 服务端只认明文，所以那边不留哈希（免密续期只能靠令牌）。
+            val plaintext = password.concatToString()
             loginWithCredential(
+                kind = probe.kind,
                 serverInput = serverInput,
                 useHttps = useHttps,
                 username = username,
-                passwordHash = passwordHash,
+                password = plaintext,
+                savedHash = PasswordHash.fromPlaintext(password).takeIf { probe.kind == ServerKind.FnOs },
                 remember = remember,
                 accessCode = accessCode.concatToString(),
             )
@@ -186,13 +232,14 @@ class SessionRepository internal constructor(
             loadRememberedCredentials()
             val profile = securePayload.profiles.firstOrNull { it.id == profileId }
                 ?: throw AppException(AppError.Unauthenticated)
-            val passwordHash = PasswordHash.parse(profile.passwordSha256)
-                ?: throw AppException(AppError.Unknown("invalid_saved_password"))
             loginWithCredential(
+                kind = profile.serverKind,
                 serverInput = profile.server,
                 useHttps = false,
                 username = profile.username,
-                passwordHash = passwordHash,
+                password = null,
+                savedHash = PasswordHash.parse(profile.passwordSha256),
+                savedToken = profile.userToken,
                 remember = remember,
                 accessCode = accessCode?.concatToString() ?: profile.accessCode.orEmpty(),
                 restoredRelayMode = profile.relayMode,
@@ -219,6 +266,7 @@ class SessionRepository internal constructor(
             useHttps = editable.useHttps,
             accessCode = profile.accessCode.orEmpty(),
             hasSavedPassword = PasswordHash.parse(profile.passwordSha256) != null,
+            kind = profile.serverKind,
         )
     }
 
@@ -262,7 +310,7 @@ class SessionRepository internal constructor(
 
     suspend fun logout() {
         try {
-            connection?.let { connector.logout(it) }
+            connection?.let { connectorFor(it.kind).logout(it) }
         } finally {
             clearCurrentToken()
             connection = null
@@ -277,8 +325,9 @@ class SessionRepository internal constructor(
     fun playbackAuth(): PlaybackAuth {
         val current = requireSignedIn()
         val token = memoryToken ?: throw AppException(AppError.Unauthenticated)
+        val connector = connectorFor(current.kind)
         return PlaybackAuth(
-            apiBase = current.api.apiBase(),
+            apiBase = current.apiBase,
             headers = connector.playbackHeaders(
                 token = token,
                 encodedAccessCode = connectionAccess.encodedAccessCode,
@@ -292,7 +341,24 @@ class SessionRepository internal constructor(
     private fun requireSignedIn(): ServerConnection =
         connection ?: throw AppException(AppError.Unauthenticated)
 
-    internal fun requireApi(): TrimMusicApi = connection?.api ?: throw AppException(AppError.Unauthenticated)
+    internal fun requireApi(): TrimMusicApi = (connection as? ServerConnection.FnOs)?.api
+        ?: throw AppException(AppError.Unauthenticated)
+
+    /** Jellyfin 会话的客户端与用户 id（构造 `JellyfinMusicBackend`）。 */
+    internal fun requireJellyfinSession(): JellyfinSession {
+        val current = connection as? ServerConnection.Jellyfin
+            ?: throw AppException(AppError.Unauthenticated)
+        return JellyfinSession(current.api, current.userId)
+    }
+
+    /** 后端调用遇到未认证/账号停用时通知会话（飞牛与 Jellyfin 共用同一套反应）。 */
+    internal suspend fun reportRequestFailure(error: AppError) {
+        when (error) {
+            AppError.AccountDisabled -> invalidateSession(AppError.AccountDisabled)
+            AppError.Unauthenticated -> verifyCurrentSession()
+            else -> Unit
+        }
+    }
 
     fun cacheNamespace(): String {
         val current = _state.value as? SessionState.SignedIn ?: throw AppException(AppError.Unauthenticated)
@@ -304,7 +370,7 @@ class SessionRepository internal constructor(
         loadRememberedCredentials()
         return securePayload.profiles.map { profile ->
             val editable = ServerUrlNormalizer.editableInput(profile.server, false)
-            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps)
+            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps, profile.serverKind)
         }
     }
 
@@ -315,7 +381,7 @@ class SessionRepository internal constructor(
         } catch (cause: AppException) {
             when (cause.error) {
                 AppError.AccountDisabled -> invalidateSession(AppError.AccountDisabled)
-                AppError.Unauthenticated -> verifyCurrentSession(current)
+                AppError.Unauthenticated -> verifyCurrentSession()
                 else -> Unit
             }
             throw cause
@@ -323,7 +389,7 @@ class SessionRepository internal constructor(
     }
 
     suspend fun verifyCurrentSession(): Boolean {
-        val current = connection?.api ?: return false
+        val current = connection ?: return false
         return verifyCurrentSession(current)
     }
 
@@ -363,15 +429,16 @@ class SessionRepository internal constructor(
                 ConnectionAccess.from(code, relayMode = false).encodedAccessCode
             }
         val relayMode = profile?.relayMode ?: savedRelayMode
+        val kind = profile?.serverKind ?: ServerKind.FnOs
         return PersistedPlaybackAuth(
-            headers = connector.playbackHeaders(token, accessCodeHeader, relayMode),
+            headers = connectorFor(kind).playbackHeaders(token, accessCodeHeader, relayMode),
         )
     }
 
-    private suspend fun verifyCurrentSession(candidate: TrimMusicApi): Boolean = authVerification.withLock {
-        if (connection?.api !== candidate) return@withLock connection != null
+    private suspend fun verifyCurrentSession(candidate: ServerConnection): Boolean = authVerification.withLock {
+        if (connection !== candidate) return@withLock connection != null
         try {
-            candidate.me()
+            connectorFor(candidate.kind).me(candidate)
             true
         } catch (cause: AppException) {
             if (cause.error == AppError.Unauthenticated || cause.error == AppError.AccountDisabled) {
@@ -384,12 +451,15 @@ class SessionRepository internal constructor(
     }
 
     private suspend fun restoreAttempt(targetServer: String, profile: StoredLoginProfile?) {
+        val connector = connectorFor(profile?.serverKind ?: ServerKind.FnOs)
         val accessCode = profile?.accessCode.orEmpty().ifBlank { memoryAccessCode.orEmpty() }
         val connected = connector.connect(
-            input = targetServer,
-            useHttps = false,
-            accessCode = accessCode,
-            restoredRelayMode = profile?.relayMode ?: savedRelayMode,
+            ConnectRequest(
+                input = targetServer,
+                useHttps = false,
+                accessCode = accessCode,
+                relayMode = profile?.relayMode ?: savedRelayMode,
+            ),
         )
         val token = memoryToken
         if (token != null) {
@@ -403,45 +473,69 @@ class SessionRepository internal constructor(
         }
 
         val savedProfile = profile ?: throw AppException(AppError.Unauthenticated)
-        val passwordHash = PasswordHash.parse(savedProfile.passwordSha256)
-            ?: throw AppException(AppError.Unknown("invalid_saved_password"))
-        val result = connected.api.login(savedProfile.username, passwordHash, deviceId)
-        memoryToken = result.userToken
+        // 飞牛：用保存的密码哈希免密重登；Jellyfin：没有哈希可用（reLogin 返回 null）→ 要求重新登录。
+        val result = connector.reLogin(
+            connection = connected,
+            username = savedProfile.username,
+            savedHash = PasswordHash.parse(savedProfile.passwordSha256),
+            deviceId = deviceId,
+        ) ?: throw AppException(AppError.Unauthenticated)
+        memoryToken = result.token
         memoryAccessCode = savedProfile.accessCode
         memoryProfileId = savedProfile.id
-        persistProfile(savedProfile.copy(userToken = result.userToken, lastUsedAt = clock()), makeActive = true)
-        completeSignIn(connected, result.user.toDomain())
+        persistProfile(savedProfile.copy(userToken = result.token, lastUsedAt = clock()), makeActive = true)
+        completeSignIn(result.connection, result.user)
     }
 
+    /**
+     * 登录的唯一入口：[password] 是刚输入的明文（登录页），[savedHash]/[savedToken] 是历史账号的
+     * 免密凭据（飞牛用哈希、Jellyfin 用令牌），两者都给不出就按未认证处理。
+     */
     private suspend fun loginWithCredential(
+        kind: ServerKind,
         serverInput: String,
         useHttps: Boolean,
         username: String,
-        passwordHash: PasswordHash,
+        password: String?,
+        savedHash: PasswordHash?,
+        savedToken: String? = null,
         remember: Boolean,
         accessCode: String,
         restoredRelayMode: Boolean? = null,
         existingProfileId: String? = null,
     ) {
-        val connected = connector.connect(serverInput, useHttps, accessCode, restoredRelayMode)
-        val result = connector.login(connected, username, passwordHash, deviceId)
-        memoryToken = result.userToken
+        val connector = connectorFor(kind)
+        val connected = connector.connect(ConnectRequest(serverInput, useHttps, accessCode, restoredRelayMode))
+        val result = if (password != null) {
+            connector.login(connected, username, password, deviceId)
+        } else {
+            connector.reLogin(connected, username, savedHash, deviceId)
+                ?: savedToken?.takeIf(String::isNotBlank)?.let { token ->
+                    runCatching { connector.me(connected) }.getOrNull()
+                        ?.let { user -> ServerLoginResult(token, user, connected) }
+                }
+                ?: throw AppException(AppError.Unauthenticated)
+        }
+        memoryToken = result.token
         memoryAccessCode = accessCode.takeIf(String::isNotBlank)
         rememberedCredentialsLoaded = true
-        val canonicalServer = connected.normalized.persistentApiBase()
+        val canonicalServer = result.connection.persistentServer
+        val relayMode = (result.connection as? ServerConnection.FnOs)?.access?.relayMode ?: false
         val matching = securePayload.profiles.firstOrNull {
-            it.server == canonicalServer && it.username == username
+            it.server == canonicalServer && it.username == username && it.serverKind == kind
         }
         if (remember) {
             val profile = StoredLoginProfile(
                 id = existingProfileId ?: matching?.id ?: UUID.randomUUID().toString(),
                 server = canonicalServer,
-                relayMode = connected.access.relayMode,
+                relayMode = relayMode,
                 username = username,
-                passwordSha256 = passwordHash.encoded,
+                // Jellyfin 服务端只认明文，哈希没法重放，所以那边留空（免密续期靠令牌）。
+                passwordSha256 = savedHash?.encoded.orEmpty(),
                 accessCode = accessCode.takeIf(String::isNotBlank),
-                userToken = result.userToken,
+                userToken = result.token,
                 lastUsedAt = clock(),
+                kind = StoredLoginProfile.kindId(kind),
             )
             memoryProfileId = profile.id
             persistProfile(profile, makeActive = true)
@@ -451,13 +545,13 @@ class SessionRepository internal constructor(
             removeMatchingProfile(canonicalServer, username)
             clearLegacyCredentials()
         }
-        recordServer(canonicalServer, connected.access.relayMode)
-        completeSignIn(connected, result.user.toDomain())
+        recordServer(canonicalServer, relayMode)
+        completeSignIn(result.connection, result.user)
     }
 
     private fun completeSignIn(connected: ServerConnection, user: User) {
         connection = connected
-        connectionAccess = connected.access
+        connectionAccess = (connected as? ServerConnection.FnOs)?.access ?: ConnectionAccess()
         _state.value = SessionState.SignedIn(connected.identity, user)
     }
 
@@ -538,7 +632,7 @@ class SessionRepository internal constructor(
         recentServers = recentServers,
         loginHistory = securePayload.profiles.map { profile ->
             val editable = ServerUrlNormalizer.editableInput(profile.server, false)
-            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps)
+            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps, profile.serverKind)
         },
         selectedProfileId = selectedProfileId,
         error = error,

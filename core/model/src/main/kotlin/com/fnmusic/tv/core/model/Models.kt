@@ -10,6 +10,8 @@ data class ServerIdentity(
     val name: String,
     val serverVersion: String,
     val mediaServerVersion: String,
+    /** 这台服务器是哪一类后端（默认飞牛：老会话/旧数据都按飞牛解释）。 */
+    val kind: ServerKind = ServerKind.FnOs,
 )
 
 data class User(
@@ -60,6 +62,10 @@ data class Track(
     val accessStatus: Int? = null,
     val audioFormat: String? = null,
     val isFavorite: Boolean = false,
+    /**
+     * 歌单内条目的 id（Jellyfin 从歌单删曲目用 `entryIds`；其它后端为 null）。
+     */
+    val playlistEntryId: String? = null,
 )
 
 data class SharedLibrary(
@@ -108,6 +114,8 @@ data class PlaybackTrack(
     val track: Track,
     val streamUrl: String,
     val artworkUrl: String?,
+    /** 这条 URL 的形态：直连原文件，还是 HLS 转码流（播放器据此选 MediaSource）。 */
+    val streamMode: StreamMode = StreamMode.Direct,
 )
 
 data class RoamNode(val roamId: String, val track: Track)

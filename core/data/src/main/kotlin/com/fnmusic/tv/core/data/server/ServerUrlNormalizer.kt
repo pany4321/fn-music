@@ -69,6 +69,17 @@ object ServerUrlNormalizer {
         return EditableServerInput(address, useHttps)
     }
 
+    /** 输入里是否显式写了端口（Jellyfin 探测要不要补试默认端口时用得到）。 */
+    fun hasExplicitPort(input: String): Boolean {
+        val candidate = normalizeWide(input.trim())
+        val withScheme = if (Regex("^[A-Za-z][A-Za-z0-9+.-]*://").containsMatchIn(candidate)) {
+            candidate
+        } else {
+            "http://$candidate"
+        }
+        return runCatching { URI(withScheme).port >= 0 }.getOrDefault(false)
+    }
+
     fun normalize(input: String, useHttps: Boolean): ServerUrlResult {
         val value = normalizeWide(input.trim())
         if (value.isEmpty()) return ServerUrlResult.Invalid(ServerUrlResult.Reason.Empty)

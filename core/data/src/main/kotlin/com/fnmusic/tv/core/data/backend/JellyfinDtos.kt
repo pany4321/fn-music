@@ -5,7 +5,6 @@ import com.fnmusic.tv.core.model.Artist
 import com.fnmusic.tv.core.model.CollectionGuid
 import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.LyricDocument
-import com.fnmusic.tv.core.model.Page
 import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.TrackGuid
@@ -102,6 +101,8 @@ internal fun JellyfinItemDto.toTrack(): Track = Track(
         ?.takeIf(String::isNotEmpty)
         ?.uppercase(),
     isFavorite = UserData?.IsFavorite == true,
+    // 歌单里的曲目会带 PlaylistItemId：Jellyfin 删条目要用它（见 jellyfin-contracts.md §4）。
+    playlistEntryId = PlaylistItemId,
 )
 
 /** 专辑条目 → 领域模型：Jellyfin 的专辑也是 Item，曲目数在 `ChildCount`/`RecursiveItemCount`。 */
@@ -143,15 +144,14 @@ internal fun JellyfinItemDto.toPlaylist(): Playlist = Playlist(
     trackCount = RecursiveItemCount ?: ChildCount,
 )
 
-/** Items 响应 → 统一分页模型（page/size 是 1-based 页号与每页条数）。 */
-internal fun <T> JellyfinItemsDto.toPage(page: Int, size: Int, map: (JellyfinItemDto) -> T): Page<T> =
-    Page(
-        items = Items.map(map),
-        page = page,
-        pageSize = size,
-        total = TotalRecordCount.takeIf { it > 0 } ?: Items.size,
-        sort = "",
-    )
+/** 新建歌单请求体（`POST /Playlists`）。 */
+@Serializable
+internal data class JellyfinCreatePlaylistRequest(
+    val Name: String,
+    val UserId: String,
+    val MediaType: String = "Audio",
+    val Ids: List<String> = emptyList(),
+)
 
 @Serializable
 internal data class JellyfinLyricLineDto(
@@ -170,7 +170,7 @@ internal data class JellyfinLyricsDto(
  * 转成 LRC 后与飞牛返回的歌词同形，`isLrc = true`，
  * 下游的 `decodeLyrics`/`SyncedLyrics` 解析链路一行都不用改。
  */
-internal fun JellyfinLyricsDto.toLyricDocument(trackGuid: String): LyricDocument? {
+internal fun JellyfinLyricsDto.toLyricDocument(trackGuid: String = ""): LyricDocument? {
     val lines = Lyrics
         .mapNotNull { line ->
             val start = line.Start ?: return@mapNotNull null

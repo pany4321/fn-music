@@ -333,7 +333,7 @@ internal fun AuthenticatedApp(
                 contentRevision = 0L,
                 removeTrack = { track ->
                     runCatching {
-                        container.musicRepository.removeFromPlaylist(route.playlist.guid.value, track.guid.value)
+                        container.musicRepository.removeFromPlaylist(route.playlist.guid.value, track)
                     }.isSuccess
                 },
             )
@@ -486,6 +486,7 @@ private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: 
         },
         onHistoryDelete = { profileId -> container.authenticatedActions.deleteSavedLoginEntry(profileId) },
         onHistoryClear = { container.authenticatedActions.clearSavedLoginEntries() },
+        onProbe = container.authenticatedActions::probeServer,
     )
 }
 
@@ -4923,7 +4924,7 @@ private fun InlineError(error: AppError) {
 }
 
 internal fun appErrorMessage(error: AppError): String = when (error) {
-    AppError.NetworkUnavailable -> "NAS 暂时不可用"
+    AppError.NetworkUnavailable -> "服务器暂时不可用"
     AppError.Empty -> "暂无内容"
     AppError.UnavailableTrack -> "歌曲不可访问"
     AppError.TranscodeUnavailable -> "兼容播放参数尚未确认"
