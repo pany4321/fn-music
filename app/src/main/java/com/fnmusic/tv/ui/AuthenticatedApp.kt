@@ -327,6 +327,7 @@ internal fun AuthenticatedApp(
                 detailHeader = TrackDetailHeader(
                     kind = "歌单",
                     declaredTrackCount = route.playlist.trackCount,
+                    artworkFallback = CollectionArtworkFallback.PlaylistGrid,
                     deckCovers = playlistCovers[route.playlist.guid.value].orEmpty(),
                     onBack = back,
                 ),
@@ -411,7 +412,7 @@ internal fun AuthenticatedApp(
                 onPlayer = { open(LibraryRoute.Player(it)) },
                 detailHeader = TrackDetailHeader(
                     kind = "最近播放",
-                    artworkFallback = CollectionArtworkFallback.Collection,
+                    artworkFallback = CollectionArtworkFallback.Recent,
                     deckCovers = recentDeck,
                     onBack = back,
                 ),
@@ -1403,10 +1404,11 @@ private fun FeatureCoverDeck(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val placements = deckPlacements(kind, artwork.size)
+    // 没有可摊的封面时也摊一张"特性插画"：卡片空着只剩一层渐变底，太难看了。
+    val placements = deckPlacements(kind, artwork.size.coerceAtLeast(1))
     Box(modifier.clipToBounds()) {
         placements.forEach { placement ->
-            val item = artwork.getOrNull(placement.itemIndex) ?: return@forEach
+            val item = artwork.getOrNull(placement.itemIndex)
             val artworkShape = RoundedCornerShape(7.dp)
             Box(
                 Modifier
@@ -1422,11 +1424,12 @@ private fun FeatureCoverDeck(
                     }
                     .border(0.5.dp, FnColors.FrameBorder, artworkShape),
             ) {
-                val coverId = item.coverId
-                if (coverId != null) {
-                    RemoteArtwork(
+                when {
+                    // 兜底插画与卡片主题一致：收藏是心形、最近播放是时钟、随机漫游是黑胶。
+                    item == null -> HomeFeatureArtwork(kind, Modifier.fillMaxSize())
+                    item.coverId != null -> RemoteArtwork(
                         container = LocalAuthenticatedDependencies.current,
-                        coverId = coverId,
+                        coverId = item.coverId,
                         variant = CoverVariant.Grid,
                         fallbackVariant = CoverVariant.Compact,
                         modifier = Modifier.fillMaxSize(),
@@ -1440,8 +1443,7 @@ private fun FeatureCoverDeck(
                             )
                         },
                     )
-                } else {
-                    InitialArtworkPlaceholder(
+                    else -> InitialArtworkPlaceholder(
                         text = item.title,
                         accent = if (kind == HomeArtworkKind.Roam) FnColors.Teal else FnColors.Coral,
                         modifier = Modifier.fillMaxSize(),
@@ -2703,7 +2705,7 @@ private data class TrackDetailHeader(
     val onBack: () -> Unit,
 )
 
-private enum class CollectionArtworkFallback { Initial, Artist, Favorites, Collection }
+private enum class CollectionArtworkFallback { Initial, Artist, Favorites, Recent, Collection, PlaylistGrid }
 
 private sealed interface TrackCollectionPrimaryAction {
     data object PlayAll : TrackCollectionPrimaryAction
@@ -3712,6 +3714,12 @@ private fun CollectionArtworkFallbackContent(
         CollectionArtworkFallback.Favorites -> Box(modifier.clip(shape)) {
             HomeFeatureArtwork(HomeArtworkKind.Favorites, Modifier.fillMaxSize())
         }
+        CollectionArtworkFallback.Recent -> Box(modifier.clip(shape)) {
+            HomeFeatureArtwork(HomeArtworkKind.Recent, Modifier.fillMaxSize())
+        }
+        CollectionArtworkFallback.PlaylistGrid -> Box(modifier.clip(shape)) {
+            HomeFeatureArtwork(HomeArtworkKind.PlaylistGrid, Modifier.fillMaxSize())
+        }
         CollectionArtworkFallback.Collection -> Box(modifier.clip(shape)) {
             HomeFeatureArtwork(HomeArtworkKind.Collection, Modifier.fillMaxSize())
         }
@@ -4064,7 +4072,10 @@ private fun PlaylistTileArtwork(
             },
         )
     } else {
-        InitialArtworkPlaceholder(title, accent, modifier, shape)
+        // 没有封面、也拼不出首几首的封面组（空歌单/曲目都没图）：用「歌单」拼贴插画兜底。
+        Box(modifier.background(FnColors.ArtworkPlaceholder)) {
+            HomeFeatureArtwork(HomeArtworkKind.PlaylistGrid, Modifier.fillMaxSize())
+        }
     }
 }
 
