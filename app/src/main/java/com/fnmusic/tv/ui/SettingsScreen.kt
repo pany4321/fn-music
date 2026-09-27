@@ -54,6 +54,12 @@ import androidx.tv.material3.Text
 import com.fnmusic.tv.AuthenticatedAppDependencies
 import com.fnmusic.tv.BuildConfig
 import com.fnmusic.tv.R
+import android.widget.Toast
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
+import com.fnmusic.tv.core.model.AppError
+import com.fnmusic.tv.core.model.AppException
 import com.fnmusic.tv.core.model.AppTheme
 import com.fnmusic.tv.core.model.PlayerStyle
 import com.fnmusic.tv.core.model.UiScaleMode
@@ -80,7 +86,12 @@ private fun uiScaleLabel(mode: UiScaleMode): String = when (mode) {
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
+internal fun SettingsScreen(
+    container: AuthenticatedAppDependencies,
+    onBack: () -> Unit,
+    /** 去"添加音乐源"表单（登录页复用形态）。 */
+    onAddSource: () -> Unit = {},
+) {
     val preferences by container.appPreferences.state.collectAsStateWithLifecycle()
     val updateState by container.updateController.state.collectAsStateWithLifecycle()
     val scope = LocalLibraryRetainedState.current.scope
@@ -98,6 +109,17 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
     val scaleFocuses = remember { List(UiScaleMode.entries.size) { FocusRequester() } }
     val updateFocus = remember { FocusRequester() }
     var usage by remember { mutableStateOf(CacheUsage(artworkBytes = 0, indexBytes = 0)) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val manageSourcesFocus = remember { FocusRequester() }
+    val addSourceFocus = remember { FocusRequester() }
+    var sourcePickerVisible by remember { mutableStateOf(false) }
+    var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
+    var switchingSourceId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        sources = runCatching { container.authenticatedActions.savedLoginEntries() }
+            .getOrDefault(emptyList())
+    }
 
     suspend fun refreshUsage() {
         usage = container.musicRepository.cacheUsage()
@@ -112,6 +134,41 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
         runCatching { coverStyleFocus.requestFocus() }
     }
 
+    if (sourcePickerVisible) {
+        SourcePickerDialog(
+            sources = sources,
+            activeProfileId = container.authenticatedActions.activeSourceId(),
+            switchingProfileId = switchingSourceId,
+            onDismiss = { sourcePickerVisible = false },
+            onSelect = { entry ->
+                switchingSourceId = entry.id
+                coroutineScope.launch {
+                    runCatching {
+                        container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
+                    }.onFailure { failure ->
+                        Toast.makeText(
+                            context,
+                            "切换失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    switchingSourceId = null
+                    sourcePickerVisible = false
+                }
+            },
+            onDelete = { entry ->
+                coroutineScope.launch {
+                    runCatching { container.authenticatedActions.deleteSavedLoginEntry(entry.id) }
+                    sources = runCatching { container.authenticatedActions.savedLoginEntries() }
+                        .getOrDefault(emptyList())
+                }
+            },
+            onAdd = {
+                sourcePickerVisible = false
+                onAddSource()
+            },
+        )
+    }
     Box(Modifier.fillMaxSize().background(FnColors.Background)) {
         Box(
             Modifier
@@ -143,6 +200,47 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                 Text("设置", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
+            Text("音乐源", fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(SettingsPanel, RoundedCornerShape(9.dp))
+                    .border(0.75.dp, SettingsBorderColor, RoundedCornerShape(9.dp))
+                    .padding(horizontal = 22.dp),
+            ) {
+                SettingsRow(label = "音乐源（${sources.size}）", height = 65.dp) {
+                    SettingsChoiceButton(
+                        label = "管理与切换",
+                        selected = false,
+                        onClick = { sourcePickerVisible = true },
+                        modifier = Modifier
+                            .width(150.dp)
+                            .focusProperties {
+                                left = FocusRequester.Cancel
+                                right = addSourceFocus
+                                up = FocusRequester.Cancel
+                                down = coverStyleFocus
+                            }
+                            .focusRequester(manageSourcesFocus),
+                    )
+                    SettingsChoiceButton(
+                        label = "＋ 添加",
+                        selected = false,
+                        onClick = onAddSource,
+                        modifier = Modifier
+                            .width(110.dp)
+                            .focusProperties {
+                                left = manageSourcesFocus
+                                right = FocusRequester.Cancel
+                                up = FocusRequester.Cancel
+                                down = coverStyleFocus
+                            }
+                            .focusRequester(addSourceFocus),
+                    )
+                }
+            }
+            Spacer(Modifier.height(18.dp))
             Text("播放与歌词", fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
 
@@ -163,6 +261,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                             .focusProperties {
                                 left = FocusRequester.Cancel
                                 right = posterStyleFocus
+                                up = addSourceFocus
                                 down = backgroundExitFocus
                             }
                             .focusRequester(coverStyleFocus),

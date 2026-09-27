@@ -4,6 +4,7 @@ import com.fnmusic.tv.core.data.api.ApiDecoder
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -199,12 +200,14 @@ class JellyfinMappingTest {
     }
 
     @Test
-    fun `direct stream url is static and carries the token`() {
+    fun `direct stream url is static and carries no token`() {
         val url = api.directStreamUrl("ITEM1")
 
         assertTrue(url.contains("/Audio/ITEM1/stream"))
         assertTrue(url.contains("static=true"))
-        assertTrue(url.contains("api_key=TOKEN123"))
+        // URL 会进播放队列快照（Room 未加密）与通知元数据，token 只能走请求头
+        assertFalse(url.contains("api_key"))
+        assertFalse(url.contains("TOKEN123"))
     }
 
     @Test
@@ -218,6 +221,8 @@ class JellyfinMappingTest {
         assertTrue(url.contains("audioCodec=aac"))
         assertTrue(url.contains("container=ts"))
         assertTrue(url.contains("maxAudioChannels=2"))
-        assertTrue(url.contains("api_key=TOKEN123"))
+        // 同上：不带 token
+        assertFalse(url.contains("api_key"))
+        assertFalse(url.contains("TOKEN123"))
     }
 }

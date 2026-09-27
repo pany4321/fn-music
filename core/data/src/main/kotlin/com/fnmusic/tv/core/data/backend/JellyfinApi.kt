@@ -77,7 +77,7 @@ internal class JellyfinApi(
                     .addQueryParameter("Recursive", "true")
                     .addQueryParameter("SortBy", "Random")
                     .addQueryParameter("Limit", limit.toString())
-                    .addQueryParameter("Fields", ITEM_FIELDS)
+                    .addQueryParameter("Fields", LIST_ITEM_FIELDS)
                     .build(),
             ).get(),
         ).Items
@@ -101,6 +101,7 @@ internal class JellyfinApi(
         sortOrder: String? = null,
         startIndex: Int = 0,
         limit: Int = 50,
+        fields: String = LIST_ITEM_FIELDS,
     ): JellyfinItemsDto = items(
         Request.Builder().url(
             url("Items").newBuilder().apply {
@@ -119,7 +120,7 @@ internal class JellyfinApi(
                 sortOrder?.let { addQueryParameter("SortOrder", it) }
                 addQueryParameter("StartIndex", startIndex.toString())
                 addQueryParameter("Limit", limit.toString())
-                addQueryParameter("Fields", ITEM_FIELDS)
+                addQueryParameter("Fields", fields)
             }.build(),
         ).get(),
     )
@@ -133,7 +134,7 @@ internal class JellyfinApi(
                 .addQueryParameter("SortBy", "SortName")
                 .addQueryParameter("StartIndex", startIndex.toString())
                 .addQueryParameter("Limit", limit.toString())
-                .addQueryParameter("Fields", ITEM_FIELDS)
+                .addQueryParameter("Fields", LIST_ITEM_FIELDS)
                 .build(),
         ).get(),
     )
@@ -146,7 +147,7 @@ internal class JellyfinApi(
                 .addQueryParameter("SortBy", "SortName")
                 .addQueryParameter("StartIndex", startIndex.toString())
                 .addQueryParameter("Limit", limit.toString())
-                .addQueryParameter("Fields", ITEM_FIELDS)
+                .addQueryParameter("Fields", LIST_ITEM_FIELDS)
                 .build(),
         ).get(),
     )
@@ -163,7 +164,7 @@ internal class JellyfinApi(
                 .addQueryParameter("userId", userId)
                 .addQueryParameter("StartIndex", startIndex.toString())
                 .addQueryParameter("Limit", limit.toString())
-                .addQueryParameter("Fields", ITEM_FIELDS)
+                .addQueryParameter("Fields", LIST_ITEM_FIELDS)
                 .build(),
         ).get(),
     )
@@ -189,7 +190,7 @@ internal class JellyfinApi(
                 url("Items").newBuilder()
                     .addQueryParameter("userId", userId)
                     .addQueryParameter("Ids", itemId)
-                    .addQueryParameter("Fields", ITEM_FIELDS)
+                    .addQueryParameter("Fields", FULL_ITEM_FIELDS)
                     .build(),
             ).get(),
         ).Items.firstOrNull()
@@ -300,7 +301,11 @@ internal class JellyfinApi(
 
     // ---- URL 构造（实测：PlaybackInfo 不返回 URL，客户端自己拼） ----
 
-    /** 封面：Jellyfin 按条目 id 取图；宽度给 fillWidth/fillHeight 得到方形裁切。 */
+    /**
+     * 封面：Jellyfin 按条目 id 取图；宽度给 fillWidth/fillHeight 得到方形裁切。
+     * **不带 api_key**：实测图片/流/播放列表都认 `Authorization` 头，
+     * 而 URL 会进播放队列快照（Room 未加密）与通知元数据 —— token 不该跟着落地。
+     */
     fun imageUrl(itemId: String, width: Int?): String =
         url("Items/$itemId/Images/Primary").newBuilder().apply {
             if (width != null) {
@@ -310,11 +315,10 @@ internal class JellyfinApi(
             }
         }.build().toString()
 
-    /** 直连原文件。 */
+    /** 直连原文件（不带 token：播放器统一用后端注入的请求头）。 */
     fun directStreamUrl(itemId: String): String =
         url("Audio/$itemId/stream").newBuilder()
             .addQueryParameter("static", "true")
-            .addQueryParameter("api_key", requireToken())
             .build().toString()
 
     /**
@@ -323,11 +327,10 @@ internal class JellyfinApi(
      * ⚠️ 实测（10.10.7）：必须打 **`/Audio/{id}/master.m3u8`** ——
      * `/Audio/{id}/stream?...transcodingProtocol=hls` 返回的是裸 TS 流（`video/mp2t`，
      * 以 0x47 同步字节开头），HLS 解析器会报 "Input does not start with the #EXTM3U header"。
-     * `MediaSourceId` 是必需的（缺了直接 400），`api_key` 会写进变体播放列表里。
+     * `MediaSourceId` 是必需的（缺了直接 400）；不带 `api_key`，鉴权靠播放器注入的请求头。
      */
     fun hlsTranscodeUrl(itemId: String, maxStreamingBitrate: Int = 192_000): String =
         url("Audio/$itemId/master.m3u8").newBuilder()
-            .addQueryParameter("api_key", requireToken())
             .addQueryParameter("MediaSourceId", itemId)
             .addQueryParameter("DeviceId", deviceId)
             .addQueryParameter("container", "ts")
@@ -442,9 +445,16 @@ internal class JellyfinApi(
     private companion object {
         val EMPTY_BODY = ByteArray(0).toRequestBody(null, 0, 0)
 
-        const val ITEM_FIELDS =
-            "MediaSources,DateCreated,UserData,RunTimeTicks,Container,AlbumArtist,Artists," +
-                "IndexNumber,ParentIndexNumber,ChildCount,RecursiveItemCount,ProductionYear,AlbumCount"
+        /**
+         * 列表/分页用的字段：**不含 `MediaSources`** —— 单个条目的 MediaSources 能到 KB 级，
+         * 一页 50 条就是几十 KB 的无用负载。列表只需要能判断"能不能直连"的 `Container`。
+         */
+        const val LIST_ITEM_FIELDS =
+            "DateCreated,UserData,RunTimeTicks,Container,AlbumArtist,Artists,IndexNumber," +
+                "ParentIndexNumber,ChildCount,RecursiveItemCount,ProductionYear,AlbumCount,MediaType"
+
+        /** 单个条目用完整字段（`streamPlan` 要 MediaSources 判断直连还是转码）。 */
+        const val FULL_ITEM_FIELDS = "MediaSources,$LIST_ITEM_FIELDS"
     }
 }
 

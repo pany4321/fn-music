@@ -44,6 +44,8 @@ data class LoginHistoryEntry(
     val username: String,
     val useHttps: Boolean,
     val kind: ServerKind = ServerKind.FnOs,
+    /** 服务器自报名（空则 UI 退回用地址显示）。 */
+    val serverName: String? = null,
 )
 
 /** Remembered playback credentials for media-button resume; read-only projection. */
@@ -122,10 +124,14 @@ class SessionRepository internal constructor(
     /** 当前会话的后端类型（未登录时按默认飞牛解释旧档案）。 */
     val serverKind: ServerKind get() = connection?.kind ?: activeProfile()?.serverKind ?: ServerKind.FnOs
 
+    private val probeCache = mutableMapOf<String, ServerProbe>()
     private val authVerification = Mutex()
     private val credentialsMutex = Mutex()
 
     val savedServer: String get() = preferences.getString(SERVER, "").orEmpty()
+
+    /** 当前激活源的档案 id（源列表用它标记"当前"；未登录时为 null）。 */
+    val activeProfileId: String? get() = memoryProfileId
     val recentServers: List<String>
         get() = (0 until MAX_LOGIN_HISTORY).mapNotNull { index ->
             preferences.getString("$RECENT_SERVER_PREFIX$index", null)
@@ -188,9 +194,12 @@ class SessionRepository internal constructor(
     suspend fun probeServer(serverInput: String, useHttps: Boolean): ServerProbe {
         val input = serverInput.trim()
         if (input.isEmpty() || ConnectionResolver.isFnId(input)) return ServerProbe(ServerKind.FnOs)
+        // 同一地址只探一次：登录页的"类型提示"与登录流程会各问一次，没必要发两遍请求。
+        val cacheKey = "$useHttps|$input"
+        probeCache[cacheKey]?.let { return it }
         val identity = runCatching { jellyfinConnector.probe(input, useHttps) }.getOrNull()
-            ?: return ServerProbe(ServerKind.FnOs)
-        return ServerProbe(ServerKind.Jellyfin, identity)
+            ?: return ServerProbe(ServerKind.FnOs).also { probeCache[cacheKey] = it }
+        return ServerProbe(ServerKind.Jellyfin, identity).also { probeCache[cacheKey] = it }
     }
 
     suspend fun login(
@@ -200,10 +209,12 @@ class SessionRepository internal constructor(
         password: CharArray,
         remember: Boolean,
         accessCode: CharArray = charArrayOf(),
+        /** 用户在"添加音乐源"里选好的类型；null 表示让后端自己探测。 */
+        kind: ServerKind? = null,
     ) {
         try {
             loadRememberedCredentials()
-            val probe = probeServer(serverInput, useHttps)
+            val probe = kind?.let { ServerProbe(it) } ?: probeServer(serverInput, useHttps)
             // 明文只在这一次登录里用得到：飞牛会用它的 SHA-256（记住密码后可免密重登），
             // Jellyfin 服务端只认明文，所以那边不留哈希（免密续期只能靠令牌）。
             val plaintext = password.concatToString()
@@ -370,7 +381,14 @@ class SessionRepository internal constructor(
         loadRememberedCredentials()
         return securePayload.profiles.map { profile ->
             val editable = ServerUrlNormalizer.editableInput(profile.server, false)
-            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps, profile.serverKind)
+            LoginHistoryEntry(
+                id = profile.id,
+                server = editable.address,
+                username = profile.username,
+                useHttps = editable.useHttps,
+                kind = profile.serverKind,
+                serverName = profile.serverName,
+            )
         }
     }
 
@@ -509,11 +527,18 @@ class SessionRepository internal constructor(
         val result = if (password != null) {
             connector.login(connected, username, password, deviceId)
         } else {
+            val viaToken = savedToken?.takeIf(String::isNotBlank)?.let { token ->
+                // ⚠️ 令牌续期必须临时把内存令牌换成"目标源的令牌"：
+                // 否则验的是当前会话的令牌（跨源切换时必然 401，切换会无谓失败）。
+                val previousToken = memoryToken
+                memoryToken = token
+                val user = runCatching { connector.me(connected) }.getOrNull()
+                // 验不过就把令牌还回去——当前会话不受影响，由调用方决定回落到密码登录。
+                if (user == null) memoryToken = previousToken
+                user?.let { ServerLoginResult(token, it, connected) }
+            }
             connector.reLogin(connected, username, savedHash, deviceId)
-                ?: savedToken?.takeIf(String::isNotBlank)?.let { token ->
-                    runCatching { connector.me(connected) }.getOrNull()
-                        ?.let { user -> ServerLoginResult(token, user, connected) }
-                }
+                ?: viaToken
                 ?: throw AppException(AppError.Unauthenticated)
         }
         memoryToken = result.token
@@ -528,6 +553,7 @@ class SessionRepository internal constructor(
             val profile = StoredLoginProfile(
                 id = existingProfileId ?: matching?.id ?: UUID.randomUUID().toString(),
                 server = canonicalServer,
+                serverName = result.connection.identity.name.takeIf(String::isNotBlank),
                 relayMode = relayMode,
                 username = username,
                 // Jellyfin 服务端只认明文，哈希没法重放，所以那边留空（免密续期靠令牌）。
@@ -632,7 +658,14 @@ class SessionRepository internal constructor(
         recentServers = recentServers,
         loginHistory = securePayload.profiles.map { profile ->
             val editable = ServerUrlNormalizer.editableInput(profile.server, false)
-            LoginHistoryEntry(profile.id, editable.address, profile.username, editable.useHttps, profile.serverKind)
+            LoginHistoryEntry(
+                id = profile.id,
+                server = editable.address,
+                username = profile.username,
+                useHttps = editable.useHttps,
+                kind = profile.serverKind,
+                serverName = profile.serverName,
+            )
         },
         selectedProfileId = selectedProfileId,
         error = error,

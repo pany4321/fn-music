@@ -31,6 +31,8 @@ internal data class StoredLoginProfile(
      * 未知值按飞牛处理（`ignoreUnknownKeys` 也让旧版本能读新数据）。
      */
     val kind: String = SERVER_KIND_FNOS,
+    /** 服务器自己报的名字（登录成功后回填），源列表用它做标题。 */
+    val serverName: String? = null,
 ) {
     val serverKind: ServerKind
         get() = if (kind == SERVER_KIND_JELLYFIN) ServerKind.Jellyfin else ServerKind.FnOs

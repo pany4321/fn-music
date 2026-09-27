@@ -458,7 +458,11 @@ internal fun AuthenticatedApp(
             },
             onBack = back,
         )
-                LibraryRoute.Settings -> SettingsScreen(container, onBack = back)
+                LibraryRoute.Settings -> SettingsScreen(
+                    container,
+                    onBack = back,
+                    onAddSource = { open(LibraryRoute.SwitchAccount) },
+                )
                 LibraryRoute.SwitchAccount -> SwitchAccountRoute(container, onBack = back)
             }
         }
@@ -479,8 +483,16 @@ private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: 
         initialError = null,
         loginHistory = history,
         onBack = onBack,
-        onLogin = { server, https, user, password, remember, accessCode ->
-            container.authenticatedActions.switchAccountTo(server, https, user, password, remember, accessCode)
+        onLogin = { server, https, user, password, remember, accessCode, kind ->
+            container.authenticatedActions.switchAccountTo(
+                server,
+                https,
+                user,
+                password,
+                remember,
+                accessCode,
+                kind,
+            )
         },
         onHistoryLogin = { profileId, accessCode, remember ->
             container.authenticatedActions.switchAccountWithHistory(profileId, accessCode, remember)
@@ -1668,6 +1680,17 @@ private fun BrowseMy(
     onPlayer: () -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var sourcePickerVisible by remember { mutableStateOf(false) }
+    var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
+    var switchingSourceId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(sourcePickerVisible) {
+        if (sourcePickerVisible) {
+            sources = runCatching { container.authenticatedActions.savedLoginEntries() }
+                .getOrDefault(emptyList())
+        }
+    }
     val artistState = retainedStore.paged<Artist>("grid:artists")
     val albumState = retainedStore.paged<Album>("grid:albums")
     val artists = artistState.snapshot.entries
@@ -1816,9 +1839,44 @@ private fun BrowseMy(
             },
             onSwitchAccount = {
                 focusedKey = "switch-account"
-                onSwitchAccount()
+                sourcePickerVisible = true
             },
         )
+        if (sourcePickerVisible) {
+            SourcePickerDialog(
+                sources = sources,
+                activeProfileId = container.authenticatedActions.activeSourceId(),
+                switchingProfileId = switchingSourceId,
+                onDismiss = { sourcePickerVisible = false },
+                onSelect = { entry ->
+                    switchingSourceId = entry.id
+                    coroutineScope.launch {
+                        runCatching {
+                            container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
+                        }.onFailure { failure ->
+                            Toast.makeText(
+                                context,
+                                "切换失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        switchingSourceId = null
+                        sourcePickerVisible = false
+                    }
+                },
+                onDelete = { entry ->
+                    coroutineScope.launch {
+                        runCatching { container.authenticatedActions.deleteSavedLoginEntry(entry.id) }
+                        sources = runCatching { container.authenticatedActions.savedLoginEntries() }
+                            .getOrDefault(emptyList())
+                    }
+                },
+                onAdd = {
+                    sourcePickerVisible = false
+                    onSwitchAccount()
+                },
+            )
+        }
         Spacer(Modifier.height(10.dp))
         // 非惰性列表：四个 band 全部常驻组合，band 级 FocusRequester 不因回收失效
         // （惰性回收会让相邻 band 的上/下键目标变成未挂载 requester，导致焦点卡死）。
@@ -1963,10 +2021,10 @@ private fun ProfileStrip(
         )
         Spacer(Modifier.width(8.dp))
         ProfileActionButton(
-            label = "切换账号",
+            label = "切换音乐源",
             glyph = ProfileGlyph.SwitchAccount,
             modifier = Modifier
-                .width(117.dp)
+                .width(134.dp)
                 .focusProperties {
                     left = settingsFocus
                     right = FocusRequester.Cancel

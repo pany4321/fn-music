@@ -143,8 +143,16 @@ internal fun FnMusicApp(container: AppUiDependencies, onExitApplication: () -> U
                                     loginHistory = current.loginHistory,
                                     initialSelectedProfileId = current.selectedProfileId,
                                     initialError = current.error,
-                                    onLogin = { server, https, user, password, remember, accessCode ->
-                                        container.sessionRepository.login(server, https, user, password, remember, accessCode)
+                                    onLogin = { server, https, user, password, remember, accessCode, kind ->
+                                        container.sessionRepository.login(
+                                            server,
+                                            https,
+                                            user,
+                                            password,
+                                            remember,
+                                            accessCode,
+                                            kind,
+                                        )
                                     },
                                     onHistoryLogin = container.sessionRepository::loginWithHistory,
                                     onHistoryDelete = container.sessionRepository::deleteLoginHistory,
@@ -240,7 +248,7 @@ internal fun LoginScreen(
     savedServer: String,
     recentServers: List<String>,
     initialError: AppError?,
-    onLogin: suspend (String, Boolean, String, CharArray, Boolean, CharArray) -> Unit,
+    onLogin: suspend (String, Boolean, String, CharArray, Boolean, CharArray, ServerKind) -> Unit,
     loginHistory: List<LoginHistoryEntry> = emptyList(),
     initialSelectedProfileId: String? = null,
     onHistoryLogin: suspend (String, CharArray?, Boolean) -> Unit = { _, accessCode, _ ->
@@ -275,6 +283,13 @@ internal fun LoginScreen(
     var showServerHistory by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
     var probe by remember { mutableStateOf<ServerProbe?>(null) }
+    // 音乐源类型：用户先选类型再填参数（首次启动 = 添加音乐源）。
+    var sourceKind by remember(selectedDraft?.profileId) {
+        mutableStateOf(selectedDraft?.kind ?: ServerKind.FnOs)
+    }
+    var kindHint by remember { mutableStateOf<String?>(null) }
+    val fnOsKindFocus = remember { FocusRequester() }
+    val jellyfinKindFocus = remember { FocusRequester() }
     var loginAttempted by remember { mutableStateOf(false) }
     var error by remember(initialError) { mutableStateOf(initialError) }
     val scope = rememberCoroutineScope()
@@ -288,8 +303,8 @@ internal fun LoginScreen(
     val httpsFocus = remember { FocusRequester() }
     val loginFocus = remember { FocusRequester() }
     val fnIdInput = ConnectionResolver.isFnId(server)
-    // Jellyfin 没有安全码/中继概念：识别出来之后就把这一栏收掉，焦点链也跟着退化。
-    val accessCodeVisible = probe?.kind != ServerKind.Jellyfin
+    // Jellyfin 没有安全码/中继概念：选了 Jellyfin 就把这一栏收掉，焦点链也跟着退化。
+    val accessCodeVisible = sourceKind != ServerKind.Jellyfin
     val validServer = fnIdInput || ServerUrlNormalizer.normalize(server, https) is ServerUrlResult.Valid
     // 表单是否已填齐（与“是否正在提交”无关）。登录按钮的可聚焦状态只看它：
     // 若提交时把按钮置为 disabled，焦点会回落到第一个可聚焦控件（NAS 地址栏）。
@@ -328,12 +343,38 @@ internal fun LoginScreen(
                 Spacer(Modifier.height(6.dp))
             }
             Text(
-                if (probe?.kind == ServerKind.Jellyfin) "Jellyfin" else "飞牛音乐",
+                "音乐源",
                 color = FnColors.Teal,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text("登录", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("类型", color = FnColors.Muted, fontSize = 15.sp)
+                Spacer(Modifier.width(4.dp))
+                SourceKindButton(
+                    label = "飞牛音乐",
+                    selected = sourceKind == ServerKind.FnOs,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusProperties { down = serverFocus; right = jellyfinKindFocus }
+                        .focusRequester(fnOsKindFocus),
+                    onClick = { sourceKind = ServerKind.FnOs; kindHint = null },
+                )
+                SourceKindButton(
+                    label = "Jellyfin",
+                    selected = sourceKind == ServerKind.Jellyfin,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusProperties { down = serverFocus; left = fnOsKindFocus }
+                        .focusRequester(jellyfinKindFocus),
+                    onClick = { sourceKind = ServerKind.Jellyfin; kindHint = null },
+                )
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -354,6 +395,7 @@ internal fun LoginScreen(
                     downFocus = usernameFocus,
                     rightFocus = historyFocus.takeIf { loginHistory.isNotEmpty() || recentServers.isNotEmpty() },
                     inputModifier = Modifier.focusRequester(serverFocus).focusProperties {
+                        up = if (sourceKind == ServerKind.Jellyfin) jellyfinKindFocus else fnOsKindFocus
                         right = if (loginHistory.isNotEmpty() || recentServers.isNotEmpty()) {
                             historyFocus
                         } else {
@@ -489,11 +531,9 @@ internal fun LoginScreen(
                 else -> ""
             }
             Text(
-                probe?.takeIf { it.kind == ServerKind.Jellyfin }?.identity?.let { identity ->
-                    "已识别 Jellyfin ${identity.serverVersion}"
-                } ?: statusMessage,
+                kindHint ?: statusMessage,
                 color = when {
-                    probe?.kind == ServerKind.Jellyfin && error == null -> FnColors.Teal
+                    kindHint != null -> FnColors.Warning
                     error == null && !serverInvalid -> FnColors.Warning
                     else -> FnColors.Coral
                 },
@@ -513,19 +553,33 @@ internal fun LoginScreen(
                     password = ""
                     accessCode = ""
                     scope.launch {
-                        // 地址提交时先识别后端：命中 Jellyfin 的 Public Info 就按 Jellyfin 登录，
-                        // 页面同时把"已识别 Jellyfin x.y.z"回显出来（识别失败/FNID 一律按飞牛）。
-                        probe = runCatching { onProbe(server, https) }.getOrNull()
                         error = null
+                        kindHint = null
                         runCatching {
                             if (savedProfileId != null) {
                                 submittedPassword.fill('\u0000')
                                 onHistoryLogin(savedProfileId, submittedAccessCode, rememberLogin)
                             } else {
-                                onLogin(server, https, username, submittedPassword, rememberLogin, submittedAccessCode)
+                                onLogin(
+                                    server,
+                                    https,
+                                    username,
+                                    submittedPassword,
+                                    rememberLogin,
+                                    submittedAccessCode,
+                                    sourceKind,
+                                )
                             }
                         }
-                            .onFailure { error = (it as? AppException)?.error ?: AppError.Unknown() }
+                            .onFailure {
+                                error = (it as? AppException)?.error ?: AppError.Unknown()
+                                // 登录失败时探一次：如果这地址其实属于另一种后端，直接告诉用户改类型。
+                                val detected = runCatching { onProbe(server, https) }.getOrNull()
+                                probe = detected
+                                if (detected != null && detected.kind != sourceKind) {
+                                    kindHint = "这台服务器看起来是 ${sourceKindLabel(detected.kind)}，请把上面的类型改成它"
+                                }
+                            }
                         submitting = false
                     }
                 },
@@ -562,7 +616,7 @@ internal fun LoginScreen(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("登录历史", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+                Text("已有音乐源", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
                 loginHistory.forEachIndexed { index, entry ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LoginActionButton(
@@ -593,7 +647,7 @@ internal fun LoginScreen(
                                 }
                             },
                             modifier = Modifier.weight(1f).height(72.dp)
-                                .semantics { contentDescription = "登录历史：${entry.username}" }
+                                .semantics { contentDescription = "音乐源：${entry.username}" }
                                 .focusProperties {
                                     right = profileDeleteFocus[index]
                                     up = profileRowFocus.getOrNull(index - 1) ?: FocusRequester.Cancel
@@ -675,7 +729,7 @@ internal fun LoginScreen(
                         }
                         .focusRequester(clearHistoryFocus),
                     shape = RoundedCornerShape(6.dp),
-                ) { Text("清除所有历史记录", color = FnColors.Coral, fontSize = 19.sp) }
+                ) { Text("清除全部音乐源", color = FnColors.Coral, fontSize = 19.sp) }
             }
         }
         LaunchedEffect(firstHistoryFocus) { firstHistoryFocus?.let { runCatching { it.requestFocus() } } }
@@ -950,7 +1004,7 @@ private fun LoginCheckbox(
 }
 
 @Composable
-private fun LoginActionButton(
+internal fun LoginActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -1005,7 +1059,7 @@ private fun LoginActionButton(
     }
 }
 
-private fun errorMessage(error: AppError): String = when (error) {
+internal fun errorMessage(error: AppError): String = when (error) {
     AppError.Unauthenticated -> "登录已失效，请重新登录"
     AppError.AccountDisabled -> "账号已禁用"
     AppError.AccessCodeRequired -> "此服务器需要安全码"
@@ -1014,4 +1068,26 @@ private fun errorMessage(error: AppError): String = when (error) {
     AppError.NotFound -> "服务器接口不可用"
     AppError.FnIdUnavailable -> "FNID 无可用连接，请检查输入或网络"
     else -> "连接失败，请重试"
+}
+
+/** 音乐源类型的选择按钮（登录页/添加音乐源用）。 */
+@Composable
+internal fun SourceKindButton(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    LoginActionButton(
+        onClick = onClick,
+        selected = selected,
+        modifier = modifier.height(52.dp).semantics { contentDescription = "音乐源类型：$label" },
+    ) {
+        Text(
+            label,
+            fontSize = 19.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) FnColors.Text else FnColors.Muted,
+        )
+    }
 }

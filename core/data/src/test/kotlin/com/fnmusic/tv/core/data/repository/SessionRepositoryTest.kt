@@ -11,6 +11,7 @@ import com.fnmusic.tv.core.data.security.SecureSessionRead
 import com.fnmusic.tv.core.data.security.StoredLoginProfile
 import com.fnmusic.tv.core.data.security.TokenStore
 import com.fnmusic.tv.core.model.AppError
+import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.AppException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -241,18 +242,15 @@ class SessionRepositoryTest {
         val tokenStore = FakeTokenStore(initialToken = null)
         val repository = repository(tokenStore)
 
-        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "alice-token-1")
-        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true)
-        enqueueProbeNotJellyfin()
+        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true, kind = ServerKind.FnOs)
         enqueueSystemConfig()
         enqueueLogin("bob", "bob-token")
-        repository.login(server.url("music/api/v1/").toString(), false, "bob", "bravo".toCharArray(), true)
-        enqueueProbeNotJellyfin()
+        repository.login(server.url("music/api/v1/").toString(), false, "bob", "bravo".toCharArray(), true, kind = ServerKind.FnOs)
         enqueueSystemConfig()
         enqueueLogin("alice", "alice-token-2")
-        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha-2".toCharArray(), true)
+        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha-2".toCharArray(), true, kind = ServerKind.FnOs)
 
         val profiles = tokenStore.session?.profiles.orEmpty()
         assertEquals(2, profiles.size)
@@ -263,10 +261,9 @@ class SessionRepositoryTest {
     @Test fun `clearing login history does not terminate the current memory session`() = runBlocking {
         val tokenStore = FakeTokenStore(initialToken = null)
         val repository = repository(tokenStore)
-        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "alice-token")
-        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true)
+        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true, kind = ServerKind.FnOs)
         assertTrue(repository.state.value is SessionState.SignedIn)
 
         repository.clearLoginHistory()
@@ -281,7 +278,6 @@ class SessionRepositoryTest {
         val tokenStore = FakeTokenStore(initialToken = null)
         val repository = repository(tokenStore)
         repeat(6) { index ->
-            enqueueProbeNotJellyfin()
             enqueueSystemConfig()
             enqueueLogin("user-$index", "token-$index")
             repository.login(
@@ -290,6 +286,7 @@ class SessionRepositoryTest {
                 "user-$index",
                 "password-$index".toCharArray(),
                 true,
+                kind = ServerKind.FnOs,
             )
         }
 
@@ -317,11 +314,10 @@ class SessionRepositoryTest {
         enqueueUser()
         repository.restore()
         repository.showLogin()
-        enqueueProbeNotJellyfin()
         enqueueSystemConfig()
         enqueueLogin("alice", "memory-token")
 
-        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), false)
+        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), false, kind = ServerKind.FnOs)
 
         assertNull(tokenStore.session)
         assertEquals("memory-token", repository.playbackAuth().headers["Authorization"])
@@ -360,6 +356,19 @@ class SessionRepositoryTest {
     )
 
     /** 登录页会先探测后端：给一个"不是 Jellyfin"的 404，随后按飞牛流程走。 */
+    @Test fun `login without an explicit kind probes once and falls back to fnos`() = runBlocking {
+        val tokenStore = FakeTokenStore(initialToken = null)
+        val repository = repository(tokenStore)
+        enqueueProbeNotJellyfin()
+        enqueueSystemConfig()
+        enqueueLogin("alice", "probe-token")
+
+        repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), true)
+
+        assertTrue(repository.state.value is SessionState.SignedIn)
+        assertEquals(ServerKind.FnOs, repository.serverKind)
+    }
+
     private fun enqueueProbeNotJellyfin() {
         server.enqueue(MockResponse.Builder().code(404).build())
     }

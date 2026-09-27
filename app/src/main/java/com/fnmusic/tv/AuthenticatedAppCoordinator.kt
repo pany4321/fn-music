@@ -9,6 +9,7 @@ import com.fnmusic.tv.core.data.repository.SessionRepository
 import com.fnmusic.tv.core.data.repository.ServerProbe
 import com.fnmusic.tv.core.data.repository.SessionState
 import com.fnmusic.tv.core.model.AppError
+import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.playback.PlaybackController
 import com.fnmusic.tv.core.playback.PlaybackService
 import java.util.concurrent.atomic.AtomicBoolean
@@ -23,6 +24,8 @@ import kotlinx.coroutines.withContext
 internal interface AuthenticatedAppActions {
     /** 登录页用：识别地址对应哪种后端（Jellyfin 命中 Public Info；其余按飞牛）。 */
     suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe
+    /** 当前正在使用的音乐源档案 id（"我的"/设置里的源列表用它标记"当前"）。 */
+    fun activeSourceId(): String?
     suspend fun verifyCurrentSession()
     suspend fun retrySessionRestore()
     suspend fun showLogin()
@@ -34,6 +37,7 @@ internal interface AuthenticatedAppActions {
         password: CharArray,
         remember: Boolean,
         accessCode: CharArray,
+        kind: ServerKind?,
     )
     suspend fun switchAccountWithHistory(profileId: String, accessCode: CharArray?, remember: Boolean)
     suspend fun savedLoginEntries(): List<LoginHistoryEntry>
@@ -112,6 +116,8 @@ internal class AuthenticatedAppCoordinator(
     override suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe =
         sessionRepository.probeServer(input, useHttps)
 
+    override fun activeSourceId(): String? = sessionRepository.activeProfileId
+
     override suspend fun verifyCurrentSession() {
         sessionRepository.verifyCurrentSession()
     }
@@ -159,6 +165,7 @@ internal class AuthenticatedAppCoordinator(
         password: CharArray,
         remember: Boolean,
         accessCode: CharArray,
+        kind: ServerKind?,
     ) {
         val departingNamespace = runCatching { sessionRepository.cacheNamespace() }.getOrNull()
         sessionRepository.login(server, useHttps, username, password, remember, accessCode)
