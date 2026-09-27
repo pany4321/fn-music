@@ -1728,8 +1728,8 @@ internal fun PlayerControlOverlay(
                 )
             }
             PlayerSideActionButton(
-                label = "退出漫游".takeIf { roaming },
-                glyph = PlayerSideActionGlyph.Queue.takeUnless { roaming },
+                // 退出漫游用“门 + 外指箭头”图标，一眼能认，也不再需要宽文字按钮。
+                glyph = if (roaming) PlayerSideActionGlyph.ExitRoam else PlayerSideActionGlyph.Queue,
                 description = if (roaming) "退出漫游" else "播放队列，共 $queueCount 首",
                 focusRequester = if (roaming) exitRoamFocus else queueFocus,
                 upFocus = progressFocus,
@@ -1752,7 +1752,6 @@ private fun PlayerSideActionButton(
     focusRequester: FocusRequester,
     upFocus: FocusRequester,
     modifier: Modifier = Modifier,
-    label: String? = null,
     glyph: PlayerSideActionGlyph? = null,
     leftFocus: FocusRequester? = null,
     rightFocus: FocusRequester? = null,
@@ -1761,16 +1760,17 @@ private fun PlayerSideActionButton(
     onFocus: () -> Unit,
     onClick: () -> Unit,
 ) {
-    val buttonWidth = if (glyph == null) 104.dp else 36.dp
+    // +25%：36×29 → 45×36；外层触摸区同步放宽，避免聚焦放大 ×1.1 时顶出边界。
+    val buttonWidth = 45.dp
     Box(
         modifier
-            .size(width = if (glyph == null) 104.dp else 48.dp, height = 48.dp)
+            .size(width = 54.dp, height = 48.dp)
             .playerTouchTarget(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         TvMaterialButton(
             onClick = onClick,
-            modifier = Modifier.size(width = buttonWidth, height = 29.dp)
+            modifier = Modifier.size(width = buttonWidth, height = 36.dp)
                 .focusProperties {
                     up = upFocus
                     down = FocusRequester.Cancel
@@ -1789,30 +1789,19 @@ private fun PlayerSideActionButton(
             colors = ButtonDefaults.colors(
                 containerColor = if (emphasized) FnColors.AccentSoft else Color.Transparent,
                 contentColor = when {
-                    selected -> FnColors.Danger
+                    // 收藏态用主题主色，和其它“已选中”控件一致（不再用固定的红）。
+                    selected -> FnColors.Coral
                     emphasized -> lerp(FnColors.Text, FnColors.Coral, 0.25f)
                     else -> FnColors.Text
                 },
                 focusedContainerColor = if (selected) FnColors.Text else FnColors.Coral,
-                focusedContentColor = if (selected) FnColors.Danger else FnColors.Background,
+                focusedContentColor = if (selected) FnColors.Coral else FnColors.Background,
                 pressedContainerColor = if (selected) FnColors.Text else FnColors.Coral,
-                pressedContentColor = if (selected) FnColors.Danger else FnColors.Background,
+                pressedContentColor = if (selected) FnColors.Coral else FnColors.Background,
             ),
             contentPadding = PaddingValues(0.dp),
         ) {
-            if (glyph != null) {
-                PlayerSideActionIcon(glyph)
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        label.orEmpty(),
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+            glyph?.let { PlayerSideActionIcon(it) }
         }
     }
 }
@@ -1842,6 +1831,7 @@ private enum class PlayerSideActionGlyph {
     Sequence,
     Queue,
     AddToPlaylist,
+    ExitRoam,
 }
 
 private fun playModeGlyph(mode: PlayMode): PlayerSideActionGlyph = when (mode) {
@@ -1854,7 +1844,7 @@ private fun playModeGlyph(mode: PlayMode): PlayerSideActionGlyph = when (mode) {
 @Composable
 private fun PlayerSideActionIcon(glyph: PlayerSideActionGlyph) {
     val iconColor = LocalContentColor.current
-    Canvas(Modifier.size(17.dp)) {
+    Canvas(Modifier.size(21.dp)) {
         val stroke = 1.7.dp.toPx()
         fun line(startX: Float, startY: Float, endX: Float, endY: Float) {
             drawLine(
@@ -1920,6 +1910,15 @@ private fun PlayerSideActionIcon(glyph: PlayerSideActionGlyph) {
                 rightArrow(0.82f, 0.50f)
                 line(0.18f, 0.29f, 0.44f, 0.29f)
                 line(0.18f, 0.71f, 0.44f, 0.71f)
+            }
+            PlayerSideActionGlyph.ExitRoam -> {
+                // 门框
+                line(0.16f, 0.16f, 0.16f, 0.84f)
+                line(0.16f, 0.16f, 0.52f, 0.16f)
+                line(0.16f, 0.84f, 0.52f, 0.84f)
+                // 向外箭头
+                line(0.52f, 0.50f, 0.88f, 0.50f)
+                rightArrow(0.88f, 0.50f)
             }
             PlayerSideActionGlyph.Queue -> {
                 line(0.15f, 0.27f, 0.58f, 0.27f)
@@ -1987,7 +1986,8 @@ private fun PlayerTransportButton(
         TvMaterialButton(
             enabled = enabled,
             onClick = onClick,
-            modifier = Modifier.size(if (emphasized) 36.dp else 29.dp)
+            // 播放/暂停 +10%（36→40），上一首/下一首 +25%（29→36）。
+            modifier = Modifier.size(if (emphasized) 40.dp else 36.dp)
                 .focusProperties {
                     up = upFocus
                     down = FocusRequester.Cancel
@@ -2011,7 +2011,7 @@ private fun PlayerTransportButton(
             contentPadding = PaddingValues(0.dp),
         ) {
             val iconColor = LocalContentColor.current
-            Canvas(Modifier.size(if (emphasized) 18.dp else 14.dp)) {
+            Canvas(Modifier.size(if (emphasized) 20.dp else 18.dp)) {
                 val stroke = 2.5.dp.toPx()
                 when (glyph) {
                     TransportGlyph.Play -> {
@@ -2371,6 +2371,52 @@ private fun AddToPlaylistDialog(
     var loading by remember { mutableStateOf(true) }
     var pendingGuid by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var creatingPlaylist by remember { mutableStateOf(false) }
+    var creatingBusy by remember { mutableStateOf(false) }
+    var createError by remember { mutableStateOf<String?>(null) }
+    val addActionFocus = remember { FocusRequester() }
+    val rowFocuses = remember(playlists) { List(playlists.size) { FocusRequester() } }
+
+    /** 新建歌单 → 直接把当前歌曲加进去；两步分开报告失败原因。 */
+    fun createPlaylistAndAdd(name: String) {
+        if (creatingBusy) return
+        creatingBusy = true
+        createError = null
+        scope.launch {
+            val created = runCatching { container.musicRepository.createPlaylist(name) }.getOrNull()
+            if (created == null) {
+                creatingBusy = false
+                createError = "创建失败，请重试"
+                return@launch
+            }
+            val added = runCatching {
+                container.musicRepository.addToPlaylist(created.guid.value, trackGuid)
+            }
+            creatingBusy = false
+            if (added.isSuccess) {
+                creatingPlaylist = false
+                message = "已创建「${created.name}」并添加"
+                delay(900)
+                onDismiss()
+            } else {
+                // 歌单已建好：回到列表并把它排在前面，让用户手动再点一次。
+                creatingPlaylist = false
+                playlists = (listOf(created) + playlists).distinctBy { it.guid.value }
+                message = "已创建「${created.name}」，但添加失败，请在列表中选择它"
+            }
+        }
+    }
+
+    fun closeCreateDialog() {
+        if (creatingBusy) return
+        creatingPlaylist = false
+        createError = null
+        // 回到添加到歌单弹窗时把焦点还给第一行，避免焦点丢到窗口外。
+        scope.launch {
+            yield()
+            runCatching { rowFocuses.firstOrNull()?.requestFocus() ?: addActionFocus.requestFocus() }
+        }
+    }
 
     LaunchedEffect(Unit) {
         val loaded = runCatching { container.musicRepository.playlists() }
@@ -2390,7 +2436,47 @@ private fun AddToPlaylistDialog(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                val addShape = CircleShape
+                Button(
+                    onClick = {
+                        if (pendingGuid != null) return@Button
+                        createError = null
+                        creatingPlaylist = true
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .focusProperties {
+                            // 右上角“新建歌单”：左侧/下方都回到歌单列表，右与上取消，保证不逃逸。
+                            left = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
+                            down = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                        }
+                        .focusRequester(addActionFocus)
+                        .semantics { contentDescription = "新建歌单" },
+                    shape = ButtonDefaults.shape(addShape, addShape, addShape, addShape, addShape),
+                    scale = ButtonDefaults.scale(focusedScale = 1.06f),
+                    colors = ButtonDefaults.colors(
+                        containerColor = FnColors.Control,
+                        contentColor = FnColors.Text,
+                        focusedContainerColor = FnColors.Coral,
+                        focusedContentColor = FnColors.Background,
+                    ),
+                    border = ButtonDefaults.border(
+                        border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = addShape),
+                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = addShape),
+                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = addShape),
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text("+", fontSize = 24.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+                }
+            }
             // 内容区固定高度：加载中/空态/列表占同样空间，弹出不再跳变；
             // 底部消息行也预留固定一行，成功/失败提示出现时高度不变。
             Box(
@@ -2423,11 +2509,10 @@ private fun AddToPlaylistDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         // TV：列表就绪后把初始焦点交给第一个歌单，避免遥控器“无响应”。
-                        val firstPlaylistFocus = remember(playlists) { FocusRequester() }
                         LaunchedEffect(loading, playlists) {
                             if (!loading && playlists.isNotEmpty()) {
                                 yield()
-                                runCatching { firstPlaylistFocus.requestFocus() }
+                                runCatching { rowFocuses.firstOrNull()?.requestFocus() }
                             }
                         }
                         playlists.forEachIndexed { index, playlist ->
@@ -2456,12 +2541,15 @@ private fun AddToPlaylistDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(64.dp)
+                                .focusProperties {
+                                    // 上下只在列表内移动：首项向上回到“新建歌单”按钮，末项向下取消。
+                                    up = rowFocuses.getOrNull(index - 1) ?: addActionFocus
+                                    down = rowFocuses.getOrNull(index + 1) ?: FocusRequester.Cancel
+                                    left = FocusRequester.Cancel
+                                    right = FocusRequester.Cancel
+                                }
                                 .then(
-                                    if (index == 0) {
-                                        Modifier.focusRequester(firstPlaylistFocus)
-                                    } else {
-                                        Modifier
-                                    }
+                                    rowFocuses.getOrNull(index)?.let { Modifier.focusRequester(it) } ?: Modifier
                                 ),
                             colors = ButtonDefaults.colors(
                                 containerColor = FnColors.Card,
@@ -2513,6 +2601,111 @@ private fun AddToPlaylistDialog(
                 maxLines = 1,
                 modifier = Modifier.height(19.dp),
             )
+
+            if (creatingPlaylist) {
+                CreatePlaylistDialog(
+                    busy = creatingBusy,
+                    error = createError,
+                    onCreate = ::createPlaylistAndAdd,
+                    onDismiss = ::closeCreateDialog,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 新建歌单：一个输入框 + 取消/确定。确定后由调用方负责“创建 + 把当前歌曲加进去”。
+ * 输入框复用登录页那套 TvTextField（点按进入编辑、BACK 退出编辑、上下键不被吞）。
+ */
+@Composable
+private fun CreatePlaylistDialog(
+    busy: Boolean,
+    error: String?,
+    onCreate: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    val fieldFocus = remember { FocusRequester() }
+    val cancelFocus = remember { FocusRequester() }
+    val confirmFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        yield()
+        runCatching { fieldFocus.requestFocus() }
+    }
+    val dialogShape = RoundedCornerShape(24.dp)
+    val dialogScale = ButtonDefaults.scale(focusedScale = 1.05f)
+    Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
+        Column(
+            Modifier
+                .widthIn(max = 520.dp)
+                .fillMaxWidth(0.9f)
+                .background(FnColors.Surface, RoundedCornerShape(8.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("新建歌单", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+            TvTextField(
+                value = name,
+                onValueChange = { name = it.take(30) },
+                label = "歌单名称",
+                modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
+                placeholder = "输入歌单名称",
+                downFocus = confirmFocus,
+            )
+            error?.let {
+                Text(it, color = FnColors.Warning, fontSize = 14.sp, lineHeight = 18.sp)
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                Button(
+                    onClick = { if (!busy) onDismiss() },
+                    modifier = Modifier
+                        .size(width = 132.dp, height = 46.dp)
+                        .focusProperties {
+                            up = fieldFocus
+                            right = confirmFocus
+                            left = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        }
+                        .focusRequester(cancelFocus),
+                    shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
+                    scale = dialogScale,
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("取消", fontSize = 14.sp)
+                    }
+                }
+                Button(
+                    enabled = name.isNotBlank() && !busy,
+                    onClick = { onCreate(name.trim()) },
+                    modifier = Modifier
+                        .size(width = 132.dp, height = 46.dp)
+                        .focusProperties {
+                            up = fieldFocus
+                            left = cancelFocus
+                            right = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        }
+                        .focusRequester(confirmFocus),
+                    shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
+                    scale = dialogScale,
+                    colors = ButtonDefaults.colors(
+                        containerColor = FnColors.Coral,
+                        contentColor = FnColors.Background,
+                        disabledContainerColor = FnColors.Disabled,
+                        disabledContentColor = FnColors.Muted,
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(if (busy) "创建中…" else "确定", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
     }
 }

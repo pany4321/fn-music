@@ -750,7 +750,7 @@ private fun VisibilityIcon(hidden: Boolean) {
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun TvTextField(
+internal fun TvTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,

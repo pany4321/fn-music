@@ -68,6 +68,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -151,6 +152,7 @@ import com.fnmusic.tv.core.model.Page
 import com.fnmusic.tv.core.model.PlayerStyle
 import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.Track
+import com.fnmusic.tv.core.model.TrackGuid
 import com.fnmusic.tv.core.model.playback.QueueSource
 import com.fnmusic.tv.core.model.playback.QueueKind
 import com.fnmusic.tv.core.model.playback.PlayMode
@@ -163,6 +165,7 @@ import com.fnmusic.tv.core.model.playback.boundedQueueWindow
 import com.fnmusic.tv.core.playback.PlaybackUiState
 import com.fnmusic.tv.core.playback.PlaybackProgressState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -384,6 +387,13 @@ internal fun AuthenticatedApp(
                 ),
                 contentRevision = favoriteState.revision,
                 emptyMessage = "还没有收藏歌曲",
+                removeTrack = { track ->
+                    container.musicRepository
+                        .toggleFavorite(track.guid.value, fallbackFavorite = true)
+                        .isSuccess
+                },
+                removeKindLabel = "取消收藏",
+                allowClearFavorites = true,
             )
         }
         LibraryRoute.Recent -> {
@@ -626,12 +636,14 @@ internal fun NowPlayingPill(
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.04f),
         colors = ButtonDefaults.colors(
-            containerColor = FnColors.PillBackground,
-            contentColor = FnColors.Text,
-            focusedContainerColor = FnColors.PillBackgroundFocused,
-            focusedContentColor = FnColors.Text,
-            pressedContainerColor = FnColors.PillBackgroundPressed,
-            pressedContentColor = FnColors.Text,
+            // 主色柔和底 + 主色文字：一眼看出是“主题主色系”的当前播放条，
+            // 又不会和右侧已选中的「首页/我的」实心主色胶囊抢同一档视觉重量。
+            containerColor = FnColors.AccentSoft,
+            contentColor = FnColors.Coral,
+            focusedContainerColor = FnColors.AccentSoftFocused,
+            focusedContentColor = FnColors.Coral,
+            pressedContainerColor = FnColors.AccentSoftFocused,
+            pressedContentColor = FnColors.Coral,
         ),
         border = ButtonDefaults.border(
             border = Border(BorderStroke(0.5.dp, FnColors.PillBorder), shape = shape),
@@ -661,9 +673,9 @@ internal fun NowPlayingPill(
                     Spacer(Modifier.width(3.5.dp))
                     Text(
                         if (playback.isPlaying) "正在播放" else "已暂停",
-                        color = FnColors.Text,
-                        fontSize = 9.sp,
-                        lineHeight = 9.sp,
+                        color = FnColors.Coral,
+                        fontSize = 10.sp,
+                        lineHeight = 10.sp,
                         style = TextStyle(
                             platformStyle = PlatformTextStyle(includeFontPadding = false),
                         ),
@@ -674,7 +686,7 @@ internal fun NowPlayingPill(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         playback.title.ifBlank { "正在播放" },
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         style = TextStyle(
                             platformStyle = PlatformTextStyle(includeFontPadding = true),
@@ -688,9 +700,9 @@ internal fun NowPlayingPill(
                         Spacer(Modifier.width(4.5.dp))
                         Text(
                             playback.artist,
-                            color = FnColors.Muted,
-                            fontSize = 9.sp,
-                            lineHeight = 10.sp,
+                            color = FnColors.Coral.copy(alpha = 0.72f),
+                            fontSize = 10.sp,
+                            lineHeight = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(0.62f, fill = false),
@@ -699,7 +711,7 @@ internal fun NowPlayingPill(
                 }
             }
             Spacer(Modifier.width(5.dp))
-            Text("›", color = FnColors.Muted, fontSize = 17.sp, lineHeight = 17.sp)
+            Text("›", color = FnColors.Coral, fontSize = 18.sp, lineHeight = 18.sp)
         }
     }
 }
@@ -712,8 +724,8 @@ private fun NowPlayingArtworkFallback(title: String) {
     ) {
         Text(
             title.trim().take(1).ifBlank { "音" }.uppercase(),
-            color = FnColors.Teal,
-            fontSize = 11.sp,
+            color = FnColors.Coral,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -1934,7 +1946,7 @@ private fun ProfileStrip(
             label = "设置",
             glyph = ProfileGlyph.Settings,
             modifier = Modifier
-                .width(72.dp)
+                .width(83.dp)
                 .focusProperties {
                     left = FocusRequester.Cancel
                     right = switchAccountFocus
@@ -1951,7 +1963,7 @@ private fun ProfileStrip(
             label = "切换账号",
             glyph = ProfileGlyph.SwitchAccount,
             modifier = Modifier
-                .width(102.dp)
+                .width(117.dp)
                 .focusProperties {
                     left = settingsFocus
                     right = FocusRequester.Cancel
@@ -2022,7 +2034,8 @@ private fun ProfileActionButton(
     val shape = CircleShape
     Button(
         onClick = onClick,
-        modifier = modifier.height(36.dp),
+        // +15%：36→41dp，图标 15→17dp、文字 13→15sp，车机触摸更好点。
+        modifier = modifier.height(41.dp),
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.035f),
         colors = ButtonDefaults.colors(
@@ -2038,11 +2051,11 @@ private fun ProfileActionButton(
             focusedBorder = Border(BorderStroke(1.2.dp, FnColors.Coral), shape = shape),
             pressedBorder = Border(BorderStroke(1.2.dp, FnColors.Coral), shape = shape),
         ),
-        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
     ) {
-        ProfileGlyphCanvas(glyph, Modifier.size(15.dp), LocalContentColor.current)
-        Spacer(Modifier.width(6.dp))
-        Text(label, fontSize = 13.sp, lineHeight = 15.sp, maxLines = 1)
+        ProfileGlyphCanvas(glyph, Modifier.size(17.dp), LocalContentColor.current)
+        Spacer(Modifier.width(7.dp))
+        Text(label, fontSize = 15.sp, lineHeight = 17.sp, maxLines = 1)
     }
 }
 
@@ -2977,6 +2990,10 @@ private fun TrackCollection(
     contentRevision: Long = 0L,
     emptyMessage: String = "暂无歌曲",
     removeTrack: (suspend (Track) -> Boolean)? = null,
+    /** 行内删除按钮的含义（弹窗文案）：歌单是"从歌单删除"，收藏是"取消收藏"。 */
+    removeKindLabel: String = "从歌单删除",
+    /** 收藏页专用：允许"清空全部收藏"（没有批量接口，逐条取消并显示进度）。 */
+    allowClearFavorites: Boolean = false,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val retained = retainedStore.tracks(stateKey)
@@ -2999,6 +3016,14 @@ private fun TrackCollection(
     var pendingRemoveTrack by remember(stateKey) { mutableStateOf<Track?>(null) }
     var removingTrack by remember(stateKey) { mutableStateOf(false) }
     var removeMessage by remember(stateKey) { mutableStateOf<String?>(null) }
+    // 本页自己删掉的歌：收藏态 revision 变化时用来区分"自己删的"和"别处改的"。
+    val locallyRemovedGuids = remember(stateKey) { mutableStateListOf<String>() }
+    var clearConfirmVisible by remember(stateKey) { mutableStateOf(false) }
+    var clearing by remember(stateKey) { mutableStateOf(false) }
+    var clearRemoved by remember(stateKey) { mutableStateOf(0) }
+    var clearTotal by remember(stateKey) { mutableStateOf(0) }
+    var clearMessage by remember(stateKey) { mutableStateOf<String?>(null) }
+    var clearJob by remember(stateKey) { mutableStateOf<Job?>(null) }
 
     fun requestRemove(track: Track) {
         if (removingTrack || removeTrack == null) return
@@ -3021,6 +3046,7 @@ private fun TrackCollection(
             }
             // 就地移除，不回源、不重置页码，焦点落到相邻歌曲上。
             pendingRemoveTrack = null
+            locallyRemovedGuids += track.guid.value
             val before = retained.snapshot
             val removedIndex = before.tracks.indexOfFirst { it.guid == track.guid }
             retained.snapshot = removeTrackFromCollection(before, track.guid)
@@ -3033,6 +3059,36 @@ private fun TrackCollection(
             }
         }
     }
+    fun startClearFavorites() {
+        if (clearing) return
+        clearing = true
+        clearRemoved = 0
+        clearMessage = null
+        clearJob = actionScope.launch {
+            val progress: suspend (Int, Int) -> Unit = { removed, total ->
+                clearRemoved = removed
+                clearTotal = total
+            }
+            try {
+                val outcome = container.musicRepository.clearAllFavorites(progress)
+                clearMessage = if (outcome.failed > 0) {
+                    "已清空 ${outcome.removed} 首，${outcome.failed} 首失败，可再试一次"
+                } else {
+                    null
+                }
+                if (outcome.failed == 0) clearConfirmVisible = false
+            } catch (cause: CancellationException) {
+                clearMessage = "已取消，已清空 $clearRemoved 首"
+                throw cause
+            } catch (_: Exception) {
+                clearMessage = "清空失败，已清空 $clearRemoved 首，可重试"
+            } finally {
+                clearing = false
+                clearJob = null
+            }
+        }
+    }
+
     fun setError(value: AppError?) {
         retained.snapshot = retained.snapshot.copy(error = value)
     }
@@ -3127,8 +3183,19 @@ private fun TrackCollection(
     }
     LaunchedEffect(stateKey, contentRevision) {
         if (loadedContentRevision != null && loadedContentRevision != contentRevision) {
-            retained.snapshot = RetainedTrackCollectionSnapshot()
-            initialFocusRequested = false
+            if (locallyRemovedGuids.isEmpty()) {
+                // 别处改的收藏：整表重置重拉，保证不留下已取消收藏的行。
+                retained.snapshot = RetainedTrackCollectionSnapshot()
+                initialFocusRequested = false
+            } else {
+                // 本页自己删的：就地剔除已经移除的那几条，保留滚动位置与焦点。
+                var current = retained.snapshot
+                locallyRemovedGuids.forEach { guid ->
+                    current = removeTrackFromCollection(current, TrackGuid(guid))
+                }
+                retained.snapshot = current
+                locallyRemovedGuids.clear()
+            }
         }
         loadedContentRevision = contentRevision
         if (!retained.snapshot.initialLoadCompleted) {
@@ -3148,6 +3215,7 @@ private fun TrackCollection(
         if (!initialFocusEnabled || !snapshot.initialLoadCompleted || initialFocusRequested) return@LaunchedEffect
         val availableKeys = buildList {
             if (primaryActionEnabled) add("primary-action")
+            if (allowClearFavorites && tracks.isNotEmpty()) add("clear-action")
             detailHeader.tabs.filter { it.selected }.forEach { add(it.key) }
             if (showTrackList) addAll(playableTracks.map { it.guid.value })
             add("detail-back")
@@ -3200,7 +3268,83 @@ private fun TrackCollection(
         emptyMessage = emptyMessage,
         canRemoveTrack = removeTrack != null,
         onRequestRemove = ::requestRemove,
+        clearActionEnabled = allowClearFavorites && tracks.isNotEmpty(),
+        clearing = clearing,
+        clearProgress = if (clearing) "$clearRemoved / $clearTotal" else null,
+        onClearAction = { clearConfirmVisible = true },
     )
+
+    if (clearConfirmVisible && allowClearFavorites) {
+        val clearShape = RoundedCornerShape(24.dp)
+        val clearScale = ButtonDefaults.scale(focusedScale = 1.05f)
+        val clearCancelFocus = remember(stateKey) { FocusRequester() }
+        LaunchedEffect(clearConfirmVisible) {
+            yield()
+            runCatching { clearCancelFocus.requestFocus() }
+        }
+        Dialog(onDismissRequest = { if (!clearing) clearConfirmVisible = false }) {
+            Column(
+                Modifier
+                    .widthIn(max = 520.dp)
+                    .fillMaxWidth(0.9f)
+                    .background(FnColors.Surface, RoundedCornerShape(8.dp))
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(if (clearing) "正在清空收藏" else "清空收藏", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    when {
+                        clearing -> "已清空 $clearRemoved / $clearTotal 首…"
+                        clearMessage != null -> clearMessage.orEmpty()
+                        else -> "将清空全部 ${expectedTotal ?: tracks.size} 首收藏歌曲，此操作不可撤销。"
+                    },
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    Button(
+                        onClick = {
+                            if (clearing) {
+                                clearJob?.cancel()
+                            } else {
+                                clearConfirmVisible = false
+                            }
+                        },
+                        modifier = Modifier
+                            .size(width = 132.dp, height = 46.dp)
+                            .focusRequester(clearCancelFocus),
+                        shape = ButtonDefaults.shape(clearShape, clearShape, clearShape, clearShape, clearShape),
+                        scale = clearScale,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(if (clearing) "停止" else "取消", fontSize = 14.sp)
+                        }
+                    }
+                    if (!clearing) {
+                        Button(
+                            onClick = ::startClearFavorites,
+                            modifier = Modifier.size(width = 132.dp, height = 46.dp),
+                            shape = ButtonDefaults.shape(clearShape, clearShape, clearShape, clearShape, clearShape),
+                            scale = clearScale,
+                            colors = ButtonDefaults.colors(
+                                containerColor = FnColors.Coral,
+                                contentColor = FnColors.Background,
+                            ),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("清空", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     pendingRemoveTrack?.let { track ->
         val cancelFocus = remember(track) { FocusRequester() }
@@ -3217,9 +3361,13 @@ private fun TrackCollection(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("从歌单删除", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text(removeKindLabel, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "将「" + track.title + "」从当前歌单中删除？",
+                    if (removeKindLabel == "取消收藏") {
+                        "将「" + track.title + "」从收藏中移除？"
+                    } else {
+                        "将「" + track.title + "」从当前歌单中删除？"
+                    },
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
                 )
@@ -3297,6 +3445,10 @@ private fun DetailTrackCollection(
     onLoadMore: () -> Unit,
     canRemoveTrack: Boolean = false,
     onRequestRemove: (Track) -> Unit = {},
+    clearActionEnabled: Boolean = false,
+    clearing: Boolean = false,
+    clearProgress: String? = null,
+    onClearAction: () -> Unit = {},
     alternateContent: @Composable () -> Unit = {},
     emptyMessage: String,
 ) {
@@ -3397,6 +3549,48 @@ private fun DetailTrackCollection(
                         contentPadding = PaddingValues(horizontal = 19.dp, vertical = 0.dp),
                     ) {
                         Text("▶  $primaryActionLabel", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (clearActionEnabled || clearing) {
+                        // 放在"播放全部"右侧：左/下走几何（播放全部、第一行），右边界取消避免逃逸。
+                        Button(
+                            enabled = !clearing,
+                            onClick = onClearAction,
+                            modifier = Modifier
+                                .then(if (focusedKey == "clear-action") Modifier.focusRequester(restoredFocus) else Modifier)
+                                .focusProperties { right = FocusRequester.Cancel }
+                                .onFocusChanged { if (it.isFocused) onFocusKey("clear-action") }
+                                .height(44.dp),
+                            shape = ButtonDefaults.shape(
+                                primaryShape,
+                                primaryShape,
+                                primaryShape,
+                                primaryShape,
+                                primaryShape,
+                            ),
+                            scale = ButtonDefaults.scale(focusedScale = 1.035f),
+                            colors = ButtonDefaults.colors(
+                                containerColor = FnColors.Surface,
+                                contentColor = FnColors.Text,
+                                focusedContainerColor = FnColors.FocusFill,
+                                focusedContentColor = FnColors.Text,
+                                pressedContainerColor = FnColors.FocusFill,
+                                pressedContentColor = FnColors.Text,
+                                disabledContainerColor = FnColors.Disabled,
+                                disabledContentColor = FnColors.Muted,
+                            ),
+                            border = ButtonDefaults.border(
+                                border = Border(BorderStroke(1.dp, FnColors.Hairline), shape = primaryShape),
+                                focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = primaryShape),
+                                pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = primaryShape),
+                            ),
+                            contentPadding = PaddingValues(horizontal = 19.dp, vertical = 0.dp),
+                        ) {
+                            Text(
+                                if (clearing) "清空中… ${clearProgress.orEmpty()}" else "清空",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
                 }
             }

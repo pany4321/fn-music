@@ -106,20 +106,30 @@ data class RoamWindow(val previous: RoamNode?, val current: RoamNode, val next: 
 enum class PlayerStyle { Cover, Poster }
 
 /** 界面配色主题（设备级偏好）。 */
-enum class AppTheme { CoralNight, Jade, ForestGreen, Violet, SakuraPink, GraphiteBlue, Ink, Mocha }
+enum class AppTheme {
+    CoralNight,
+    Jade,
+    ForestGreen,
+    Violet,
+    SakuraPink,
+    GraphiteBlue,
+    Ink,
+    Mocha,
+    Bordeaux,
+    Plum,
+    Matcha,
+    Pewter,
+}
 
-/** 界面缩放档位：自动按设备密度判定，其余为固定倍数（车机以 1.5 倍为标准）。 */
+/** 界面缩放档位：自动按设备密度判定，其余为固定倍数（车机标准档 1.35 倍）。 */
 enum class UiScaleMode { Auto, Standard, Large, Larger }
 
 /** 界面缩放倍数；[UiScaleMode.Auto] 时由设备密度决定。 */
 fun UiScaleMode.factor(deviceDensity: Float): Float = when (this) {
-    UiScaleMode.Auto -> when {
-        deviceDensity <= 1.33f -> 1.5f
-        deviceDensity < 1.8f -> 1.25f
-        else -> 1.0f
-    }
-    UiScaleMode.Standard -> 1.5f
-    UiScaleMode.Large -> 1.6f
+    // 实测：1080P 车机（密度 ≤1.33）1.25 倍最合适，电视/手机不缩放。
+    UiScaleMode.Auto -> if (deviceDensity < 1.8f) 1.25f else 1.0f
+    UiScaleMode.Standard -> 1.35f
+    UiScaleMode.Large -> 1.5f
     UiScaleMode.Larger -> 1.75f
 }
 

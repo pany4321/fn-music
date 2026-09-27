@@ -31,6 +31,21 @@ data class SystemConfigDto(
 @Serializable data class FavoriteTrackRequest(val trackGUID: String)
 
 @Serializable data class PlaylistAddTrackRequest(val guid: String, val trackGUIDs: List<String>)
+
+/** 新建歌单请求：coverId 用服务端约定的 playlist_<32位hex> 形式。 */
+@Serializable data class PlaylistCreateRequest(val coverId: String, val name: String)
+
+/** 新建歌单返回：不同版本服务端把新 guid 放在不同层级，逐层兜底解析。 */
+@Serializable data class PlaylistCreateResultDto(
+    val guid: String? = null,
+    val playlistGUID: String? = null,
+    val playlistGuid: String? = null,
+    val playlist: PlaylistGuidRefDto? = null,
+) {
+    fun guidOrNull(): String? = guid ?: playlistGUID ?: playlistGuid ?: playlist?.guid
+}
+
+@Serializable data class PlaylistGuidRefDto(val guid: String? = null)
 @Serializable data class LoginResultDto(val userToken: String, val user: UserDto)
 
 @Serializable

@@ -358,7 +358,7 @@ internal fun SettingsScreen(container: AuthenticatedAppDependencies, onBack: () 
                         }
                     }
                     Text(
-                        "自动按屏幕密度选择：电视/手机 1 倍，1080P 车机 1.5 倍。车机建议「标准」。",
+                        "自动按屏幕密度选择：1080P 车机 1.25 倍，电视/手机 1 倍。车机建议「较大」（1.5 倍）。",
                         color = FnColors.Muted,
                         fontSize = 10.sp,
                         lineHeight = 12.sp,

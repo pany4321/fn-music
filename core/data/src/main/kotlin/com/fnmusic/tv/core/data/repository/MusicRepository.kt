@@ -455,6 +455,48 @@ class MusicRepository internal constructor(
         invalidatePlaylistPages(playlistGuid)
     }
 
+    /**
+     * 新建歌单并返回它（guid 由服务端下发）。
+     * 歌单索引（"playlists"）是带缓存的，创建后失效索引缓存，首页歌单行/全部歌单页下次加载就能看到。
+     */
+    suspend fun createPlaylist(name: String): Playlist {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty())
+        val coverId = newPlaylistCoverId()
+        val guid = session.authenticated { it.createPlaylist(coverId, trimmed) }
+        runCatching { responses.invalidateSource(session.cacheNamespace(), "index") }
+        return Playlist(CollectionGuid(guid), trimmed, coverId)
+    }
+
+    /**
+     * 清空全部收藏：服务端没有批量接口，先分页取回全部收藏 guid，再逐条取消收藏。
+     * 每删掉一条就回调一次进度，调用方可以随时取消（协程取消即可中断）。
+     */
+    suspend fun clearAllFavorites(
+        onProgress: suspend (removed: Int, total: Int) -> Unit = { _, _ -> },
+    ): FavoritesClearOutcome {
+        val guids = mutableListOf<String>()
+        var page = 1
+        while (true) {
+            val loaded = favoriteTracks(page)
+            guids += loaded.items.map { it.guid.value }
+            if (!loaded.hasNext) break
+            page += 1
+        }
+        var removed = 0
+        var failed = 0
+        guids.forEach { guid ->
+            if (toggleFavorite(guid, fallbackFavorite = true).isSuccess) removed++ else failed++
+            onProgress(removed, guids.size)
+        }
+        return FavoritesClearOutcome(removed = removed, failed = failed)
+    }
+
+    private fun newPlaylistCoverId(): String {
+        val hex = "0123456789abcdef"
+        return "playlist_" + buildString { repeat(32) { append(hex[Random.nextInt(hex.length)]) } }
+    }
+
     /** 歌单内容在 NAS 上已变化，丢弃该歌单的缓存页，让下一次加载直接回源。 */
     private suspend fun invalidatePlaylistPages(playlistGuid: String) {
         runCatching { responses.invalidateSource(session.cacheNamespace(), "playlist:$playlistGuid") }
@@ -851,3 +893,6 @@ private const val PLAYLIST_COVER_PARALLELISM = 4
 
 /** 取候选封面时的取样页大小：3 张封面用不着整页 50 首。 */
 private const val COVER_CANDIDATE_PAGE_SIZE = 12
+
+/** 清空收藏的结果：成功删除数与失败数（失败的可以再点一次继续清）。 */
+data class FavoritesClearOutcome(val removed: Int, val failed: Int)

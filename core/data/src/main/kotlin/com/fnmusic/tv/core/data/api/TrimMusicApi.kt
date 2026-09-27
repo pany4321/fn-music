@@ -126,6 +126,15 @@ class TrimMusicApi(
         postUnit("playlist/add-track", PlaylistAddTrackRequest(guid, trackGUIDs))
     }
 
+    /**
+     * 新建歌单：POST playlist/create {coverId, name}，返回新歌单 guid。
+     * 契约来自 fnOS 客户端的歌单导入脚本（实测可用）。
+     */
+    suspend fun createPlaylist(coverId: String, name: String): String {
+        val result: PlaylistCreateResultDto = post("playlist/create", PlaylistCreateRequest(coverId, name))
+        return result.guidOrNull() ?: throw AppException(AppError.Unknown("playlist_create_no_guid"))
+    }
+
     suspend fun createFavorite(trackGuid: String) {
         postUnit("favorite-track/create", FavoriteTrackRequest(trackGuid))
     }

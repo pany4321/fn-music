@@ -91,17 +91,18 @@ private fun createLineGradientBrush(
     val totalWidth = rowData.totalWidth
 
     if (totalWidth <= 0f) {
-        val isFinished = currentTimeMs >= lineLayout.last().syllable.end
-        val color = if (isFinished) activeColor else inactiveColor
-        return SolidColor(color)
+        // 空行不做进度压暗，交给行透明度统一表达“非当前行”。
+        return SolidColor(activeColor)
     }
 
     val firstSyllableStart = rowData.firstSyllableStart
     val lastSyllableEnd = rowData.lastSyllableEnd
 
     val lineProgress = run {
+        // 整行还没开始唱（下一行）：不叠加 0.2 的进度遮罩，否则会比上一行暗一个数量级。
+        // 行内“已唱 / 未唱”的进度遮罩只用于当前正在唱的那一行。
         if (currentTimeMs <= firstSyllableStart) return Brush.horizontalGradient(
-            listOf(inactiveColor, inactiveColor)
+            listOf(activeColor, activeColor)
         )
         if (currentTimeMs >= lastSyllableEnd) return Brush.horizontalGradient(
             listOf(activeColor, activeColor)

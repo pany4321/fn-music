@@ -137,10 +137,11 @@ private fun Color.lifted(t: Float = 0.08f): Color = lerp(this, Color.White, t)
 internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     // 默认主题：与历史版本完全一致。
     AppTheme.CoralNight -> {
-        val background = Color(0xFF101214)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF141618)
         // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
         val frameBorder = Color(0xFF36383A)
-        val surface = Color(0xFF171A1E)
+        val surface = Color(0xFF1B1E22)
         val text = Color(0xFFF4F2EC)
         val muted = Color(0xFFA9ADB4)
         val accent = Color(0xFFFF7657)
@@ -150,7 +151,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF292D2C)
         val cardBorder = Color(0xFF434645)
         val cardFocused = Color(0xFF303634)
-        val container = Color(0xFF171B1D)
+        val container = Color(0xFF1B1F21)
         val hairline = Color(0xFF454B4D)
         val panel = Color(0xFF212524)
         val control = Color(0xFF292D31)
@@ -221,10 +222,11 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         )
     }
     AppTheme.Jade -> {
-        val background = Color(0xFF0F1416)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF13181A)
         // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
         val frameBorder = Color(0xFF353A3B)
-        val surface = Color(0xFF161B1C)
+        val surface = Color(0xFF1A1F20)
         val text = Color(0xFFF1F5F3)
         val muted = Color(0xFF9FB0AC)
         val accent = Color(0xFF4FD1C5)
@@ -234,7 +236,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF262D2C)
         val cardBorder = Color(0xFF404645)
         val cardFocused = Color(0xFF2C3836)
-        val container = Color(0xFF151C1D)
+        val container = Color(0xFF192021)
         val hairline = Color(0xFF3E4B48)
         val panel = Color(0xFF202625)
         val control = Color(0xFF26302F)
@@ -284,10 +286,11 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         )
     }
     AppTheme.ForestGreen -> {
-        val background = Color(0xFF0F1410)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF131814)
         // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
         val frameBorder = Color(0xFF353A36)
-        val surface = Color(0xFF161C17)
+        val surface = Color(0xFF1A201B)
         val text = Color(0xFFF1F5EF)
         val muted = Color(0xFFA3B3A4)
         val accent = Color(0xFF58C070)
@@ -297,7 +300,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF262D26)
         val cardBorder = Color(0xFF404640)
         val cardFocused = Color(0xFF2C382C)
-        val container = Color(0xFF151C15)
+        val container = Color(0xFF192019)
         val hairline = Color(0xFF3E4B3E)
         val panel = Color(0xFF202621)
         val control = Color(0xFF263026)
@@ -347,10 +350,11 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         )
     }
     AppTheme.Violet -> {
-        val background = Color(0xFF121016)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF16141A)
         // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
         val frameBorder = Color(0xFF38363B)
-        val surface = Color(0xFF1A1720)
+        val surface = Color(0xFF1E1B24)
         val text = Color(0xFFF4F1FA)
         val muted = Color(0xFFADA6BD)
         val accent = Color(0xFFA78BFA)
@@ -360,7 +364,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF2C2831)
         val cardBorder = Color(0xFF45424A)
         val cardFocused = Color(0xFF342C42)
-        val container = Color(0xFF191521)
+        val container = Color(0xFF1D1925)
         val hairline = Color(0xFF48405A)
         val panel = Color(0xFF24212D)
         val control = Color(0xFF2D2838)
@@ -410,10 +414,11 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         )
     }
     AppTheme.SakuraPink -> {
-        val background = Color(0xFF161012)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF1A1416)
         // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
         val frameBorder = Color(0xFF3B3638)
-        val surface = Color(0xFF1E171A)
+        val surface = Color(0xFF221B1E)
         val text = Color(0xFFFAF1F3)
         val muted = Color(0xFFBDA6AC)
         val accent = Color(0xFFF58AA8)
@@ -423,7 +428,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF2F282B)
         val cardBorder = Color(0xFF484244)
         val cardFocused = Color(0xFF3A2C31)
-        val container = Color(0xFF1C1518)
+        val container = Color(0xFF20191C)
         val hairline = Color(0xFF503F45)
         val panel = Color(0xFF272124)
         val control = Color(0xFF322A2E)
@@ -473,10 +478,11 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         )
     }
     AppTheme.GraphiteBlue -> {
-        val background = Color(0xFF0F1216)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF13161A)
         // 外框描边（胶囊容器、小控件、叠层封面）——比卡片描边更轻。
         val frameBorder = Color(0xFF35383B)
-        val surface = Color(0xFF161A20)
+        val surface = Color(0xFF1A1E24)
         val text = Color(0xFFF2F4F8)
         val muted = Color(0xFFA5AEBB)
         val accent = Color(0xFF5B9BF5)
@@ -487,7 +493,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF262C33)
         val cardBorder = Color(0xFF40454B)
         val cardFocused = Color(0xFF2C3644)
-        val container = Color(0xFF151A22)
+        val container = Color(0xFF191E26)
         val hairline = Color(0xFF3E4854)
         val panel = Color(0xFF20242D)
         val control = Color(0xFF262E3A)
@@ -538,9 +544,10 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     // 墨白：唯一一套“无彩”主题，所有层次靠明度表达，封面与插画成为页面里唯一的颜色。
     AppTheme.Ink -> {
-        val background = Color(0xFF0D0E0F)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF111213)
         val frameBorder = Color(0xFF343637)
-        val surface = Color(0xFF151617)
+        val surface = Color(0xFF191A1B)
         val text = Color(0xFFF2F3F4)
         val muted = Color(0xFF9AA0A5)
         val accent = Color(0xFFE8EAEC)
@@ -549,7 +556,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF262829)
         val cardBorder = Color(0xFF3B3E3F)
         val cardFocused = Color(0xFF333536)
-        val container = Color(0xFF1B1D1E)
+        val container = Color(0xFF1F2122)
         val hairline = Color(0xFF3A3D3E)
         val panel = Color(0xFF1E2021)
         val control = Color(0xFF2C2F31)
@@ -601,9 +608,10 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
     }
     // 摩卡：低饱和暖棕 + 焦糖主色，与珊瑚夜的亮红、樱粉的粉刻意拉开。
     AppTheme.Mocha -> {
-        val background = Color(0xFF131010)
+        // 页面底色：比纯黑抬一档，与黑色屏框 / 机身挡边分得开。
+        val background = Color(0xFF171414)
         val frameBorder = Color(0xFF3C332D)
-        val surface = Color(0xFF1B1715)
+        val surface = Color(0xFF1F1B19)
         val text = Color(0xFFF4EFE9)
         val muted = Color(0xFFB3A79B)
         val accent = Color(0xFFD9A46A)
@@ -612,7 +620,7 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
         val card = Color(0xFF2D2622)
         val cardBorder = Color(0xFF443A33)
         val cardFocused = Color(0xFF3A322C)
-        val container = Color(0xFF211B18)
+        val container = Color(0xFF251F1C)
         val hairline = Color(0xFF453B34)
         val panel = Color(0xFF231D19)
         val control = Color(0xFF332B26)
@@ -661,6 +669,255 @@ internal fun themeColors(theme: AppTheme): ThemeColors = when (theme) {
             cardCollectionEnd = lerp(background, secondary, 0.22f),
         )
     }
+    // 酒红：宝石红主色，比珊瑚夜的橙红更深、更偏紫。
+    AppTheme.Bordeaux -> {
+        val background = Color(0xFF161013)
+        val frameBorder = Color(0xFF3A232A)
+        val surface = Color(0xFF1E1417)
+        val text = Color(0xFFF6EFF1)
+        val muted = Color(0xFFB4A3A8)
+        val accent = Color(0xFFE2556E)
+        val secondary = Color(0xFFC9A66B)
+        val warning = Color(0xFFE8C36A)
+        val card = Color(0xFF2B1A1F)
+        val cardBorder = Color(0xFF42282E)
+        val cardFocused = Color(0xFF372227)
+        val container = Color(0xFF1A1114)
+        val hairline = Color(0xFF4A2E35)
+        val panel = Color(0xFF211316)
+        val control = Color(0xFF2F2024)
+        val divider = Color(0xFF38232A)
+        val panelBorder = Color(0xFF40272E)
+        val danger = Color(0xFFFF3B4D)
+        ThemeColors(
+            background = background,
+            surface = surface,
+            text = text,
+            muted = muted,
+            accent = accent,
+            secondary = secondary,
+            warning = warning,
+            card = card,
+            cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
+            container = container,
+            hairline = hairline,
+            panel = panel,
+            control = control,
+            divider = divider,
+            panelBorder = panelBorder,
+            accentBright = lerp(accent, Color.White, 0.12f),
+            accentSoft = lerp(accent, surface, 0.72f),
+            accentSoftFocused = lerp(accent, surface, 0.62f),
+            disabled = lerp(surface, background, 0.35f),
+            inkOnWarning = background,
+            decorA = lerp(background, surface, 0.45f),
+            decorB = lerp(background, surface, 0.28f),
+            pillBackground = lerp(surface, text, 0.06f),
+            pillBackgroundFocused = lerp(surface, text, 0.12f),
+            pillBackgroundPressed = lerp(surface, text, 0.16f),
+            pillBorder = lerp(surface, text, 0.18f),
+            artworkPlaceholder = lerp(surface, text, 0.05f),
+            danger = danger,
+            controlStrong = lerp(background, Color.Black, 0.25f),
+            cardRoamStart = lerp(background, secondary, 0.08f),
+            cardRoamEnd = lerp(background, secondary, 0.18f),
+            cardFavoritesStart = lerp(background, accent, 0.08f),
+            cardFavoritesEnd = lerp(background, accent, 0.18f),
+            cardRecentStart = lerp(background, accent, 0.06f),
+            cardRecentEnd = lerp(background, accent, 0.14f),
+            cardCollectionStart = lerp(background, secondary, 0.10f),
+            cardCollectionEnd = lerp(background, secondary, 0.22f),
+        )
+    }
+    // 洋红：亮洋红主色，与紫罗兰（蓝紫）、樱粉（浅粉）不在同一色相段。
+    AppTheme.Plum -> {
+        val background = Color(0xFF160E16)
+        val frameBorder = Color(0xFF3B273C)
+        val surface = Color(0xFF1F151F)
+        val text = Color(0xFFF6EFF6)
+        val muted = Color(0xFFB3A2B3)
+        val accent = Color(0xFFE07BD0)
+        val secondary = Color(0xFF8FD3E8)
+        val warning = Color(0xFFE8C36A)
+        val card = Color(0xFF2C1D2C)
+        val cardBorder = Color(0xFF432C43)
+        val cardFocused = Color(0xFF382639)
+        val container = Color(0xFF1B111C)
+        val hairline = Color(0xFF4B304B)
+        val panel = Color(0xFF221622)
+        val control = Color(0xFF312231)
+        val divider = Color(0xFF3A243A)
+        val panelBorder = Color(0xFF422B42)
+        val danger = Color(0xFFFF3B4D)
+        ThemeColors(
+            background = background,
+            surface = surface,
+            text = text,
+            muted = muted,
+            accent = accent,
+            secondary = secondary,
+            warning = warning,
+            card = card,
+            cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
+            container = container,
+            hairline = hairline,
+            panel = panel,
+            control = control,
+            divider = divider,
+            panelBorder = panelBorder,
+            accentBright = lerp(accent, Color.White, 0.12f),
+            accentSoft = lerp(accent, surface, 0.72f),
+            accentSoftFocused = lerp(accent, surface, 0.62f),
+            disabled = lerp(surface, background, 0.35f),
+            inkOnWarning = background,
+            decorA = lerp(background, surface, 0.45f),
+            decorB = lerp(background, surface, 0.28f),
+            pillBackground = lerp(surface, text, 0.06f),
+            pillBackgroundFocused = lerp(surface, text, 0.12f),
+            pillBackgroundPressed = lerp(surface, text, 0.16f),
+            pillBorder = lerp(surface, text, 0.18f),
+            artworkPlaceholder = lerp(surface, text, 0.05f),
+            danger = danger,
+            controlStrong = lerp(background, Color.Black, 0.25f),
+            cardRoamStart = lerp(background, secondary, 0.08f),
+            cardRoamEnd = lerp(background, secondary, 0.18f),
+            cardFavoritesStart = lerp(background, accent, 0.08f),
+            cardFavoritesEnd = lerp(background, accent, 0.18f),
+            cardRecentStart = lerp(background, accent, 0.06f),
+            cardRecentEnd = lerp(background, accent, 0.14f),
+            cardCollectionStart = lerp(background, secondary, 0.10f),
+            cardCollectionEnd = lerp(background, secondary, 0.22f),
+        )
+    }
+    // 抹茶：黄绿主色，补上现有主题里缺的黄绿色相段。
+    AppTheme.Matcha -> {
+        val background = Color(0xFF13150D)
+        val frameBorder = Color(0xFF353A24)
+        val surface = Color(0xFF1B1E14)
+        val text = Color(0xFFF3F6EC)
+        val muted = Color(0xFFA8B29A)
+        val accent = Color(0xFFB6D94C)
+        val secondary = Color(0xFFE8C36A)
+        val warning = Color(0xFFE8C36A)
+        val card = Color(0xFF272B1A)
+        val cardBorder = Color(0xFF3D4229)
+        val cardFocused = Color(0xFF333824)
+        val container = Color(0xFF171A10)
+        val hairline = Color(0xFF454B30)
+        val panel = Color(0xFF1D2113)
+        val control = Color(0xFF2A2F1C)
+        val divider = Color(0xFF333823)
+        val panelBorder = Color(0xFF3B4027)
+        val danger = Color(0xFFFF3B4D)
+        ThemeColors(
+            background = background,
+            surface = surface,
+            text = text,
+            muted = muted,
+            accent = accent,
+            secondary = secondary,
+            warning = warning,
+            card = card,
+            cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
+            container = container,
+            hairline = hairline,
+            panel = panel,
+            control = control,
+            divider = divider,
+            panelBorder = panelBorder,
+            accentBright = lerp(accent, Color.White, 0.12f),
+            accentSoft = lerp(accent, surface, 0.72f),
+            accentSoftFocused = lerp(accent, surface, 0.62f),
+            disabled = lerp(surface, background, 0.35f),
+            inkOnWarning = background,
+            decorA = lerp(background, surface, 0.45f),
+            decorB = lerp(background, surface, 0.28f),
+            pillBackground = lerp(surface, text, 0.06f),
+            pillBackgroundFocused = lerp(surface, text, 0.12f),
+            pillBackgroundPressed = lerp(surface, text, 0.16f),
+            pillBorder = lerp(surface, text, 0.18f),
+            artworkPlaceholder = lerp(surface, text, 0.05f),
+            danger = danger,
+            controlStrong = lerp(background, Color.Black, 0.25f),
+            cardRoamStart = lerp(background, secondary, 0.08f),
+            cardRoamEnd = lerp(background, secondary, 0.18f),
+            cardFavoritesStart = lerp(background, accent, 0.08f),
+            cardFavoritesEnd = lerp(background, accent, 0.18f),
+            cardRecentStart = lerp(background, accent, 0.06f),
+            cardRecentEnd = lerp(background, accent, 0.14f),
+            cardCollectionStart = lerp(background, secondary, 0.10f),
+            cardCollectionEnd = lerp(background, secondary, 0.22f),
+        )
+    }
+    // 铅灰青：低饱和冷灰青主色 + 陶土粉副色——安静，但不等于无彩（区别于墨白）。
+    AppTheme.Pewter -> {
+        val background = Color(0xFF101315)
+        val frameBorder = Color(0xFF303637)
+        val surface = Color(0xFF181C1D)
+        val text = Color(0xFFEFF3F4)
+        val muted = Color(0xFFA2ADB0)
+        val accent = Color(0xFFA8C0C8)
+        val secondary = Color(0xFFC99A90)
+        val warning = Color(0xFFE8C36A)
+        val card = Color(0xFF232829)
+        val cardBorder = Color(0xFF384041)
+        val cardFocused = Color(0xFF2F3536)
+        val container = Color(0xFF14181A)
+        val hairline = Color(0xFF414A4C)
+        val panel = Color(0xFF1A1F20)
+        val control = Color(0xFF272E2F)
+        val divider = Color(0xFF2F3637)
+        val panelBorder = Color(0xFF363E3F)
+        val danger = Color(0xFFFF3B4D)
+        ThemeColors(
+            background = background,
+            surface = surface,
+            text = text,
+            muted = muted,
+            accent = accent,
+            secondary = secondary,
+            warning = warning,
+            card = card,
+            cardFocused = cardFocused,
+            cardBorder = cardBorder,
+            frameBorder = frameBorder,
+            container = container,
+            hairline = hairline,
+            panel = panel,
+            control = control,
+            divider = divider,
+            panelBorder = panelBorder,
+            accentBright = lerp(accent, Color.White, 0.12f),
+            // 冷灰青主色偏亮：做“选中底”时往表面色压得更多，保证浅色文字读得清。
+            accentSoft = lerp(accent, surface, 0.78f),
+            accentSoftFocused = lerp(accent, surface, 0.68f),
+            disabled = lerp(surface, background, 0.35f),
+            inkOnWarning = background,
+            decorA = lerp(background, surface, 0.45f),
+            decorB = lerp(background, surface, 0.28f),
+            pillBackground = lerp(surface, text, 0.06f),
+            pillBackgroundFocused = lerp(surface, text, 0.12f),
+            pillBackgroundPressed = lerp(surface, text, 0.16f),
+            pillBorder = lerp(surface, text, 0.18f),
+            artworkPlaceholder = lerp(surface, text, 0.05f),
+            danger = danger,
+            controlStrong = lerp(background, Color.Black, 0.25f),
+            cardRoamStart = lerp(background, secondary, 0.08f),
+            cardRoamEnd = lerp(background, secondary, 0.18f),
+            cardFavoritesStart = lerp(background, accent, 0.08f),
+            cardFavoritesEnd = lerp(background, accent, 0.18f),
+            cardRecentStart = lerp(background, accent, 0.06f),
+            cardRecentEnd = lerp(background, accent, 0.14f),
+            cardCollectionStart = lerp(background, secondary, 0.10f),
+            cardCollectionEnd = lerp(background, secondary, 0.22f),
+        )
+    }
 }
 
 internal fun themeLabel(theme: AppTheme): String = when (theme) {
@@ -672,6 +929,10 @@ internal fun themeLabel(theme: AppTheme): String = when (theme) {
     AppTheme.GraphiteBlue -> "石墨蓝"
     AppTheme.Ink -> "墨白"
     AppTheme.Mocha -> "摩卡"
+    AppTheme.Bordeaux -> "酒红"
+    AppTheme.Plum -> "洋红"
+    AppTheme.Matcha -> "抹茶"
+    AppTheme.Pewter -> "铅灰青"
 }
 
 /**
@@ -679,9 +940,9 @@ internal fun themeLabel(theme: AppTheme): String = when (theme) {
  * 因此无需改动 300 余处调用点即可整机换肤。
  */
 object FnColors {
-    var Background by mutableStateOf(Color(0xFF101214))
+    var Background by mutableStateOf(Color(0xFF141618))
         private set
-    var Surface by mutableStateOf(Color(0xFF171A1E))
+    var Surface by mutableStateOf(Color(0xFF1B1E22))
         private set
     var Text by mutableStateOf(Color(0xFFF4F2EC))
         private set
@@ -697,7 +958,7 @@ object FnColors {
         private set
     var CardFocused by mutableStateOf(Color(0xFF303634))
         private set
-    var Container by mutableStateOf(Color(0xFF171B1D))
+    var Container by mutableStateOf(Color(0xFF1B1F21))
         private set
     var Hairline by mutableStateOf(Color(0xFF454B4D))
         private set
