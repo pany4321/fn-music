@@ -4,6 +4,7 @@ import com.fnmusic.tv.core.model.Album
 import com.fnmusic.tv.core.model.Artist
 import com.fnmusic.tv.core.model.CollectionGuid
 import com.fnmusic.tv.core.model.Genre
+import com.fnmusic.tv.core.model.LyricDocument
 import com.fnmusic.tv.core.model.Page
 import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.Track
@@ -151,3 +152,48 @@ internal fun <T> JellyfinItemsDto.toPage(page: Int, size: Int, map: (JellyfinIte
         total = TotalRecordCount.takeIf { it > 0 } ?: Items.size,
         sort = "",
     )
+
+@Serializable
+internal data class JellyfinLyricLineDto(
+    val Text: String = "",
+    /** 起始时间，单位 ticks（1ms = 10 000 ticks）。 */
+    val Start: Long? = null,
+)
+
+@Serializable
+internal data class JellyfinLyricsDto(
+    val Lyrics: List<JellyfinLyricLineDto> = emptyList(),
+)
+
+/**
+ * Jellyfin 的结构化歌词 → 我们的 LRC 文本。
+ * 转成 LRC 后与飞牛返回的歌词同形，`isLrc = true`，
+ * 下游的 `decodeLyrics`/`SyncedLyrics` 解析链路一行都不用改。
+ */
+internal fun JellyfinLyricsDto.toLyricDocument(trackGuid: String): LyricDocument? {
+    val lines = Lyrics
+        .mapNotNull { line ->
+            val start = line.Start ?: return@mapNotNull null
+            val text = line.Text.trim()
+            if (text.isEmpty()) return@mapNotNull null
+            formatLrcTimestamp(start) to text
+        }
+        .sortedBy { it.first }
+    if (lines.isEmpty()) return null
+    val content = lines.joinToString(separator = "\n") { (time, text) -> "[$time]$text" }
+    return LyricDocument(
+        guid = trackGuid,
+        content = content,
+        isLrc = true,
+        offsetMs = 0,
+    )
+}
+
+/** LRC 时间戳：`[mm:ss.xx]`（xx 为百分秒，与飞牛歌词同格式）。 */
+internal fun formatLrcTimestamp(ticks: Long): String {
+    val totalMs = (ticks / TICKS_PER_MS).coerceAtLeast(0)
+    val minutes = totalMs / 60_000
+    val seconds = (totalMs % 60_000) / 1_000
+    val centis = (totalMs % 1_000) / 10
+    return "%02d:%02d.%02d".format(minutes, seconds, centis)
+}

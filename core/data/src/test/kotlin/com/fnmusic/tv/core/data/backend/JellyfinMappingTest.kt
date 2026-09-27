@@ -77,6 +77,30 @@ class JellyfinMappingTest {
     }
 
     @Test
+    fun `jellyfin lyrics convert to lrc text in time order`() {
+        val json = """{"Lyrics":[{"Text":"第二行","Start":15000000},
+            {"Text":"第一行","Start":5000000},{"Text":"","Start":9000000}]}"""
+
+        val doc = ApiDecoder.json.decodeFromString<JellyfinLyricsDto>(json)
+            .toLyricDocument("t1")
+
+        assertEquals(true, doc?.isLrc)
+        // 空行被丢掉，行按时间排序，ticks 换算成 [mm:ss.xx]
+        assertEquals("[00:00.50]第一行" + "\n" + "[00:01.50]第二行", doc?.content)
+        assertEquals("t1", doc?.guid)
+    }
+
+    @Test
+    fun `lyrics without start times produce no document`() {
+        val json = """{"Lyrics":[{"Text":"无时间戳"}]}"""
+
+        val doc = ApiDecoder.json.decodeFromString<JellyfinLyricsDto>(json)
+            .toLyricDocument("t1")
+
+        assertNull(doc)
+    }
+
+    @Test
     fun `album artist genre and playlist map to domain collections`() {
         val album = ApiDecoder.json.decodeFromString<JellyfinItemDto>(
             """{"Id":"al1","Name":"世界百大DJ","AlbumArtist":"Various Artists",

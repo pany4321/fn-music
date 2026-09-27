@@ -186,6 +186,34 @@ internal class JellyfinApi(
             ).get(),
         ).Items.firstOrNull()
 
+    /**
+     * 服务端歌词（Jellyfin 10.9+）。
+     * 实测：该曲没有歌词时端点返回 404 —— 这不是错误，返回 null 让在线的歌词源接管。
+     */
+    suspend fun lyrics(itemId: String): JellyfinLyricsDto? {
+        val request = Request.Builder()
+            .url(url("Audio/$itemId/Lyrics"))
+            .header("Accept", "application/json")
+            .header("Authorization", authorizationHeader(requireToken()))
+            .get()
+            .build()
+        val body = try {
+            execute(request)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: AppException) {
+            if (cause.error == AppError.NotFound) return null
+            throw cause
+        }
+        return try {
+            ApiDecoder.json.decodeFromString<JellyfinLyricsDto>(body)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: Exception) {
+            throw AppException(AppError.Unknown("jellyfin_invalid_json"), cause)
+        }
+    }
+
     // ---- URL 构造（实测：PlaybackInfo 不返回 URL，客户端自己拼） ----
 
     /** 封面：Jellyfin 按条目 id 取图；宽度给 fillWidth/fillHeight 得到方形裁切。 */
