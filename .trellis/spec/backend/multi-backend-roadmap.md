@@ -12,6 +12,8 @@
 3. **Step 2a**：Jellyfin 的 DTO/映射（专辑/歌手/风格/歌单/曲目，含 `PlaylistItemId`）、
    统一 `items(...)` 查询、`Artists/AlbumArtists`、`MusicGenres`、`Playlists/{id}/Items`、
    收藏 `POST/DELETE`、歌词 → LRC（ticks→`[mm:ss.xx]`，404 = 无歌词 → 在线兜底），单测覆盖。
+4. **Step 1b**：飞牛侧抽取完成（`c2bffa3`）——目录查询改成"后端出原始体、后端解码"，
+   `MusicRepository` 不再持有任何飞牛 endpoint/DTO；`ServerConnector`/`PlaybackAuth` 泛化播放鉴权与重挂。
 
 ## 关键设计决策（Step 1b 必须遵守，否则会返工）
 
@@ -52,21 +54,21 @@ interface MusicBackend {
 
 ## 剩余步骤
 
-### Step 1b（飞牛侧抽取，行为不变）
-1. 按上面的决策改 `cachedPage`/`cachedIndex` 的取数方式，加 `CatalogSource` 与
-   `RawPage`、`decodePage`。
-2. 把 `MusicRepository` 里各目录方法的 endpoint+排序串搬进 `FnOsMusicBackend`，
-   映射函数（`Dto.kt` 里已有的 `toDomain()`）保持不动。
-3. 拆 `ServerConnector`（`FnOsConnector` 收拢现有解析/安全码/FNID/登录/恢复），
-   `PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, ownsUrl)`，
-   `PlaybackService` 的头注入与 `PlaybackRehoming` 的前缀判定随之泛化。
-4. 真机跑飞牛全流程回归（行为不变），合入 `main`。
+### Step 1b（飞牛侧抽取，行为不变）✅ 已完成（commit `c2bffa3`）
+1. ✅ 按上面的决策改 `cachedPage`/`cachedIndex` 的取数方式，落地 `CatalogSource`/`RawPage`/`decodePage`
+   （外加 `RawIndex/DecodedPage/CatalogIndexSource`；目录键与 Room 格式不变，旧缓存继续命中）。
+2. ✅ 各目录方法的 endpoint + 排序串搬进 `FnOsMusicBackend`（含搜索/收藏/最近播放/歌单曲目数/歌词/漫游/封面字节/变更操作），
+   映射函数仍是 `Dto.kt` 里的 `toDomain()`。
+3. ✅ `FnOsConnector` 收拢解析/安全码/FNID/登录/恢复；`PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, streamPathPrefix)`
+   （前缀而不是判定函数：跨 Media3 Bundle 只能传字符串）；`PlaybackService` 头注入与 `PlaybackRehoming` 随之泛化。
+4. ⏳ 真机飞牛回归：主要通路已验证（见交接文档 §5 Step 1b 第 4 条），搜索/写入类与全新登录待补验；合入 `main` 待定版本口径。
 
 ### Step 2b（Jellyfin 接线）
 5. `JellyfinConnector`：`/System/Info/Public` 识别 + 登录 + 令牌持久化
    （`SecureTokenStore` payload 加 `kind` 字段，兼容老数据）+ namespace = `ServerId:UserId`。
+   ⚠️ 同时要泛化 `ServerConnection`（现在直接带 `TrimMusicApi`）与 `SessionRepository.requireApi()/authenticated{}`。
 6. 登录页：提交时先 probe 识别后端；FNID/安全码仅飞牛显示；错误文案泛化。
-7. `AppContainer`/会话按 `ServerKind` 选择并注入后端实现。
+7. `AppContainer`/会话按 `ServerKind` 选择并注入后端实现；`JellyfinMusicBackend` 的 pending 桩全部补齐。
 8. 客户端漫游 `LocalRoamStrategy`（`SortBy=Random` 或 `/Items/{id}/InstantMix` 取种子 →
    本地 prev/current/next 游标 → 合成 `RoamWindow`），由 `capabilities.serverSideRoam` 选择；
    播放内核零改动。

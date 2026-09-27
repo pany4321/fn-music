@@ -54,6 +54,29 @@
 | `e8dbedb` | **Step 2a-3**：歌词 → LRC（`ticks → [mm:ss.xx]`、按时间排序、丢空行、`isLrc=true`，与飞牛同形）；`JellyfinApi.lyrics()` 404 返回 null 交给在线歌词；单测覆盖 |
 | `4b26c3c` | CI：允许从 `release/*` 维护分支出包（已存在的 tag 会跳过，不会重复发布） |
 | `c11481a` | 路线图与 **Step 1b 关键设计决策**（见下） |
+| `4086a86` | `.gitignore` 忽略 `.zcode/`（会话/计划草稿里会写测试服务器地址） |
+| `c2bffa3` | **Step 1b**：飞牛侧抽取（行为不变）——`RawPage/RawIndex/DecodedPage` + `CatalogPageSource/CatalogIndexSource`（目录查询返回可缓存原始体、后端负责解码），`MusicRepository.cachedPage/cachedIndex` 改为吃原始体；`FnOsMusicBackend` 收拢全部飞牛 endpoint/排序串/DTO 映射；新增 `ServerConnector`+`FnOsConnector`；`PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, streamPathPrefix)`，`PlaybackRehoming` 前缀随之下发。详见 §3.1 |
+
+### 3.1 Step 1b 落地细节（Step 2b 会用到）
+
+- **缓存契约**：`MusicBackend.catalogPage/catalogIndex` 返回 `RawPage.rawJson`（飞牛侧就是 `ApiDecoder.json.encodeToString(DTO)`，
+  与抽取前写进缓存的内容**逐字一致** → 老的 Room 行继续命中）；`decodePage/decodeIndex` 由后端把原始体解成领域模型。
+  `CatalogPageSource` 的 `cacheKey` 与历史 sourceKey 相同，`sizeSensitive=true` 的来源（artists/albums/all-tracks/recently-added）
+  仍按 `sizedPageSourceKey` 编页大小进键。
+- **接口全量**：目录（分页/索引）、搜索、收藏列表/最近播放、歌单曲目数、收藏与歌单变更、歌词原始体+解码、漫游三件套、
+  封面字节下载都在 `MusicBackend` 上；`MusicRepository` 里已无任何飞牛 endpoint 与 DTO。
+- **`JellyfinMusicBackend` 目前是 pending 桩**（显式抛 `jellyfin_*_pending`，不会静默返回空数据）：
+  `catalogPage/decodePage/catalogIndex/decodeIndex/searchTracks/searchArtists/searchAlbums/favoriteTracks/recentTracks/
+  playlistTrackCounts/setFavorite/createPlaylist/addToPlaylist/removeFromPlaylist/lyricsRaw/decodeLyrics/startRoam/nextRoam/previousRoam`
+  —— 这些都要在 Step 2b 补齐（现在会话只可能是飞牛，不会走到）。
+- **`ServerConnection` 还带 `TrimMusicApi`**：Step 1b 只把"连接方式"抽到 `FnOsConnector`，会话状态机仍直接持有飞牛客户端。
+  Step 2b 引入 `JellyfinConnector` 时要把它改成按 `ServerKind` 分叉的连接对象（各后端自带客户端类型），
+  `SessionRepository` 的 `requireApi()/authenticated{}` 需同步泛化。
+- **`streamPathPrefix`**：`PlaybackAuth` 里的字符串前缀（飞牛 `/music/api/v1/`，来自 `ServerUrlNormalizer.API_PATH_PREFIX`）
+  是重挂判定的唯一依据（Media3 的 Bundle 传不了判定函数）；为空则完全不重写 URL。
+- **`PlaybackAuth.headers` 由后端组装**：飞牛的 `Authorization`/Cookie(`music-token`+`mode=relay`)/`x-access-code` 就是
+  原来的 `playbackRequestHeaders`（已搬到 `FnOsConnector.playbackHeaders`，`FnOsConnectorTest` 覆盖）；
+  播放服务只用 `Bundle` 的两个平行数组搬运 Map（`PlaybackCommands.putRequestHeaders/requestHeaders`）。
 
 **真机回归（飞牛侧，Step 1a 之后）已通过**：登录 → 首页三卡封面 → 随机漫游播放（MediaSession 显示 PLAYING 且缓冲位远超前于播放位，证明后端产出的直连 URL 正常）→ 随机歌曲/最近添加封面 → 收藏页 ✕ 与清空 → logcat 无 FATAL。
 
@@ -77,16 +100,21 @@
 
 ## 5. 剩余任务（按顺序执行）
 
-### Step 1b —— 飞牛侧抽取（行为不变，真机回归后合 main）
-1. **按 `RawPage`/`CatalogSource` 决策改造取数**（见 `.trellis/spec/backend/multi-backend-roadmap.md` 第「关键设计决策」节）：
-   `MusicBackend` 的目录查询返回 `RawPage(rawJson, page, pageSize, total, sort)`，`decodePage(source, rawJson)` 由后端提供；
-   `MusicRepository.cachedPage` 改成 `fetch = backend.catalogPage(source,…).rawJson` —— **一份缓存同时服务两个后端，Room 持久化格式不变**。
-   ⚠️ 这是本改造最关键的一步，不要改成"后端直接返回领域 Page"（那样缓存只能复制进每个后端）。
-2. 把 `MusicRepository` 里各目录方法的 endpoint + 排序串搬进 `FnOsMusicBackend`（映射函数 `Dto.kt` 的 `toDomain()` 不动），逐个方法保持行为一致。
-3. 拆 `ServerConnector`：`FnOsConnector` 收拢现有 `ConnectionResolver`/安全码/FNID/登录/恢复路径；
-   `PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, ownsUrl)`；
-   `PlaybackService` 头注入与 `PlaybackRehoming`（现在硬编码 `/music/api/v1/` 前缀）随之泛化。
-4. 真机跑飞牛全流程回归（登录/首页四行/播放/漫游/随机行封面与红心/收藏页/歌单 CRUD/搜索/主题缩放）→ 合入 `main`。
+### Step 1b —— 飞牛侧抽取 ✅ 已完成（`c2bffa3`，行为不变）
+1. ✅ `RawPage/RawIndex/DecodedPage` + `CatalogPageSource/CatalogIndexSource` 落地，`cachedPage/cachedIndex`
+   改成 `fetch = backend.catalogPage(...).rawJson`（**一份缓存同时服务两个后端，Room 格式与缓存键都没变**）。
+2. ✅ 各目录方法的 endpoint + 排序串全部搬进 `FnOsMusicBackend`（含搜索/收藏/最近播放/歌单曲目数/歌词/漫游/封面字节/变更操作），
+   `MusicRepository` 里已无飞牛接口与 DTO。
+3. ✅ `ServerConnector` + `FnOsConnector` 拆出；`PlaybackCredentials` → `PlaybackAuth(apiBase, headers, cacheNamespace, streamPathPrefix)`；
+   `PlaybackService` 的头注入与 `PlaybackRehoming` 前缀判定随之泛化（细节见 §3.1）。
+4. ⏳ **真机回归（飞牛侧）**：门禁全绿（`:app` 单测 115 + lint 通过；`core:data` 130 中仅 Windows 必失败的
+   `AppDatabaseMigrationTest` 两例；`core:playback` 47 全绿）。真机（3B1F5VEA9BBV3NFR，1.4.3 sideload debug）**已验**：
+   重装后会话恢复、首页四行（歌单索引/随机专辑/随机歌曲/最近添加）与三张卡片封面、我的页（用户信息 + 歌手行）、
+   收藏页列表与计数、歌单详情页（名称/计数/派生封面/曲目）、播放（直连 URL + 头注入，MediaSession PLAYING 且缓冲远超播放位，
+   FLAC 徽标）、漫游（服务端 start/next）、歌词通路（无歌词曲目显示占位）、全程无 FATAL。
+   **未在真机验证**：搜索、收藏写入（♡/✕）、歌单写入（新建/加歌/删歌）、主题缩放设置页、全新登录（`FnOsConnector.login` 本身）。
+   → 合 main 前若要补验，按 §4 的 D-pad 流程；这几项在代码上都是薄委托 + 既有单测覆盖。
+5. ⏳ 合入 `main`（待用户确认版本与发布方式，见 §9.1 与本文开头版本安排的口径差异）。
 
 ### Step 2b —— Jellyfin 接线
 5. `JellyfinConnector`：`GET /System/Info/Public` 识别 + `POST /Users/AuthenticateByName` 登录 +
@@ -119,7 +147,7 @@
 
 ## 7. 风险与回滚
 
-- **Step 1b 是行为不变重构**：真机回归必须全绿再合 main；出问题可直接回到 `a0f1c39` 之前的 `main`。
+- **Step 1b 是行为不变重构**：真机回归（主要通路）已通过；出问题可直接 `git revert c2bffa3`（或回到 `e1530ec`）。
 - **Jellyfin 版本差异**：删条目参数（`entryIds`）、InstantMix 参数、歌词端点可用性都要**以实测为准**（本地脚本已备好）。
 - **换包名不可逆**：旧包用户需重装 → 单独一次 2.0.0 发布 + Release 说明。
 - 若 Jellyfin 上线后出问题：可按 `capabilities` 在登录页隐藏 Jellyfin 入口，不必回滚代码。
@@ -223,3 +251,4 @@ rm -f /tmp/staged.patch
 | 公开函数暴露 internal 类型 | 编译报错 | 类型改成 public 或函数改 internal（`applyTheme` 就是这么处理的） |
 | 文档里写明文片段 | 等于泄露 | 校验命令从 `.trellis/local/` 读匹配模式 |
 | 只 push 不看 CI | 以为发了版其实没出 Release | `gh release list` 确认 |
+| 真机上误点「切换账号」再返回 | 之后播放报 `Source error`（HTTP 401，日志里 DataSource 401） | **不是回归**：进「切换账号」页会 `clearPlaybackSession()`（清空播放会话 + `ClearAuth` 清掉注入的头），而头只在会话状态再次发 `SignedIn` 时才重新注入 → 重启 App 即恢复。改动播放鉴权时别被它带偏 |
