@@ -38,3 +38,6 @@ SearchPlaybackDiagnosticTest.kt
 
 # 本地测试凭据（NAS / Jellyfin 的账号密码、抓包结果等）绝不入库
 .trellis/local/
+
+# 会话/计划草稿：里面会写测试服务器地址，不进仓库
+.zcode/
