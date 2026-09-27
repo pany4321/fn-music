@@ -14,7 +14,7 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
-import com.fnmusic.tv.core.model.PlaybackCredentials
+import com.fnmusic.tv.core.model.PlaybackAuth
 import com.fnmusic.tv.core.model.PlaybackTrack
 import com.fnmusic.tv.core.model.RoamWindow
 import com.fnmusic.tv.core.model.Track
@@ -91,7 +91,7 @@ class PlaybackController(
     private var ticker: Job? = null
     private var queuePageJob: Job? = null
     private var roamJob: Job? = null
-    private var pendingCredentials: PlaybackCredentials? = null
+    private var pendingAuth: PlaybackAuth? = null
     private var currentNamespace: String? = null
     private var restored = false
     private var generation = 0L
@@ -192,7 +192,7 @@ class PlaybackController(
                 runCatching { future.get() }.onSuccess { mediaController ->
                     controller = mediaController
                     mediaController.addListener(listener)
-                    pendingCredentials?.let(::configure)
+                    pendingAuth?.let(::configure)
                     project(mediaController)
                     startTicker()
                 }
@@ -201,26 +201,26 @@ class PlaybackController(
         )
     }
 
-    fun configure(credentials: PlaybackCredentials) {
-        pendingCredentials = credentials
-        val binding = playbackNamespaceBinding(currentNamespace, credentials.cacheNamespace)
+    fun configure(auth: PlaybackAuth) {
+        pendingAuth = auth
+        val binding = playbackNamespaceBinding(currentNamespace, auth.cacheNamespace)
         if (binding != PlaybackNamespaceBinding.Same) {
             beginStructuralTransition()
             if (binding == PlaybackNamespaceBinding.Rebind) resetActiveSessionForRebind(controller)
             restored = false
-            currentNamespace = credentials.cacheNamespace
-            snapshotCommitTracker.reset(credentials.cacheNamespace)
+            currentNamespace = auth.cacheNamespace
+            snapshotCommitTracker.reset(auth.cacheNamespace)
             PlaybackTransportBridge.setOwnership(PlaybackTransportOwnership.Restoring)
         }
         val player = controller ?: return
-        val args = authBundle(credentials)
+        val args = authBundle(auth)
         val configureGeneration = generation
         val future = player.sendCustomCommand(PlaybackCommands.ConfigureAuthCommand, args)
         future.addListener(
             {
                 val configured = runCatching { future.get().resultCode == SessionResult.RESULT_SUCCESS }
                     .getOrDefault(false)
-                if (!configured || currentNamespace != credentials.cacheNamespace) return@addListener
+                if (!configured || currentNamespace != auth.cacheNamespace) return@addListener
                 if (hasConfiguredQueue(restored, player.mediaItemCount)) {
                     restored = true
                     PlaybackTransportBridge.setOwnership(ownershipFor(queueKind))
@@ -228,10 +228,10 @@ class PlaybackController(
                     return@addListener
                 }
                 scope.launch {
-                    val account = sessionStore.read(credentials.cacheNamespace)
+                    val account = sessionStore.read(auth.cacheNamespace)
                     if (
                         generation != configureGeneration ||
-                        currentNamespace != credentials.cacheNamespace ||
+                        currentNamespace != auth.cacheNamespace ||
                         player.mediaItemCount > 0
                     ) {
                         return@launch
@@ -488,12 +488,12 @@ class PlaybackController(
      * origin: re-applies credentials (the service rebases stale queue URIs onto
      * the new api base at open time), then prepares and plays once applied.
      */
-    fun retryAfterConnectionChange(credentials: PlaybackCredentials) {
+    fun retryAfterConnectionChange(auth: PlaybackAuth) {
         val player = controller ?: return
         val errorCode = player.playerError?.errorCode ?: return
         if (!PlaybackFailure.isNetworkRetryableCode(errorCode)) return
-        pendingCredentials = credentials
-        val future = player.sendCustomCommand(PlaybackCommands.ConfigureAuthCommand, authBundle(credentials))
+        pendingAuth = auth
+        val future = player.sendCustomCommand(PlaybackCommands.ConfigureAuthCommand, authBundle(auth))
         future.addListener(
             {
                 runCatching { future.get() }
@@ -506,12 +506,11 @@ class PlaybackController(
         )
     }
 
-    private fun authBundle(credentials: PlaybackCredentials): Bundle = Bundle().apply {
-        putString(PlaybackCommands.Token, credentials.rawAuthorization)
-        putString(PlaybackCommands.CacheNamespace, credentials.cacheNamespace)
-        putString(PlaybackCommands.AccessCode, credentials.accessCodeHeader)
-        putBoolean(PlaybackCommands.RelayMode, credentials.relayMode)
-        putString(PlaybackCommands.ApiBase, credentials.apiBase)
+    private fun authBundle(auth: PlaybackAuth): Bundle = Bundle().apply {
+        putRequestHeaders(auth.headers)
+        putString(PlaybackCommands.CacheNamespace, auth.cacheNamespace)
+        putString(PlaybackCommands.ApiBase, auth.apiBase)
+        putString(PlaybackCommands.StreamPathPrefix, auth.streamPathPrefix)
     }
 
     fun next() {
@@ -717,7 +716,7 @@ class PlaybackController(
             clearMediaItems()
             sendCustomCommand(PlaybackCommands.ClearAuthCommand, Bundle.EMPTY)
         }
-        pendingCredentials = null
+        pendingAuth = null
         restored = false
         currentNamespace = null
         frozenQueueSnapshot = null

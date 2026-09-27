@@ -2,32 +2,23 @@ package com.fnmusic.tv.core.data.repository
 
 import android.content.Context
 import android.graphics.BitmapFactory
-import com.fnmusic.tv.core.data.api.AlbumDto
-import com.fnmusic.tv.core.data.api.GenreDto
-import com.fnmusic.tv.core.data.api.ApiDecoder
-import com.fnmusic.tv.core.data.api.ArtistDto
-import com.fnmusic.tv.core.data.api.LyricListDto
-import com.fnmusic.tv.core.data.api.PlaylistDetailDto
-import com.fnmusic.tv.core.data.api.PlaylistDto
-import com.fnmusic.tv.core.data.api.SharedLibraryDto
-import com.fnmusic.tv.core.data.api.SortedPageListDto
+import com.fnmusic.tv.core.data.backend.CatalogIndexSource
+import com.fnmusic.tv.core.data.backend.CatalogPageSource
+import com.fnmusic.tv.core.data.backend.DecodedPage
 import com.fnmusic.tv.core.data.backend.FnOsMusicBackend
 import com.fnmusic.tv.core.data.backend.MusicBackend
-import com.fnmusic.tv.core.data.api.TrackDto
-import com.fnmusic.tv.core.data.api.TrackMetadataDto
 import com.fnmusic.tv.core.data.api.isRetryableRequestFailure
 import com.fnmusic.tv.core.data.local.CachedIndexEntity
 import com.fnmusic.tv.core.data.local.CachedLyricEntity
 import com.fnmusic.tv.core.data.local.CachedPageEntity
 import com.fnmusic.tv.core.data.local.LocalStore
 import com.fnmusic.tv.core.data.preferences.AppPreferences
-import com.fnmusic.tv.core.model.CollectionGuid
-import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.Album
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
 import com.fnmusic.tv.core.model.Artist
 import com.fnmusic.tv.core.model.CoverVariant
+import com.fnmusic.tv.core.model.Genre
 import com.fnmusic.tv.core.model.LyricDocument
 import com.fnmusic.tv.core.model.Page
 import com.fnmusic.tv.core.model.PlaybackTrack
@@ -48,9 +39,6 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,8 +47,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlin.random.Random
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -71,8 +57,6 @@ private const val MAX_ARTWORK_PIXELS = 16_000_000L
 private const val ARTWORK_VALIDATION_LONG_EDGE = 128
 
 internal data class ArtworkBounds(val width: Int, val height: Int)
-
-internal fun TrackDto.toFavoriteDomain(): Track = toDomain().copy(isFavorite = true)
 
 data class FavoriteLibraryState(
     val namespace: String? = null,
@@ -126,15 +110,6 @@ internal fun FavoriteLibraryState.rollback(
     error = error,
 )
 
-internal fun decodeLyrics(response: LyricListDto): Pair<LyricDocument?, SyncedLyrics?> {
-    val selected = response.list.firstOrNull { it.guid == response.preferred }
-        ?: response.list.firstOrNull { it.isLRC }
-        ?: response.list.firstOrNull()
-    val document = selected?.toDomain()
-    val syncedLyrics = document?.let { parseLyrics(it.content) }?.takeIf(SyncedLyrics::hasUsableLines)
-    return document to syncedLyrics
-}
-
 internal fun isValidArtworkBytes(bytes: ByteArray): Boolean = isValidArtworkBytes(
     bytes = bytes,
     readBounds = { encoded ->
@@ -180,6 +155,10 @@ internal fun isValidArtworkBytes(
     return runCatching { decodeSampled(bytes, sample) }.getOrDefault(false)
 }
 
+/**
+ * 门面 + 缓存 + 状态：公开签名与抽取前一致，网络请求全部交给 [backend]。
+ * 目录类查询一律"取原始体 → 缓存 → 由后端解码成领域模型"，所以一份缓存同时服务所有后端。
+ */
 class MusicRepository internal constructor(
     context: Context,
     private val session: SessionRepository,
@@ -236,21 +215,13 @@ class MusicRepository internal constructor(
         repositoryScope.launch { artworkCache.initialize() }
     }
 
-    suspend fun playlists(): List<Playlist> = cachedIndex<List<PlaylistDto>, List<Playlist>>(
-        key = "playlists",
-        fetch = { session.authenticated { it.playlists() } },
-    ) { list -> list.map(PlaylistDto::toDomain) }
+    suspend fun playlists(): List<Playlist> = cachedIndex(CatalogIndexSource.Playlists)
 
-    suspend fun playlist(guid: String): Playlist = cachedIndex<PlaylistDetailDto, Playlist>(
-        key = "playlist:$guid",
-        fetch = { session.authenticated { it.playlist(guid) } },
-    ) { it.toDomain() }
+    suspend fun playlist(guid: String): Playlist = cachedIndex(CatalogIndexSource.PlaylistDetail(guid))
 
-    suspend fun playlistTracks(guid: String, page: Int) = cachedPage<TrackDto, Track>(
-        sourceKey = "playlist:$guid",
-        page = page,
-        fetch = { session.authenticated { it.playlistTracks(guid, page) } },
-    ) { it.toDomain() }.also(::observeFavoriteTracks)
+    suspend fun playlistTracks(guid: String, page: Int) =
+        cachedPage(CatalogPageSource.PlaylistTracks(guid), page, PAGE_SIZE)
+            .also(::observeFavoriteTracks)
 
     /**
      * Cover ids of the playlist's first tracks (at most [size]), for coverless
@@ -267,14 +238,15 @@ class MusicRepository internal constructor(
             // 首页/歌单页会为每个歌单各拉一次候选封面；不限制并发时十几二十个请求
             // 同时打向 NAS，把首页首屏一起拖慢。这里串行化到固定并发数。
             playlistCoverSemaphore.withPermit {
-            session.authenticated { it.playlistTracks(guid, page = 1, size = COVER_CANDIDATE_PAGE_SIZE) }
-                .list
-                .asSequence()
-                .mapNotNull { track -> track.coverId?.trim()?.takeIf(String::isNotEmpty) }
-                .distinct()
-                .shuffled()
-                .take(size)
-                .toList()
+                val source = CatalogPageSource.PlaylistTracks(guid)
+                backend.catalogPage(source, page = 1, size = COVER_CANDIDATE_PAGE_SIZE)
+                    .let { backend.decodePage(source, it.rawJson).items }
+                    .asSequence()
+                    .mapNotNull { track -> track.coverId?.trim()?.takeIf(String::isNotEmpty) }
+                    .distinct()
+                    .shuffled()
+                    .take(size)
+                    .toList()
             }
         } catch (cause: CancellationException) {
             synchronized(playlistCoverFetchInFlight) { playlistCoverFetchInFlight -= guid }
@@ -287,59 +259,34 @@ class MusicRepository internal constructor(
         return covers
     }
 
-    suspend fun artists(page: Int, size: Int = 50) = cachedPage<ArtistDto, Artist>(
-        sourceKey = sizedPageSourceKey("artists", size),
-        page = page,
-        pageSize = size,
-        fetch = { session.authenticated { it.artists(page, size) } },
-    ) { it.toDomain() }
+    suspend fun artists(page: Int, size: Int = 50) =
+        cachedPage(CatalogPageSource.Artists, page, size)
 
-    suspend fun artist(guid: String): Artist = cachedIndex<ArtistDto, Artist>(
-        key = "artist:$guid",
-        fetch = { session.authenticated { it.artist(guid) } },
-    ) { it.toDomain() }
+    suspend fun artist(guid: String): Artist = cachedIndex(CatalogIndexSource.ArtistDetail(guid))
 
-    suspend fun artistTracks(guid: String, page: Int) = cachedPage<TrackDto, Track>(
-        sourceKey = "artist-tracks:$guid",
-        page = page,
-        fetch = { session.authenticated { it.artistTracks(guid, page) } },
-    ) { it.toDomain() }.also(::observeFavoriteTracks)
+    suspend fun artistTracks(guid: String, page: Int) =
+        cachedPage(CatalogPageSource.ArtistTracks(guid), page, PAGE_SIZE)
+            .also(::observeFavoriteTracks)
 
-    suspend fun artistAlbums(guid: String, page: Int) = cachedPage<AlbumDto, Album>(
-        sourceKey = "artist-albums:$guid",
-        page = page,
-        fetch = { session.authenticated { it.artistAlbums(guid, page) } },
-    ) { it.toDomain() }
+    suspend fun artistAlbums(guid: String, page: Int) =
+        cachedPage(CatalogPageSource.ArtistAlbums(guid), page, PAGE_SIZE)
 
     /**
      * Up to [count] albums sampled across the whole library: one probe call reads
      * the total, then each album comes from a randomly picked server page so the
      * set changes on every call.
      */
-    suspend fun albums(page: Int, size: Int = 50) = cachedPage<AlbumDto, Album>(
-        sourceKey = sizedPageSourceKey("albums", size),
-        page = page,
-        pageSize = size,
-        fetch = { session.authenticated { it.albums(page, size) } },
-    ) { it.toDomain() }
+    suspend fun albums(page: Int, size: Int = 50) =
+        cachedPage(CatalogPageSource.Albums, page, size)
 
-    suspend fun album(guid: String): Album = cachedIndex<AlbumDto, Album>(
-        key = "album:$guid",
-        fetch = { session.authenticated { it.album(guid) } },
-    ) { it.toDomain() }
+    suspend fun album(guid: String): Album = cachedIndex(CatalogIndexSource.AlbumDetail(guid))
 
-    suspend fun albumTracks(guid: String, page: Int) = cachedPage<TrackDto, Track>(
-        sourceKey = "album-tracks:$guid",
-        page = page,
-        fetch = { session.authenticated { it.albumTracks(guid, page) } },
-    ) { it.toDomain() }.also(::observeFavoriteTracks)
+    suspend fun albumTracks(guid: String, page: Int) =
+        cachedPage(CatalogPageSource.AlbumTracks(guid), page, PAGE_SIZE)
+            .also(::observeFavoriteTracks)
 
-    suspend fun allTracks(page: Int, size: Int = 50) = cachedPage<TrackDto, Track>(
-        sourceKey = sizedPageSourceKey("all-tracks", size),
-        page = page,
-        pageSize = size,
-        fetch = { session.authenticated { it.allTracks(page, size) } },
-    ) { it.toDomain() }.also(::observeFavoriteTracks)
+    suspend fun allTracks(page: Int, size: Int = 50) =
+        cachedPage(CatalogPageSource.AllTracks, page, size).also(::observeFavoriteTracks)
 
     /** 卡片封面用的轻量随机采样：探测总数后只随机取一页（共 2 次请求）。 */
     suspend fun randomAlbumSample(size: Int = 24): List<Album> {
@@ -364,113 +311,61 @@ class MusicRepository internal constructor(
             )
         }
 
-    suspend fun recentlyAddedTracks(page: Int, size: Int = 16) = cachedPage<TrackDto, Track>(
-        sourceKey = sizedPageSourceKey("recently-added", size),
-        page = page,
-        pageSize = size,
-        fetch = { session.authenticated { it.recentlyAddedTracks(page, size) } },
-    ) { it.toDomain() }.also(::observeFavoriteTracks)
+    suspend fun recentlyAddedTracks(page: Int, size: Int = 16) =
+        cachedPage(CatalogPageSource.RecentlyAdded, page, size).also(::observeFavoriteTracks)
 
-    suspend fun genres(): List<Genre> = cachedIndex<List<GenreDto>, List<Genre>>(
-        key = "genres",
-        fetch = { session.authenticated { it.genres(page = 1, size = 500).list } },
-    ) { list -> list.map { Genre(CollectionGuid(it.guid), it.name, it.coverId, it.trackCount) } }
+    suspend fun genres(): List<Genre> = cachedIndex(CatalogIndexSource.Genres)
 
-    suspend fun genreTracks(guid: String, page: Int) = cachedPage<TrackDto, Track>(
-        sourceKey = "genre-tracks:$guid",
-        page = page,
-        fetch = { session.authenticated { it.genreTracks(guid, page) } },
-    ) { it.toDomain() }.also(::observeFavoriteTracks)
+    suspend fun genreTracks(guid: String, page: Int) =
+        cachedPage(CatalogPageSource.GenreTracks(guid), page, PAGE_SIZE)
+            .also(::observeFavoriteTracks)
 
-    suspend fun searchTracks(query: String, page: Int = 1, size: Int = 20): Page<Track> {
-        val response = session.authenticated { it.searchTracks(query, page, size) }
-        return Page(
-            items = response.list.map(TrackDto::toDomain),
-            page = page,
-            pageSize = size,
-            total = response.total,
-            sort = "relevance",
-        )
-    }
+    suspend fun searchTracks(query: String, page: Int = 1, size: Int = 20): Page<Track> =
+        backend.searchTracks(query, page, size).toDomainPage(page, size)
 
-    suspend fun searchArtists(query: String, page: Int = 1, size: Int = 20): Page<Artist> {
-        val response = session.authenticated { it.searchArtists(query, page, size) }
-        return Page(
-            items = response.list.map(ArtistDto::toDomain),
-            page = page,
-            pageSize = size,
-            total = response.total,
-            sort = "relevance",
-        )
-    }
+    suspend fun searchArtists(query: String, page: Int = 1, size: Int = 20): Page<Artist> =
+        backend.searchArtists(query, page, size).toDomainPage(page, size)
 
-    suspend fun searchAlbums(query: String, page: Int = 1, size: Int = 20): Page<Album> {
-        val response = session.authenticated { it.searchAlbums(query, page, size) }
-        return Page(
-            items = response.list.map(AlbumDto::toDomain),
-            page = page,
-            pageSize = size,
-            total = response.total,
-            sort = "relevance",
-        )
-    }
+    suspend fun searchAlbums(query: String, page: Int = 1, size: Int = 20): Page<Album> =
+        backend.searchAlbums(query, page, size).toDomainPage(page, size)
 
     suspend fun playlistTrackCounts(guids: List<String>): Map<String, Int> {
         if (guids.isEmpty()) return emptyMap()
-        return runCatching {
-            session.authenticated { it.playlistBatchDetail(guids) }
-                .associate { dto -> dto.guid to dto.trackCount }
-        }.getOrDefault(emptyMap())
+        return runCatching { backend.playlistTrackCounts(guids) }.getOrDefault(emptyMap())
     }
 
     suspend fun favoriteTracks(page: Int): Page<Track> {
         val namespace = session.cacheNamespace()
-        val response = session.authenticated { it.favoriteTracks(page, FAVORITE_PAGE_SIZE) }
-        val result = Page(
-            items = response.list.map(TrackDto::toFavoriteDomain),
-            page = page,
-            pageSize = FAVORITE_PAGE_SIZE,
-            total = response.total,
-            sort = FAVORITE_SORT,
-        )
+        val result = backend.favoriteTracks(page, FAVORITE_PAGE_SIZE).toDomainPage(page, FAVORITE_PAGE_SIZE)
         observeFavoriteTracks(result, namespace)
         return result
     }
 
-    suspend fun recentTracks(page: Int): Page<Track> {
-        val response = session.authenticated { it.playHistory(page, RECENT_PAGE_SIZE) }
-        return Page(
-            items = response.list.map(TrackDto::toDomain),
-            page = page,
-            pageSize = RECENT_PAGE_SIZE,
-            total = response.total,
-            sort = RECENT_SORT,
-        )
-    }
+    suspend fun recentTracks(page: Int): Page<Track> =
+        backend.recentTracks(page, RECENT_PAGE_SIZE).toDomainPage(page, RECENT_PAGE_SIZE)
 
     suspend fun addToPlaylist(playlistGuid: String, trackGuid: String) {
-        session.authenticated { it.addToPlaylist(playlistGuid, listOf(trackGuid)) }
+        backend.addToPlaylist(playlistGuid, trackGuid)
         invalidatePlaylistPages(playlistGuid)
     }
 
     suspend fun removeFromPlaylist(playlistGuid: String, trackGuid: String) {
-        session.authenticated { it.removeFromPlaylist(playlistGuid, listOf(trackGuid)) }
+        backend.removeFromPlaylist(playlistGuid, trackGuid)
         invalidatePlaylistPages(playlistGuid)
     }
 
     /**
-     * 新建歌单并返回它（guid 由服务端下发）。
+     * 新建歌单并返回它（guid 由服务端下发，封面 id 由后端按自家约定生成）。
      * 歌单索引（"playlists"）是带缓存的，创建后失效索引缓存，首页歌单行/全部歌单页下次加载就能看到。
      */
     suspend fun createPlaylist(name: String): Playlist {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty())
-        val coverId = newPlaylistCoverId()
-        val guid = session.authenticated { it.createPlaylist(coverId, trimmed) }
+        val playlist = backend.createPlaylist(trimmed)
         // 缓存键是 (namespace, kind, businessKey)：歌单索引登记在 businessKey="playlists" 上，
         // 用 "index"（那是 kind）失效不掉，会导致重新打开弹窗时又读到旧列表。
         runCatching { responses.invalidateSource(session.cacheNamespace(), "playlists") }
-        return Playlist(CollectionGuid(guid), trimmed, coverId)
+        return playlist
     }
 
     /**
@@ -497,11 +392,6 @@ class MusicRepository internal constructor(
         return FavoritesClearOutcome(removed = removed, failed = failed)
     }
 
-    private fun newPlaylistCoverId(): String {
-        val hex = "0123456789abcdef"
-        return "playlist_" + buildString { repeat(32) { append(hex[Random.nextInt(hex.length)]) } }
-    }
-
     /** 歌单内容在 NAS 上已变化，丢弃该歌单的缓存页，让下一次加载直接回源。 */
     private suspend fun invalidatePlaylistPages(playlistGuid: String) {
         runCatching { responses.invalidateSource(session.cacheNamespace(), "playlist:$playlistGuid") }
@@ -514,9 +404,7 @@ class MusicRepository internal constructor(
             val (optimisticState, mutation) = _favoriteState.value.beginMutation(trackGuid, fallbackFavorite)
             _favoriteState.value = optimisticState
             try {
-                session.authenticated { api ->
-                    if (mutation.desired) api.createFavorite(trackGuid) else api.deleteFavorite(trackGuid)
-                }
+                backend.setFavorite(trackGuid, mutation.desired)
                 _favoriteState.update { it.complete(mutation) }
                 Result.success(mutation.desired)
             } catch (cause: CancellationException) {
@@ -543,15 +431,10 @@ class MusicRepository internal constructor(
         is QueueSource.Genre -> genreTracks(source.guid, page)
     }
 
-    suspend fun sharedLibraries(): List<SharedLibrary> = cachedIndex<List<SharedLibraryDto>, List<SharedLibrary>>(
-        key = "shared-libraries",
-        fetch = { session.authenticated { it.sharedLibraries() } },
-    ) { list -> list.map(SharedLibraryDto::toDomain) }
+    suspend fun sharedLibraries(): List<SharedLibrary> = cachedIndex(CatalogIndexSource.SharedLibraries)
 
-    suspend fun trackMetadata(trackGuid: String): Track = cachedIndex<TrackMetadataDto, Track>(
-        key = "track-metadata:$trackGuid",
-        fetch = { session.authenticated { it.metadata(trackGuid) } },
-    ) { it.toDomain() }.also(::observeFavoriteTrack)
+    suspend fun trackMetadata(trackGuid: String): Track =
+        cachedIndex(CatalogIndexSource.TrackMetadata(trackGuid)).also(::observeFavoriteTrack)
 
     suspend fun currentTrackMetadata(trackGuid: String): CurrentResourceResult<Track> = currentResource {
         withCurrentResourceRetry { trackMetadata(trackGuid) }
@@ -582,8 +465,11 @@ class MusicRepository internal constructor(
             }
             .toList()
 
-    suspend fun lyrics(trackGuid: String): Pair<LyricDocument?, SyncedLyrics?> =
-        decodeLyrics(lyricResponse(trackGuid))
+    suspend fun lyrics(trackGuid: String): Pair<LyricDocument?, SyncedLyrics?> {
+        val document = lyricDocument(trackGuid)
+        val syncedLyrics = document?.let { parseLyrics(it.content) }?.takeIf(SyncedLyrics::hasUsableLines)
+        return document to syncedLyrics
+    }
 
     private suspend fun firstPartyCurrentLyrics(trackGuid: String): CurrentResourceResult<CurrentLyrics> = currentResource {
         val (document, syncedLyrics) = withCurrentResourceRetry { lyrics(trackGuid) }
@@ -601,21 +487,17 @@ class MusicRepository internal constructor(
 
     suspend fun startRoam(): RoamWindow? {
         val namespace = session.cacheNamespace()
-        return session.authenticated { it.roamStart(session.deviceId) }?.let {
-            RoamWindow(null, it.current.toDomain(), it.next?.toDomain())
-        }.also { observeFavoriteWindow(it, namespace) }
+        return backend.startRoam().also { observeFavoriteWindow(it, namespace) }
     }
 
     suspend fun nextRoam(roamId: String): RoamWindow {
         val namespace = session.cacheNamespace()
-        return session.authenticated { it.roamNext(session.deviceId, roamId).toDomain() }
-            .also { observeFavoriteWindow(it, namespace) }
+        return backend.nextRoam(roamId).also { observeFavoriteWindow(it, namespace) }
     }
 
     suspend fun previousRoam(roamId: String): RoamWindow {
         val namespace = session.cacheNamespace()
-        return session.authenticated { it.roamPrevious(session.deviceId, roamId).toDomain() }
-            .also { observeFavoriteWindow(it, namespace) }
+        return backend.previousRoam(roamId).also { observeFavoriteWindow(it, namespace) }
     }
 
     suspend fun artwork(coverId: String, variant: CoverVariant): ByteArray? = try {
@@ -695,14 +577,19 @@ class MusicRepository internal constructor(
     private suspend fun loadArtwork(coverId: String, variant: CoverVariant): ByteArray? {
         val namespace = session.cacheNamespace()
         return artworkCache.get(namespace, coverId, variant) {
-            session.authenticated { it.cover(coverId, variant.width) }
+            backend.artwork(coverId, variant.width)
         }
     }
 
-    private suspend fun lyricResponse(trackGuid: String): LyricListDto {
+    /**
+     * 取回服务端歌词（原始体进缓存/本地库，解码交给后端）。
+     * 离线时回落到本地库里的原始体；缓存体不可解析才把网络错误抛出去（与改动前一致）。
+     */
+    private suspend fun lyricDocument(trackGuid: String): LyricDocument? {
         val namespace = session.cacheNamespace()
         val key = ResponseCacheKey(namespace, "lyric", trackGuid)
-        var decodedResponse: LyricListDto? = null
+        var decoded: LyricDocument? = null
+        var resolved = false
         val payload = responses.getOrFetch(
             key = key,
             persist = { encoded ->
@@ -712,45 +599,55 @@ class MusicRepository internal constructor(
             },
         ) {
             try {
-                session.authenticated { it.lyrics(trackGuid) }
-                    .also { decodedResponse = it }
-                    .let(ApiDecoder.json::encodeToString)
+                backend.lyricsRaw(trackGuid).also { raw ->
+                    decoded = backend.decodeLyrics(raw)
+                    resolved = true
+                }
             } catch (cause: CancellationException) {
                 throw cause
             } catch (cause: AppException) {
                 if (cause.error != AppError.NetworkUnavailable) throw cause
                 val cached = fallback { localStore.lyric(namespace, trackGuid) } ?: throw cause
-                decodedResponse = validatePayload<LyricListDto>(cached.payload) ?: throw cause
+                decoded = try {
+                    backend.decodeLyrics(cached.payload)
+                } catch (decodeFailure: Exception) {
+                    if (decodeFailure is CancellationException) throw decodeFailure
+                    throw cause
+                }
+                resolved = true
                 cached.payload
             }
         }
-        return decodedResponse ?: ApiDecoder.json.decodeFromString(payload)
+        return if (resolved) decoded else backend.decodeLyrics(payload)
     }
 
-    private suspend inline fun <reified Dto, Domain> cachedPage(
-        sourceKey: String,
+    /**
+     * 目录页：原始体走响应缓存（内存 + Room），解码由后端完成。
+     * 缓存源键与抽取前逐字一致，所以老的本地缓存仍然命中。
+     */
+    private suspend fun <T> cachedPage(
+        source: CatalogPageSource<T>,
         page: Int,
-        pageSize: Int = PAGE_SIZE,
-        crossinline fetch: suspend () -> SortedPageListDto<Dto>,
-        noinline transform: (Dto) -> Domain,
-    ): Page<Domain> {
+        pageSize: Int,
+    ): Page<T> {
+        require(pageSize > 0)
         val namespace = session.cacheNamespace()
+        val sourceKey = if (source.sizeSensitive) sizedPageSourceKey(source.cacheKey, pageSize) else source.cacheKey
         val key = ResponseCacheKey(namespace, "page", sourceKey, page)
-        var decodedResponse: SortedPageListDto<Dto>? = null
+        var decoded: DecodedPage<T>? = null
         val payload = responses.getOrFetch(
             key = key,
             persist = { encoded ->
                 bestEffort {
-                    val response = decodedResponse
-                        ?: ApiDecoder.json.decodeFromString<SortedPageListDto<Dto>>(encoded)
+                    val resolved = decoded ?: backend.decodePage(source, encoded)
                     localStore.savePage(
                         CachedPageEntity(
                             namespace = namespace,
                             sourceKey = sourceKey,
                             page = page,
                             payload = encoded,
-                            total = response.total,
-                            sort = response.sort,
+                            total = resolved.total,
+                            sort = resolved.sort,
                             accessedAt = now(),
                         ),
                     )
@@ -758,48 +655,58 @@ class MusicRepository internal constructor(
             },
         ) {
             try {
-                fetch().also { decodedResponse = it }.let(ApiDecoder.json::encodeToString)
+                val raw = backend.catalogPage(source, page, pageSize)
+                decoded = backend.decodePage(source, raw.rawJson)
+                raw.rawJson
             } catch (cause: CancellationException) {
                 throw cause
             } catch (cause: AppException) {
                 if (cause.error != AppError.NetworkUnavailable) throw cause
                 val cached = fallback { localStore.page(namespace, sourceKey, page) } ?: throw cause
-                decodedResponse = validatePayload<SortedPageListDto<Dto>>(cached.payload) ?: throw cause
+                decoded = try {
+                    backend.decodePage(source, cached.payload)
+                } catch (decodeFailure: Exception) {
+                    if (decodeFailure is CancellationException) throw decodeFailure
+                    throw cause
+                }
                 cached.payload
             }
         }
-        return (decodedResponse ?: ApiDecoder.json.decodeFromString<SortedPageListDto<Dto>>(payload))
-            .toDomainPage(page, pageSize, transform)
+        return (decoded ?: backend.decodePage(source, payload)).toDomainPage(page, pageSize)
     }
 
-    private suspend inline fun <reified Dto, Domain> cachedIndex(
-        key: String,
-        crossinline fetch: suspend () -> Dto,
-        transform: (Dto) -> Domain,
-    ): Domain {
+    /** 目录索引：与 [cachedPage] 同一套缓存语义（内存 + Room），只是不分页。 */
+    private suspend fun <T> cachedIndex(source: CatalogIndexSource<T>): T {
         val namespace = session.cacheNamespace()
-        val cacheKey = ResponseCacheKey(namespace, "index", key)
-        var decodedResponse: Dto? = null
+        val cacheKey = ResponseCacheKey(namespace, "index", source.cacheKey)
+        var decoded: T? = null
         val payload = responses.getOrFetch(
             key = cacheKey,
             persist = { encoded ->
                 bestEffort {
-                    localStore.saveIndex(CachedIndexEntity(namespace, key, encoded, now()))
+                    localStore.saveIndex(CachedIndexEntity(namespace, source.cacheKey, encoded, now()))
                 }
             },
         ) {
             try {
-                fetch().also { decodedResponse = it }.let(ApiDecoder.json::encodeToString)
+                backend.catalogIndex(source).rawJson.also { raw ->
+                    decoded = backend.decodeIndex(source, raw)
+                }
             } catch (cause: CancellationException) {
                 throw cause
             } catch (cause: AppException) {
                 if (cause.error != AppError.NetworkUnavailable) throw cause
-                val cached = fallback { localStore.index(namespace, key) } ?: throw cause
-                decodedResponse = validatePayload<Dto>(cached.payload) ?: throw cause
+                val cached = fallback { localStore.index(namespace, source.cacheKey) } ?: throw cause
+                decoded = try {
+                    backend.decodeIndex(source, cached.payload)
+                } catch (decodeFailure: Exception) {
+                    if (decodeFailure is CancellationException) throw decodeFailure
+                    throw cause
+                }
                 cached.payload
             }
         }
-        return transform(decodedResponse ?: ApiDecoder.json.decodeFromString(payload))
+        return decoded ?: backend.decodeIndex(source, payload)
     }
 
     private suspend fun <T> currentResource(block: suspend () -> T?): CurrentResourceResult<T> = try {
@@ -831,12 +738,6 @@ class MusicRepository internal constructor(
         null
     }
 
-    private inline fun <reified T> validatePayload(payload: String): T? = try {
-        ApiDecoder.json.decodeFromString(payload)
-    } catch (_: Exception) {
-        null
-    }
-
     private fun now(): Long = System.currentTimeMillis()
 
     private companion object {
@@ -844,8 +745,6 @@ class MusicRepository internal constructor(
         const val ARTWORK_MEMORY_CAPACITY_BYTES = 24 * 1024 * 1024
         const val PAGE_SIZE = 50
         const val FAVORITE_PAGE_SIZE = 50
-        const val FAVORITE_SORT = "favoriteAt,desc"
-        const val RECENT_SORT = "recent"
         const val RECENT_PAGE_SIZE = 50
 
         fun defaultOnlineLyricsMatcher(): suspend (LyricsMatchRequest) -> LyricsMatchResult {
@@ -866,13 +765,10 @@ internal fun sizedPageSourceKey(sourceKey: String, size: Int): String {
     return "$sourceKey:size=$size"
 }
 
-internal fun <Dto, Domain> SortedPageListDto<Dto>.toDomainPage(
-    page: Int,
-    pageSize: Int,
-    transform: (Dto) -> Domain,
-): Page<Domain> {
+/** 解码后的一页 → 领域分页：页/页大小来自请求，total/sort 来自响应（与抽取前一致）。 */
+internal fun <T> DecodedPage<T>.toDomainPage(page: Int, pageSize: Int): Page<T> {
     require(pageSize > 0)
-    return Page(list.map(transform), page, pageSize, total, sort)
+    return Page(items, page, pageSize, total, sort)
 }
 
 internal suspend fun resolveLyricsWithFallback(

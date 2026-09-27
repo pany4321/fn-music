@@ -79,7 +79,7 @@ internal class AuthenticatedAppCoordinator(
                             musicRepository.applyArtworkBudget()
                             boundNamespace = namespace
                         }
-                        playbackController.configure(sessionRepository.playbackCredentials())
+                        playbackController.configure(sessionRepository.playbackAuth())
                     }
 
                     is SessionState.SignedOut -> {
@@ -195,7 +195,7 @@ internal class AuthenticatedAppCoordinator(
     override suspend fun retryPlaybackConnection(): Boolean {
         val rehomed = sessionRepository.rehomeConnection()
         if (!rehomed) return false
-        playbackController.retryAfterConnectionChange(sessionRepository.playbackCredentials())
+        playbackController.retryAfterConnectionChange(sessionRepository.playbackAuth())
         return true
     }
 

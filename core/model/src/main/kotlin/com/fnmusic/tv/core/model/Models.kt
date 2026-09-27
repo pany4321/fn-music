@@ -86,12 +86,22 @@ data class LyricDocument(
     val offsetMs: Long,
 )
 
-data class PlaybackCredentials(
+/**
+ * 播放器要用的会话材料：流地址所在的服务基址、请求头、缓存命名空间，
+ * 以及"哪些地址属于本后端"的路径前缀（会话重挂只重写落在它下面的 URL）。
+ *
+ * 请求头由各后端组装（飞牛的 Authorization/Cookie/x-access-code 与 Jellyfin 的
+ * MediaBrowser Token 都装得下），播放服务只管原样注入。
+ */
+data class PlaybackAuth(
     val apiBase: String,
-    val rawAuthorization: String,
+    val headers: Map<String, String>,
     val cacheNamespace: String,
-    val accessCodeHeader: String? = null,
-    val relayMode: Boolean = false,
+    /**
+     * 本后端流地址的路径前缀（飞牛 `/music/api/v1/`、Jellyfin `/Audio/`）。
+     * 跨 Media3 的 Bundle 只能传字符串，所以这里用前缀而不是判定函数。
+     */
+    val streamPathPrefix: String,
 )
 
 data class PlaybackTrack(

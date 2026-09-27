@@ -214,6 +214,17 @@ internal class JellyfinApi(
         }
     }
 
+    /** 封面原始字节：图片是二进制，不能走 `execute`（字符串化会破坏内容）。 */
+    suspend fun imageBytes(itemId: String, width: Int?): ByteArray =
+        executeBytes(
+            Request.Builder()
+                .url(imageUrl(itemId, width))
+                .header("Accept", "image/*")
+                .header("Authorization", authorizationHeader(requireToken()))
+                .get()
+                .build(),
+        )
+
     // ---- URL 构造（实测：PlaybackInfo 不返回 URL，客户端自己拼） ----
 
     /** 封面：Jellyfin 按条目 id 取图；宽度给 fillWidth/fillHeight 得到方形裁切。 */
@@ -306,6 +317,32 @@ internal class JellyfinApi(
                             )
                         }
                     }
+                }
+            })
+        }
+
+    private suspend fun executeBytes(request: Request): ByteArray =
+        suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isCancelled) return
+                    continuation.resumeWithException(
+                        AppException(AppError.NetworkUnavailable),
+                    )
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val result = runCatching {
+                        response.use {
+                            if (!it.isSuccessful) throw AppException(classify(it.code, ""))
+                            it.body?.bytes()?.takeIf(ByteArray::isNotEmpty)
+                                ?: throw AppException(AppError.Empty)
+                        }
+                    }
+                    if (!continuation.isActive) return
+                    result.fold(continuation::resume, continuation::resumeWithException)
                 }
             })
         }

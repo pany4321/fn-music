@@ -78,16 +78,6 @@ internal fun createPlaybackHttpDataSourceFactory(): DefaultHttpDataSource.Factor
         .setAllowCrossProtocolRedirects(false)
         .setUserAgent("FnMusicTV/0.1")
 
-internal fun playbackRequestHeaders(token: String, accessCode: String?, relayMode: Boolean): Map<String, String> =
-    buildMap {
-        put("Authorization", token)
-        if (relayMode) put("Cookie", "music-token=$token; mode=relay")
-        if (!accessCode.isNullOrBlank()) {
-            put("x-access-code", accessCode)
-            put("x-access-source", "app")
-        }
-    }
-
 internal fun deleteLegacyAudioCache(cacheDirectory: File): Boolean = runCatching {
     val legacyCache = File(cacheDirectory.canonicalFile, LEGACY_AUDIO_CACHE_DIRECTORY)
     if (!legacyCache.exists()) {
@@ -116,8 +106,8 @@ class PlaybackService : MediaSessionService() {
     private val resumptionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
-    private var apiBaseOverride: String? = null
-    private val rehomingResolver = ApiBaseRewritingResolver { apiBaseOverride }
+    private var rehomeTarget: RehomeTarget? = null
+    private val rehomingResolver = ApiBaseRewritingResolver { rehomeTarget }
     private val httpFactory = createPlaybackHttpDataSourceFactory()
 
     override fun onCreate() {
@@ -173,20 +163,22 @@ class PlaybackService : MediaSessionService() {
                 ): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == PlaybackCommands.ClearAuth) {
                         httpFactory.setDefaultRequestProperties(emptyMap())
-                        apiBaseOverride = null
+                        rehomeTarget = null
                         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                     }
                     if (customCommand.customAction == PlaybackCommands.ConfigureAuth) {
-                        val token = args.getString(PlaybackCommands.Token)
                         val namespace = args.getString(PlaybackCommands.CacheNamespace)
-                        if (token.isNullOrBlank() || namespace.isNullOrBlank()) {
+                        val headers = args.requestHeaders()
+                        if (headers.isEmpty() || namespace.isNullOrBlank()) {
                             return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
                         }
-                        val relayMode = args.getBoolean(PlaybackCommands.RelayMode, false)
-                        val accessCode = args.getString(PlaybackCommands.AccessCode)
-                        val headers = playbackRequestHeaders(token, accessCode, relayMode)
                         httpFactory.setDefaultRequestProperties(headers)
-                        apiBaseOverride = args.getString(PlaybackCommands.ApiBase)
+                        rehomeTarget = args.getString(PlaybackCommands.ApiBase)?.let { apiBase ->
+                            RehomeTarget(
+                                apiBase = apiBase,
+                                streamPathPrefix = args.getString(PlaybackCommands.StreamPathPrefix).orEmpty(),
+                            )
+                        }
                         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                     }
                     if (customCommand.customAction == PlaybackCommands.SetShuffleOrder) {
@@ -238,8 +230,7 @@ class PlaybackService : MediaSessionService() {
                     result.setException(NoSuchElementException("No resumable playback snapshot"))
                     return@launch
                 }
-                val headers = playbackRequestHeaders(data.rawAuthorization, data.accessCodeHeader, data.relayMode)
-                httpFactory.setDefaultRequestProperties(headers)
+                httpFactory.setDefaultRequestProperties(data.headers)
                 result.set(
                     MediaSession.MediaItemsWithStartPosition(
                         snapshot.items,

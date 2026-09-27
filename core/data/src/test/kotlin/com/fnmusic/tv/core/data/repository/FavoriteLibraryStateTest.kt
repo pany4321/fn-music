@@ -1,6 +1,7 @@
 package com.fnmusic.tv.core.data.repository
 
 import com.fnmusic.tv.core.data.api.TrackDto
+import com.fnmusic.tv.core.data.backend.toFavoriteDomain
 import com.fnmusic.tv.core.model.AppError
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

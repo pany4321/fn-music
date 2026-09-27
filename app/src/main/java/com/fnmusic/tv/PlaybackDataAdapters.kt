@@ -61,12 +61,7 @@ internal class RepositoryPlaybackResumptionSource(
         val queueJson = session.queueJson
         if (queueJson.isNullOrBlank()) return null
         val auth = persistedAuth() ?: return null
-        return PlaybackResumptionData(
-            queueJson = queueJson,
-            rawAuthorization = auth.rawAuthorization,
-            accessCodeHeader = auth.accessCodeHeader,
-            relayMode = auth.relayMode,
-        )
+        return PlaybackResumptionData(queueJson = queueJson, headers = auth.headers)
     }
 
     private companion object {

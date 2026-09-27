@@ -73,7 +73,7 @@ class SessionRepositoryTest {
 
         assertTrue(rehomed)
         assertTrue(repository.state.value is SessionState.SignedIn)
-        assertEquals("fresh-token", repository.playbackCredentials().rawAuthorization)
+        assertEquals("fresh-token", repository.playbackAuth().headers["Authorization"])
     }
 
     @Test fun `rehome on a signed-out session returns false without touching storage`() = runBlocking {
@@ -93,8 +93,22 @@ class SessionRepositoryTest {
 
         val auth = repository.persistedPlaybackAuth()
 
-        assertEquals(REMEMBERED_TOKEN, auth?.rawAuthorization)
+        assertEquals(REMEMBERED_TOKEN, auth?.headers?.get("Authorization"))
         assertEquals(SessionState.Loading, repository.state.value)
+    }
+
+    @Test fun `playback auth carries the session namespace and backend path prefix`() = runBlocking {
+        enqueueSystemConfig()
+        enqueueUser()
+        val tokenStore = FakeTokenStore(REMEMBERED_TOKEN)
+        val repository = repository(tokenStore)
+
+        repository.restore()
+
+        val auth = repository.playbackAuth()
+        assertEquals("server-1:user-1", auth.cacheNamespace)
+        assertEquals("/music/api/v1/", auth.streamPathPrefix)
+        assertEquals(REMEMBERED_TOKEN, auth.headers["Authorization"])
     }
 
     @Test fun `restore clears an unauthorized remembered token without throwing`() = runBlocking {
@@ -219,7 +233,7 @@ class SessionRepositoryTest {
         repository.restore()
 
         assertTrue(repository.state.value is SessionState.SignedIn)
-        assertEquals(REMEMBERED_TOKEN, repository.playbackCredentials().rawAuthorization)
+        assertEquals(REMEMBERED_TOKEN, repository.playbackAuth().headers["Authorization"])
         assertEquals(0, tokenStore.clearCount)
     }
 
@@ -255,7 +269,7 @@ class SessionRepositoryTest {
 
         assertTrue(repository.state.value is SessionState.SignedIn)
         assertNull(tokenStore.session)
-        assertEquals("alice-token", repository.playbackCredentials().rawAuthorization)
+        assertEquals("alice-token", repository.playbackAuth().headers["Authorization"])
         assertEquals("", context.getSharedPreferences(SESSION_PREFERENCES, Context.MODE_PRIVATE).getString(SERVER, ""))
     }
 
@@ -282,7 +296,7 @@ class SessionRepositoryTest {
         repository.deleteLoginHistory(deletedId)
 
         assertTrue(repository.state.value is SessionState.SignedIn)
-        assertEquals("token-5", repository.playbackCredentials().rawAuthorization)
+        assertEquals("token-5", repository.playbackAuth().headers["Authorization"])
         assertEquals(4, tokenStore.session?.profiles?.size)
         assertTrue(tokenStore.session?.profiles?.none { it.id == deletedId } == true)
     }
@@ -304,7 +318,7 @@ class SessionRepositoryTest {
         repository.login(server.url("music/api/v1/").toString(), false, "alice", "alpha".toCharArray(), false)
 
         assertNull(tokenStore.session)
-        assertEquals("memory-token", repository.playbackCredentials().rawAuthorization)
+        assertEquals("memory-token", repository.playbackAuth().headers["Authorization"])
     }
 
     @Test fun `restore propagates cancellation without publishing signed out`() = runBlocking {

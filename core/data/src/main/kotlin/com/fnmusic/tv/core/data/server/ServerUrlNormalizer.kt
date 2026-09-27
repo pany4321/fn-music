@@ -29,6 +29,12 @@ sealed interface ServerUrlResult {
 
 object ServerUrlNormalizer {
     /**
+     * 飞牛的接口前缀：地址规范化后所有接口都在 `/music/api/v1/` 下面，
+     * 它同时也是播放重挂（rehoming）时要重写 URL 的路径范围。
+     */
+    const val API_PATH_PREFIX = "/music/api/v1/"
+
+    /**
      * Collapses full-width characters that CJK phone/TV keyboards interleave into
      * addresses (ideographic/full-width stops, colon, slash, and full-width
      * alphanumerics) so `192。168。1。10` validates as `192.168.1.10`.

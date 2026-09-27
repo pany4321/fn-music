@@ -39,16 +39,14 @@ class PlaybackResumptionSourceTest {
         val source = RepositoryPlaybackResumptionSource(
             context = context,
             localStore = localStore,
-            persistedAuth = { PersistedPlaybackAuth("token-1", "encoded-code", relayMode = true) },
+            persistedAuth = { PersistedPlaybackAuth(mapOf("Authorization" to "token-1")) },
         )
         store.save("server:user", SNAPSHOT_JSON)
 
         val data = source.loadResumption()
 
         assertEquals(SNAPSHOT_JSON, data?.queueJson)
-        assertEquals("token-1", data?.rawAuthorization)
-        assertEquals("encoded-code", data?.accessCodeHeader)
-        assertEquals(true, data?.relayMode)
+        assertEquals(mapOf("Authorization" to "token-1"), data?.headers)
     }
 
     @Test fun `resumption returns null without a remembered snapshot or credentials`() = runBlocking {

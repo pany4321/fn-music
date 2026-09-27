@@ -1,6 +1,6 @@
 package com.fnmusic.tv.core.data.repository
 
-import com.fnmusic.tv.core.data.api.SortedPageListDto
+import com.fnmusic.tv.core.data.backend.DecodedPage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -16,13 +16,14 @@ class MusicRepositoryPageKeyTest {
     }
 
     @Test fun `requested television page size controls continuation`() {
-        val response = SortedPageListDto(
-            list = List(12) { "artist-$it" },
+        val response = DecodedPage(
+            items = List(12) { "artist-$it" },
             total = 345,
+            sort = "",
         )
 
-        val seventhPage = response.toDomainPage(page = 7, pageSize = 12) { it }
-        val lastPage = response.toDomainPage(page = 29, pageSize = 12) { it }
+        val seventhPage = response.toDomainPage(page = 7, pageSize = 12)
+        val lastPage = response.toDomainPage(page = 29, pageSize = 12)
 
         assertEquals(12, seventhPage.pageSize)
         assertTrue(seventhPage.hasNext)

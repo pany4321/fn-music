@@ -10,15 +10,13 @@ import com.fnmusic.tv.core.data.security.SecureTokenStore
 import com.fnmusic.tv.core.data.security.StoredLoginProfile
 import com.fnmusic.tv.core.data.security.TokenStore
 import com.fnmusic.tv.core.data.server.ConnectionAccess
-import com.fnmusic.tv.core.data.server.ConnectionResolver
-import com.fnmusic.tv.core.data.server.ConnectionTarget
-import com.fnmusic.tv.core.data.server.NormalizedServer
+import com.fnmusic.tv.core.data.server.FnOsConnector
+import com.fnmusic.tv.core.data.server.ServerConnection
+import com.fnmusic.tv.core.data.server.ServerConnector
 import com.fnmusic.tv.core.data.server.ServerUrlNormalizer
-import com.fnmusic.tv.core.data.server.ServerUrlResult
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
-import com.fnmusic.tv.core.model.PlaybackCredentials
-import com.fnmusic.tv.core.model.Playlist
+import com.fnmusic.tv.core.model.PlaybackAuth
 import com.fnmusic.tv.core.model.ServerIdentity
 import com.fnmusic.tv.core.model.User
 import java.io.IOException
@@ -43,9 +41,7 @@ data class LoginHistoryEntry(
 
 /** Remembered playback credentials for media-button resume; read-only projection. */
 data class PersistedPlaybackAuth(
-    val rawAuthorization: String,
-    val accessCodeHeader: String?,
-    val relayMode: Boolean,
+    val headers: Map<String, String>,
 )
 
 data class LoginDraft(
@@ -94,7 +90,14 @@ class SessionRepository internal constructor(
     private var secureSessionUnreadable = false
     @Volatile private var securePayload = SecureSessionPayload()
     private var connectionAccess = ConnectionAccess()
-    private var api: TrimMusicApi? = null
+    private var connection: ServerConnection? = null
+
+    /**
+     * 与具体服务器形态相关的一切（地址解析、安全码、FNID 中继、登录、播放请求头）都在
+     * connector 里；接入 Jellyfin 时换成按会话类型选择的实现即可。
+     */
+    private val connector: ServerConnector = FnOsConnector(clientFactory) { memoryToken }
+
     private val authVerification = Mutex()
     private val credentialsMutex = Mutex()
 
@@ -128,7 +131,7 @@ class SessionRepository internal constructor(
             } catch (cause: CancellationException) {
                 throw cause
             } catch (cause: Exception) {
-                api = null
+                connection = null
                 val error = (cause as? AppException)?.error ?: AppError.Unknown()
                 if (!cause.isRetryableRestoreFailure()) {
                     if (error == AppError.Unauthenticated || error == AppError.AccountDisabled) {
@@ -253,35 +256,43 @@ class SessionRepository internal constructor(
     }
 
     fun showLogin() {
-        api = null
+        connection = null
         _state.value = signedOut(selectedProfileId = memoryProfileId)
     }
 
     suspend fun logout() {
         try {
-            api?.logout()
+            connection?.let { connector.logout(it) }
         } finally {
             clearCurrentToken()
-            api = null
+            connection = null
             _state.value = signedOut(selectedProfileId = memoryProfileId)
         }
     }
 
-    suspend fun playlists(): List<Playlist> = authenticated { it.playlists().map { dto -> dto.toDomain() } }
-
-    fun playbackCredentials(): PlaybackCredentials {
-        val currentApi = api ?: throw AppException(AppError.Unauthenticated)
-        val current = _state.value as? SessionState.SignedIn ?: throw AppException(AppError.Unauthenticated)
-        return PlaybackCredentials(
-            currentApi.apiBase(),
-            memoryToken ?: throw AppException(AppError.Unauthenticated),
-            "${current.server.guid.value}:${current.user.guid.value}",
-            connectionAccess.encodedAccessCode,
-            connectionAccess.relayMode,
+    /**
+     * 播放器要用的会话材料：地址、请求头（由 connector 按后端组装）、缓存命名空间
+     * 与重挂判定的路径前缀。
+     */
+    fun playbackAuth(): PlaybackAuth {
+        val current = requireSignedIn()
+        val token = memoryToken ?: throw AppException(AppError.Unauthenticated)
+        return PlaybackAuth(
+            apiBase = current.api.apiBase(),
+            headers = connector.playbackHeaders(
+                token = token,
+                encodedAccessCode = connectionAccess.encodedAccessCode,
+                relayMode = connectionAccess.relayMode,
+            ),
+            cacheNamespace = cacheNamespace(),
+            streamPathPrefix = connector.streamPathPrefix,
         )
     }
 
-    internal fun requireApi(): TrimMusicApi = api ?: throw AppException(AppError.Unauthenticated)
+    private fun requireSignedIn(): ServerConnection =
+        connection ?: throw AppException(AppError.Unauthenticated)
+
+    internal fun requireApi(): TrimMusicApi = connection?.api ?: throw AppException(AppError.Unauthenticated)
 
     fun cacheNamespace(): String {
         val current = _state.value as? SessionState.SignedIn ?: throw AppException(AppError.Unauthenticated)
@@ -312,7 +323,7 @@ class SessionRepository internal constructor(
     }
 
     suspend fun verifyCurrentSession(): Boolean {
-        val current = api ?: return false
+        val current = connection?.api ?: return false
         return verifyCurrentSession(current)
     }
 
@@ -352,11 +363,13 @@ class SessionRepository internal constructor(
                 ConnectionAccess.from(code, relayMode = false).encodedAccessCode
             }
         val relayMode = profile?.relayMode ?: savedRelayMode
-        return PersistedPlaybackAuth(token, accessCodeHeader, relayMode)
+        return PersistedPlaybackAuth(
+            headers = connector.playbackHeaders(token, accessCodeHeader, relayMode),
+        )
     }
 
     private suspend fun verifyCurrentSession(candidate: TrimMusicApi): Boolean = authVerification.withLock {
-        if (api !== candidate) return@withLock api != null
+        if (connection?.api !== candidate) return@withLock connection != null
         try {
             candidate.me()
             true
@@ -372,12 +385,16 @@ class SessionRepository internal constructor(
 
     private suspend fun restoreAttempt(targetServer: String, profile: StoredLoginProfile?) {
         val accessCode = profile?.accessCode.orEmpty().ifBlank { memoryAccessCode.orEmpty() }
-        val connected = connect(targetServer, useHttps = false, accessCode, profile?.relayMode ?: savedRelayMode)
+        val connected = connector.connect(
+            input = targetServer,
+            useHttps = false,
+            accessCode = accessCode,
+            restoredRelayMode = profile?.relayMode ?: savedRelayMode,
+        )
         val token = memoryToken
         if (token != null) {
             try {
-                val user = connected.api.me().toDomain()
-                completeSignIn(connected, user)
+                completeSignIn(connected, connector.me(connected))
                 return
             } catch (cause: AppException) {
                 if (cause.error != AppError.Unauthenticated || profile == null) throw cause
@@ -406,8 +423,8 @@ class SessionRepository internal constructor(
         restoredRelayMode: Boolean? = null,
         existingProfileId: String? = null,
     ) {
-        val connected = connect(serverInput, useHttps, accessCode, restoredRelayMode)
-        val result = connected.api.login(username, passwordHash, deviceId)
+        val connected = connector.connect(serverInput, useHttps, accessCode, restoredRelayMode)
+        val result = connector.login(connected, username, passwordHash, deviceId)
         memoryToken = result.userToken
         memoryAccessCode = accessCode.takeIf(String::isNotBlank)
         rememberedCredentialsLoaded = true
@@ -438,40 +455,16 @@ class SessionRepository internal constructor(
         completeSignIn(connected, result.user.toDomain())
     }
 
-    private fun completeSignIn(connected: ConnectedServer, user: User) {
-        api = connected.api
+    private fun completeSignIn(connected: ServerConnection, user: User) {
+        connection = connected
         connectionAccess = connected.access
-        _state.value = SessionState.SignedIn(connected.server, user)
+        _state.value = SessionState.SignedIn(connected.identity, user)
     }
 
     private suspend fun invalidateSession(error: AppError) {
         clearCurrentToken()
-        api = null
+        connection = null
         _state.value = signedOut(error, memoryProfileId)
-    }
-
-    private suspend fun connect(
-        input: String,
-        useHttps: Boolean,
-        accessCode: String,
-        restoredRelayMode: Boolean? = null,
-    ): ConnectedServer {
-        try {
-            val client = clientFactory()
-            val resolver = ConnectionResolver(client)
-            val target = if (restoredRelayMode == null) {
-                resolver.resolve(input, useHttps)
-            } else {
-                val normalized = (ServerUrlNormalizer.normalize(input, useHttps) as? ServerUrlResult.Valid)?.server
-                    ?: throw AppException(AppError.Unknown("invalid_server"))
-                ConnectionTarget(normalized, restoredRelayMode)
-            }
-            val access = resolver.verifyAccessCode(target, accessCode)
-            val candidate = TrimMusicApi(target.server, client, { memoryToken }, access)
-            return ConnectedServer(target.server, candidate.systemConfig().toDomain(), candidate, access)
-        } catch (cause: IOException) {
-            throw AppException(AppError.NetworkUnavailable, cause)
-        }
     }
 
     private suspend fun clearCurrentToken() {
@@ -577,13 +570,6 @@ class SessionRepository internal constructor(
         if (exception.error != AppError.NetworkUnavailable) return false
         return exception.isRetryableRequestFailure || exception.cause is IOException
     }
-
-    private data class ConnectedServer(
-        val normalized: NormalizedServer,
-        val server: ServerIdentity,
-        val api: TrimMusicApi,
-        val access: ConnectionAccess,
-    )
 
     private companion object {
         const val SERVER = "server"

@@ -35,13 +35,18 @@ class PlaybackServiceConfigurationTest {
     }
 
     @Test
-    fun `playback request headers include access code and relay cookies`() {
-        val headers = playbackRequestHeaders("token", "encoded-code", relayMode = true)
+    fun `auth bundle carries request headers verbatim across the session boundary`() {
+        val headers = mapOf(
+            "Authorization" to "token",
+            "Cookie" to "music-token=token; mode=relay",
+            "x-access-code" to "encoded-code",
+            "x-access-source" to "app",
+        )
 
-        assertEquals("token", headers["Authorization"])
-        assertEquals("music-token=token; mode=relay", headers["Cookie"])
-        assertEquals("encoded-code", headers["x-access-code"])
-        assertEquals("app", headers["x-access-source"])
+        val bundle = android.os.Bundle().apply { putRequestHeaders(headers) }
+
+        assertEquals(headers, bundle.requestHeaders())
+        assertEquals(headers, bundle.requestHeaders())
     }
 
     @Test

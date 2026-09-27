@@ -2,8 +2,12 @@ package com.fnmusic.tv.core.data.repository
 
 import com.fnmusic.tv.core.data.api.LyricDto
 import com.fnmusic.tv.core.data.api.LyricListDto
+import com.fnmusic.tv.core.data.backend.selectLyricDocument
 import com.fnmusic.tv.core.model.LyricDocument
+import com.fnmusic.tv.core.lyrics.hasUsableLines
 import com.fnmusic.tv.core.lyrics.lyricText
+import com.fnmusic.tv.core.lyrics.parseLyrics
+import com.mocharealm.accompanist.lyrics.core.model.SyncedLyrics
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -26,7 +30,9 @@ class MusicRepositoryLyricsTest {
             preferred = "yrc",
         )
 
-        val (document, syncedLyrics) = decodeLyrics(response)
+        // 后端只负责挑出歌词版本，LRC 解析在仓库侧（与运行期同一条链路）。
+        val document = selectLyricDocument(response)
+        val syncedLyrics = document?.let { parseLyrics(it.content) }?.takeIf(SyncedLyrics::hasUsableLines)
 
         assertFalse(document!!.isLrc)
         assertNotNull(syncedLyrics)
