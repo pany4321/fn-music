@@ -176,6 +176,20 @@
 - **观察（未定因）**：飞牛档案在某次 `adb install -r` 后从登录历史里消失（登录页回到空表单），
   同期 Jellyfin 档案跨多次安装都保持；没找到确定原因，下次真机验收留意是否复现。
 
+#### 真机环境坑（接续会话必读）
+
+- **手机锁屏时 `adb install` 必然失败**（`Failure [-99]`，ColorOS 要弹安装确认但锁屏下弹不出来）。
+  实测：`mWakefulness=Dozing` / 锁屏 → 一律 -99；先 `input keyevent 26` 唤醒并**解锁**再装。
+  `adb shell svc power stayon true` 可以让屏幕在充电时不熄灭，减少踩这个坑。
+- **当前设备状态（2026-09-28 00:30）**：为了拿到"干净登录页"做了卸载重装，卸载成功但重装被锁屏拦住，
+  所以 **debug 包 `com.fnmusic.tv.debug` 目前不在手机上**（release 包 `com.fnmusic.tv` 未动）。
+  解锁手机后在仓库根执行：
+  `adb install app/build/outputs/apk/sideload/debug/fn-music-tv-1.5.1-sideload-debug.apk`
+  （或直接下 GitHub Release 的 1.5.1 universal APK）即可恢复。
+- **登录页 D-pad 两个坑**（这次在飞牛登录上卡了很久）：① 输入框不在编辑态时按 BACK 会**直接退出登录页**；
+  ② 登录按钮在 `credentialsReady=false` 时是 disabled，此时从 HTTPS 按 DOWN **不会移动焦点**，
+  再按 CENTER 会把 HTTPS 开关打开。填完表单后建议先截图确认焦点在「登录」再按确认。
+
 ### Step 2b —— Jellyfin 接线 ✅ 已完成（`27a63a7` + HLS/文案修复）
 6. ✅ `JellyfinConnector`：识别 + 登录 + 令牌持久化都做了（`kind` 字段兼容老数据；namespace 仍用
    `serverGUID:userGUID`，Jellyfin 侧 serverGUID 取 `Public Info` 的 `Id`）；差异见 §3.2。
