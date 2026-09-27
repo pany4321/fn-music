@@ -11,6 +11,8 @@ import com.fnmusic.tv.core.data.api.PlaylistDetailDto
 import com.fnmusic.tv.core.data.api.PlaylistDto
 import com.fnmusic.tv.core.data.api.SharedLibraryDto
 import com.fnmusic.tv.core.data.api.SortedPageListDto
+import com.fnmusic.tv.core.data.backend.FnOsMusicBackend
+import com.fnmusic.tv.core.data.backend.MusicBackend
 import com.fnmusic.tv.core.data.api.TrackDto
 import com.fnmusic.tv.core.data.api.TrackMetadataDto
 import com.fnmusic.tv.core.data.api.isRetryableRequestFailure
@@ -186,6 +188,8 @@ class MusicRepository internal constructor(
     metadataCapacityBytes: Int,
     repositoryScope: CoroutineScope,
     onlineLyricsMatcher: suspend (LyricsMatchRequest) -> LyricsMatchResult,
+    /** 当前服务器后端：抽取阶段默认飞牛，后续按会话的服务器类型选择。 */
+    private val backend: MusicBackend = FnOsMusicBackend(session),
 ) {
     constructor(
         context: Context,
@@ -352,14 +356,13 @@ class MusicRepository internal constructor(
      * [randomTracks] 为了拿到 count 首会并发拉 count 页，用在只需要 3 张封面的
      * 卡片上过重（17 次请求换 3 张封面），这里改成单页随机。
      */
-    suspend fun randomTrackSample(size: Int = 24): List<Track> {
-        val pageSize = size.coerceAtLeast(1)
-        val probe = allTracks(page = 1, size = 1)
-        val total = probe.total ?: return probe.items
-        if (total <= pageSize) return allTracks(page = 1, size = pageSize).items
-        val lastPage = (total + pageSize - 1) / pageSize
-        return allTracks(page = Random.nextInt(1, lastPage + 1), size = pageSize).items
-    }
+    suspend fun randomTrackSample(size: Int = 24): List<Track> =
+        backend.randomTracks(size).also { tracks ->
+            // 与原实现一致：随机取到的歌也要参与收藏状态观察（否则首页随机行的红心不会随收藏变化）。
+            observeFavoriteTracks(
+                Page(items = tracks, page = 1, pageSize = tracks.size, total = tracks.size, sort = ""),
+            )
+        }
 
     suspend fun recentlyAddedTracks(page: Int, size: Int = 16) = cachedPage<TrackDto, Track>(
         sourceKey = sizedPageSourceKey("recently-added", size),
@@ -558,29 +561,26 @@ class MusicRepository internal constructor(
         if (track.accessStatus != null && track.accessStatus != 0) throw AppException(AppError.UnavailableTrack)
         val refreshed = trackMetadata(track.guid.value)
         if (refreshed.isCue) throw AppException(AppError.TranscodeUnavailable)
-        val api = session.requireApi()
         return PlaybackTrack(
             refreshed,
-            api.streamUrl(refreshed.guid.value).toString(),
-            refreshed.coverId?.let { api.coverUrl(it, CoverVariant.Player.width).toString() },
+            backend.streamPlan(refreshed).url,
+            refreshed.coverId?.let { backend.artworkUrl(it, CoverVariant.Player.width) },
         )
     }
 
-    fun prepareQueue(tracks: List<Track>): List<PlaybackTrack> {
-        val api = session.requireApi()
-        return tracks.asSequence()
+    fun prepareQueue(tracks: List<Track>): List<PlaybackTrack> =
+        tracks.asSequence()
             .filter { it.accessStatus == null || it.accessStatus == 0 }
             .filterNot(Track::isCue)
             .take(250)
             .map { track ->
                 PlaybackTrack(
                     track,
-                    api.streamUrl(track.guid.value).toString(),
-                    track.coverId?.let { api.coverUrl(it, CoverVariant.Player.width).toString() },
+                    backend.directStreamUrl(track),
+                    track.coverId?.let { backend.artworkUrl(it, CoverVariant.Player.width) },
                 )
             }
             .toList()
-    }
 
     suspend fun lyrics(trackGuid: String): Pair<LyricDocument?, SyncedLyrics?> =
         decodeLyrics(lyricResponse(trackGuid))
