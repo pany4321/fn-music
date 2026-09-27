@@ -35,3 +35,6 @@ SearchPlaybackDiagnosticTest.kt
 
 # Local scratch (screenshots, adb dumps) never gets committed
 .trellis/tmp/
+
+# 本地测试凭据（NAS / Jellyfin 的账号密码、抓包结果等）绝不入库
+.trellis/local/
