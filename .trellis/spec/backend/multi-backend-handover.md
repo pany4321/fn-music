@@ -114,7 +114,8 @@
    FLAC 徽标）、漫游（服务端 start/next）、歌词通路（无歌词曲目显示占位）、全程无 FATAL。
    **未在真机验证**：搜索、收藏写入（♡/✕）、歌单写入（新建/加歌/删歌）、主题缩放设置页、全新登录（`FnOsConnector.login` 本身）。
    → 合 main 前若要补验，按 §4 的 D-pad 流程；这几项在代码上都是薄委托 + 既有单测覆盖。
-5. ⏳ 合入 `main`（待用户确认版本与发布方式，见 §9.1 与本文开头版本安排的口径差异）。
+5. ⏳ 合入 `main`：**已与用户确认：Step 1b 单独发 `1.4.4`**（patch = 内部重构，符合 §9.1 语义），
+   1.5.0 留给 Step 2b（Jellyfin 接入）。上面第 4 条里「未在真机验证」的 5 项**留到 Step 2b 结束时的真机双后端串行验收一起跑**。
 
 ### Step 2b —— Jellyfin 接线
 5. `JellyfinConnector`：`GET /System/Info/Public` 识别 + `POST /Users/AuthenticateByName` 登录 +
