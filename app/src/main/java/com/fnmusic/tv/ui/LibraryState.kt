@@ -115,6 +115,19 @@ internal fun <T> retainLoadedList(
     initialLoadCompleted = true,
 )
 
+/**
+ * 把新条目插到保留列表最前面（按 key 去重）：新建歌单这类“立刻要看见”的场景用。
+ * 首页歌单行与全部歌单页读的是同一份保留列表，一处更新两处生效。
+ */
+internal fun <T> RetainedListSnapshot<T>.prepend(
+    items: List<T>,
+    key: (T) -> String,
+): RetainedListSnapshot<T> {
+    if (items.isEmpty()) return this
+    val incoming = items.associateBy(key)
+    return copy(entries = items + entries.filterNot { key(it) in incoming.keys }, error = null)
+}
+
 internal fun shouldLoadInitialList(snapshot: RetainedListSnapshot<*>): Boolean =
     !snapshot.initialLoadCompleted || snapshot.entries.isEmpty() && snapshot.error != null
 

@@ -32,6 +32,33 @@ class LibraryStateTest {
     )
 
     @Test
+    fun `prepend puts the new item first and keeps the previous order`() {
+        val snapshot = RetainedListSnapshot(entries = listOf("a", "b"), initialLoadCompleted = true)
+
+        val updated = snapshot.prepend(listOf("new")) { it }
+
+        assertEquals(listOf("new", "a", "b"), updated.entries)
+    }
+
+    @Test
+    fun `prepend dedupes by key so a reloaded item is not duplicated`() {
+        val snapshot = RetainedListSnapshot(entries = listOf("a", "b"), initialLoadCompleted = true)
+
+        val updated = snapshot.prepend(listOf("b")) { it }
+
+        assertEquals(listOf("b", "a"), updated.entries)
+    }
+
+    @Test
+    fun `prepend with an empty list keeps the snapshot untouched`() {
+        val snapshot = RetainedListSnapshot(entries = listOf("a"), initialLoadCompleted = true)
+
+        val updated = snapshot.prepend(emptyList<String>()) { it }
+
+        assertEquals(listOf("a"), updated.entries)
+    }
+
+    @Test
     fun `removing a track drops it from tracks pages and totals`() {
         val snapshot = snapshotWith("a", "b", "c")
 

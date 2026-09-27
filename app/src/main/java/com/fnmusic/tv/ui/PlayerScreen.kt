@@ -1787,14 +1787,20 @@ private fun PlayerSideActionButton(
                 },
             scale = ButtonDefaults.scale(focusedScale = 1.1f),
             colors = ButtonDefaults.colors(
-                containerColor = if (emphasized) FnColors.AccentSoft else Color.Transparent,
+                // emphasized 只有「退出漫游」用到：实心主题主色底 + 深色图标，
+                // 与“已选中”语义一致（此前是主色柔和底 + 偏白图标，不够醒目）。
+                containerColor = if (emphasized) FnColors.Coral else Color.Transparent,
                 contentColor = when {
                     // 收藏态用主题主色，和其它“已选中”控件一致（不再用固定的红）。
                     selected -> FnColors.Coral
-                    emphasized -> lerp(FnColors.Text, FnColors.Coral, 0.25f)
+                    emphasized -> FnColors.Background
                     else -> FnColors.Text
                 },
-                focusedContainerColor = if (selected) FnColors.Text else FnColors.Coral,
+                focusedContainerColor = when {
+                    selected -> FnColors.Text
+                    emphasized -> FnColors.AccentBright
+                    else -> FnColors.Coral
+                },
                 focusedContentColor = if (selected) FnColors.Coral else FnColors.Background,
                 pressedContainerColor = if (selected) FnColors.Text else FnColors.Coral,
                 pressedContentColor = if (selected) FnColors.Coral else FnColors.Background,
@@ -2376,6 +2382,8 @@ private fun AddToPlaylistDialog(
     var createError by remember { mutableStateOf<String?>(null) }
     val addActionFocus = remember { FocusRequester() }
     val rowFocuses = remember(playlists) { List(playlists.size) { FocusRequester() } }
+    // 首页歌单行与全部歌单页读这份保留列表：新建后写穿，列表立刻能看到新歌单。
+    val playlistRetainedState = LocalLibraryRetainedState.current.list<Playlist>("playlists")
 
     /** 新建歌单 → 直接把当前歌曲加进去；两步分开报告失败原因。 */
     fun createPlaylistAndAdd(name: String) {
@@ -2393,6 +2401,11 @@ private fun AddToPlaylistDialog(
                 container.musicRepository.addToPlaylist(created.guid.value, trackGuid)
             }
             creatingBusy = false
+            // 无论添加是否成功，都把新歌单写穿到保留列表与弹窗列表：
+            // 首页歌单行 / 全部歌单页立刻出现，弹窗里也能马上选到它。
+            playlistRetainedState.snapshot =
+                playlistRetainedState.snapshot.prepend(listOf(created)) { it.guid.value }
+            playlists = (listOf(created) + playlists).distinctBy { it.guid.value }
             if (added.isSuccess) {
                 creatingPlaylist = false
                 message = "已创建「${created.name}」并添加"
@@ -2401,7 +2414,6 @@ private fun AddToPlaylistDialog(
             } else {
                 // 歌单已建好：回到列表并把它排在前面，让用户手动再点一次。
                 creatingPlaylist = false
-                playlists = (listOf(created) + playlists).distinctBy { it.guid.value }
                 message = "已创建「${created.name}」，但添加失败，请在列表中选择它"
             }
         }

@@ -5194,22 +5194,31 @@ private fun SearchRoute(
         } else {
             Spacer(Modifier.height(18.dp))
         }
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+        // 懒加载：搜索结果（歌手 + 专辑 + 歌曲最多约 60 行）只在可见时组合与解码，
+        // 老电视（Android 6、堆 96–192MB）不会再因为一次性铺开大量封面而 OOM。
+        LazyColumn(
+            Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             when {
-                loading -> Text("正在搜索…", color = FnColors.Muted, fontSize = 16.sp)
+                loading -> item(key = "loading") {
+                    Text("正在搜索…", color = FnColors.Muted, fontSize = 16.sp)
+                }
                 // 用实际搜索词判断，而不是输入框文本：历史胶囊直搜时输入框保持为空。
-                searched.isBlank() -> Text(
-                    "按确认键呼出键盘输入，将同时匹配歌手、专辑和歌曲",
-                    color = FnColors.Muted,
-                    fontSize = 16.sp,
-                )
-                tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() ->
-                    Text("没有找到与「" + searched + "」匹配的内容", color = FnColors.Muted, fontSize = 16.sp)
+                searched.isBlank() -> item(key = "hint") {
+                    Text(
+                        "按确认键呼出键盘输入，将同时匹配歌手、专辑和歌曲",
+                        color = FnColors.Muted,
+                        fontSize = 16.sp,
+                    )
+                }
+                tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() -> item(key = "empty") {
+                    Text(
+                        "没有找到与「" + searched + "」匹配的内容",
+                        color = FnColors.Muted,
+                        fontSize = 16.sp,
+                    )
+                }
                 else -> {
                     val firstSection = when {
                         artists.isNotEmpty() -> "artist"
@@ -5219,7 +5228,10 @@ private fun SearchRoute(
                     // 初始焦点只挂在第一个非空分区的首项上；三处同时挂载会导致
                     // 后挂载者生效，遥控器按下后跳过歌手列。
                     if (artists.isNotEmpty()) {
-                        Text("歌手", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        item(key = "artists-title") {
+                            Text("歌手", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                        item(key = "artists-row") {
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -5267,9 +5279,13 @@ private fun SearchRoute(
                                 )
                             }
                         }
+                        }
                     }
                     if (albums.isNotEmpty()) {
-                        Text("专辑", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        item(key = "albums-title") {
+                            Text("专辑", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                        item(key = "albums-row") {
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -5316,10 +5332,13 @@ private fun SearchRoute(
                                 )
                             }
                         }
+                        }
                     }
                     if (tracks.isNotEmpty()) {
-                        Text("歌曲", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        tracks.forEachIndexed { index, track ->
+                        item(key = "tracks-title") {
+                            Text("歌曲", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                        itemsIndexed(tracks, key = { _, track -> "track:" + track.guid.value }) { index, track ->
                             TrackResultRow(
                                 index = index + 1,
                                 title = track.title,
@@ -5352,11 +5371,13 @@ private fun SearchRoute(
                             )
                         }
                         if (tracks.size >= SEARCH_TRACK_PAGE_SIZE) {
-                            Text(
-                                "歌曲较多，仅显示前 ${tracks.size} 首，可换更精确的关键词",
-                                color = FnColors.Muted,
-                                fontSize = 14.sp,
-                            )
+                            item(key = "tracks-hint") {
+                                Text(
+                                    "歌曲较多，仅显示前 ${tracks.size} 首，可换更精确的关键词",
+                                    color = FnColors.Muted,
+                                    fontSize = 14.sp,
+                                )
+                            }
                         }
                     }
                 }
