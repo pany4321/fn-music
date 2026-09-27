@@ -1,6 +1,6 @@
 # 多后端改造路线图与设计决策
 
-面向 `feature/multi-backend` 分支（目标 1.5.0）。已完成部分见 git 历史与
+面向 `feature/multi-backend` 分支（1.5.0 = 多后端骨架，已发布；1.5.1 = Jellyfin 接入）。已完成部分见 git 历史与
 `.trellis/spec/backend/jellyfin-contracts.md`（Jellyfin 实测契约）。
 
 ## 已完成
@@ -83,6 +83,6 @@ interface MusicBackend {
       注释里按这个语义写，避免后来者以为要统一格式。
 
 ### 收尾
-11. 真机双后端串行验收（同一台设备跑飞牛与 Jellyfin 全流程）→ 合入 `main` → 发 **1.5.0**。
+11. 真机双后端串行验收（同一台设备跑飞牛与 Jellyfin 全流程）→ 合入 `main` → 在 1.5.0 基础上升版发 **1.5.1**。
 12. `release/1.4` 维护分支保留 1.4.x 小修；改名/换包名（音乐坞 / `com.musicdock.tv`）
     单独一次 2.0.0 发布。
