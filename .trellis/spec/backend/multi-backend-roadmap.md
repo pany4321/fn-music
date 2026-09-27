@@ -76,6 +76,11 @@ interface MusicBackend {
    `PlaybackSource.Hls` + `media3-exoplayer-hls` 建 HLS media item。
 10. Jellyfin 的歌单/收藏/最近播放接到既有缓存与 `favoriteState` 状态机上
     （`PlaylistItemId` → `Track.playlistEntryId`）。
+    - 计划文档（`.zcode/plans/…`）里还剩两处没落地，别漏：`MusicBackend` 增加
+      `probe(origin): ServerIdentity?`（登录页识别类型/版本用）；`Track` 增加
+      `playlistEntryId: String?` 承载 Jellyfin 的歌单条目 id。
+    - `QueueSource.sort` 的定位是"后端不透明游标"（飞牛沿用现有排序串，Jellyfin 用自家键），
+      注释里按这个语义写，避免后来者以为要统一格式。
 
 ### 收尾
 11. 真机双后端串行验收（同一台设备跑飞牛与 Jellyfin 全流程）→ 合入 `main` → 发 **1.5.0**。
