@@ -293,6 +293,8 @@ internal fun LoginScreen(
         mutableStateOf(selectedDraft?.kind ?: ServerKind.FnOs)
     }
     var kindHint by remember { mutableStateOf<String?>(null) }
+    // 从「已有音乐源」带入表单后的提示：告诉用户"已经填好了，确认后点连接"。
+    var prefillHint by remember { mutableStateOf<String?>(null) }
     val fnOsKindFocus = remember { FocusRequester() }
     val jellyfinKindFocus = remember { FocusRequester() }
     var loginAttempted by remember { mutableStateOf(false) }
@@ -390,6 +392,7 @@ internal fun LoginScreen(
                 TvTextField(
                     value = server,
                     onValueChange = {
+                        prefillHint = null
                         server = it
                         Regex("^(https?)://", RegexOption.IGNORE_CASE).find(it.trim())
                             ?.groupValues?.get(1)
@@ -429,6 +432,7 @@ internal fun LoginScreen(
                 TvTextField(
                     value = username,
                     onValueChange = {
+                        prefillHint = null
                         username = it
                         selectedProfileId = null
                         hasSavedPassword = false
@@ -538,9 +542,10 @@ internal fun LoginScreen(
                 else -> ""
             }
             Text(
-                kindHint ?: statusMessage,
+                kindHint ?: prefillHint ?: statusMessage,
                 color = when {
                     kindHint != null -> FnColors.Warning
+                    prefillHint != null -> FnColors.Teal
                     error == null && !serverInvalid -> FnColors.Warning
                     else -> FnColors.Coral
                 },
@@ -648,6 +653,8 @@ internal fun LoginScreen(
                 }
             },
             onSelect = { entry ->
+                // 统一逻辑：点一条 = 把这条源**带入表单**（类型/地址/账号/安全码），
+                // 不自动登录、不自动切换 —— 连接与否由下面的「连接」按钮决定。
                 val draft = historyDraft(entry.id) ?: return@SourcePickerDialog
                 server = draft.server
                 https = draft.useHttps
@@ -656,22 +663,12 @@ internal fun LoginScreen(
                 password = ""
                 selectedProfileId = draft.profileId
                 hasSavedPassword = draft.hasSavedPassword
+                sourceKind = draft.kind
                 showServerHistory = false
-                submitting = true
-                loginAttempted = true
+                loginAttempted = false
                 error = null
-                scope.launch {
-                    runCatching {
-                        onHistoryLogin(
-                            draft.profileId,
-                            draft.accessCode.toCharArray(),
-                            rememberLogin,
-                        )
-                    }.onFailure {
-                        error = (it as? AppException)?.error ?: AppError.Unknown()
-                    }
-                    submitting = false
-                }
+                kindHint = null
+                prefillHint = "已带入「${sourceTitle(entry)}」，确认后点“连接”"
             },
         )
     }

@@ -70,6 +70,7 @@ class PlayerOverlayFocusTest {
                     onSelect = selectedQueueIndex::set,
                     onRemove = {},
                     onInteraction = {},
+                    onClose = {},
                 )
             }
         }
@@ -101,6 +102,7 @@ class PlayerOverlayFocusTest {
                     onSelect = {},
                     onRemove = {},
                     onInteraction = {},
+                    onClose = {},
                 )
             }
         }
@@ -153,6 +155,7 @@ class PlayerOverlayFocusTest {
                     onSelect = {},
                     onRemove = {},
                     onInteraction = {},
+                    onClose = {},
                 )
             }
         }
@@ -179,6 +182,7 @@ class PlayerOverlayFocusTest {
                     onSelect = {},
                     onRemove = removedQueueIndex::set,
                     onInteraction = {},
+                onClose = {},
                 )
             }
         }
@@ -328,6 +332,7 @@ class PlayerOverlayFocusTest {
                     onSelect = {},
                     onRemove = {},
                     onInteraction = {},
+                    onClose = {},
                 )
             }
         }
@@ -530,6 +535,7 @@ class PlayerOverlayFocusTest {
                         onSelect = {},
                         onRemove = {},
                         onInteraction = {},
+                    onClose = {},
                     )
                 } else {
                     PlayerControlHarness(

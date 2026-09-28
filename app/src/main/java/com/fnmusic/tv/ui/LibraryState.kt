@@ -32,7 +32,11 @@ internal sealed interface LibraryRoute {
     data class AlbumDetail(val album: Album) : LibraryRoute
     data class Player(val track: Track?) : LibraryRoute
     data object Settings : LibraryRoute
-    data object SwitchAccount : LibraryRoute
+    /**
+     * 「连接音乐源」表单页。[sourceId] 非空时预填这个已保存音乐源（类型/地址/账号/安全码），
+     * 用于"从音乐源列表选一条 → 带入表单"；为空则是纯新增。
+     */
+    data class SwitchAccount(val sourceId: String? = null) : LibraryRoute
 }
 
 internal data class RetainedPageSnapshot<T>(
@@ -344,7 +348,7 @@ internal fun LibraryRoute.storageKey(): String = when (this) {
     is LibraryRoute.AlbumDetail -> "album:${album.guid.value}"
     is LibraryRoute.Player -> "player"
     LibraryRoute.Settings -> "settings"
-    LibraryRoute.SwitchAccount -> "switch-account"
+    is LibraryRoute.SwitchAccount -> "switch-account"
 }
 
 internal fun LibraryRoute.retainedStateKeys(): Set<String> = when (this) {

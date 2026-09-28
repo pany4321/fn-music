@@ -18,7 +18,7 @@ import org.junit.Test
 class LoginHistorySmokeTest {
     @get:Rule val composeRule = createComposeRule()
 
-    @Test fun historySelectionLogsInOnceAndDeleteRemainsIndependent() {
+    @Test fun historySelectionFillsTheFormWithoutLoggingIn() {
         val loginCount = AtomicInteger()
         val deleteCount = AtomicInteger()
         val selectedProfile = AtomicReference<String>()
@@ -29,7 +29,7 @@ class LoginHistorySmokeTest {
                     savedServer = "",
                     recentServers = emptyList(),
                     initialError = null,
-                    onLogin = { _, _, _, password, _, accessCode ->
+                    onLogin = { _, _, _, password, _, accessCode, _ ->
                         password.fill('\u0000')
                         accessCode.fill('\u0000')
                     },
@@ -54,12 +54,15 @@ class LoginHistorySmokeTest {
         }
 
         composeRule.onNodeWithContentDescription("历史").performClick()
-        composeRule.onNodeWithText("飞牛音乐").assertIsDisplayed()
+        // 行标题（服务器名或类型名）与副标题：用副标题断言，避免和表单上的"飞牛音乐"类型按钮撞名
         composeRule.onNodeWithText("飞牛音乐 · 10.0.0.115:5666 · test").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("音乐源：飞牛音乐").performClick()
-        composeRule.waitUntil(5_000) { loginCount.get() == 1 }
 
-        assertEquals("profile-1", selectedProfile.get())
+        // 统一逻辑：点一条只把该源带进表单（地址/账号被回填），不自动登录。
+        composeRule.onNodeWithText("10.0.0.115:5666").assertIsDisplayed()
+        composeRule.waitForIdle()
+        assertEquals(0, loginCount.get())
+        assertEquals(null, selectedProfile.get())
         assertEquals(0, deleteCount.get())
     }
 
@@ -73,7 +76,7 @@ class LoginHistorySmokeTest {
                     savedServer = "",
                     recentServers = emptyList(),
                     initialError = null,
-                    onLogin = { _, _, _, password, _, accessCode ->
+                    onLogin = { _, _, _, password, _, accessCode, _ ->
                         password.fill('\u0000')
                         accessCode.fill('\u0000')
                     },

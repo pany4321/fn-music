@@ -92,6 +92,8 @@ internal fun SettingsScreen(
     onBack: () -> Unit,
     /** 去"添加音乐源"表单（登录页复用形态）。 */
     onAddSource: () -> Unit = {},
+    /** 从音乐源列表选了一条：打开同一个表单并预填该源。 */
+    onEditSource: (String) -> Unit = {},
 ) {
     val preferences by container.appPreferences.state.collectAsStateWithLifecycle()
     val updateState by container.updateController.state.collectAsStateWithLifecycle()
@@ -116,7 +118,6 @@ internal fun SettingsScreen(
     val addSourceFocus = remember { FocusRequester() }
     var sourcePickerVisible by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
-    var switchingSourceId by remember { mutableStateOf<String?>(null) }
     var testingSourceId by remember { mutableStateOf<String?>(null) }
     var sourceStatuses by remember { mutableStateOf<Map<String, SourceRowStatus>>(emptyMap()) }
     LaunchedEffect(Unit) {
@@ -158,22 +159,10 @@ internal fun SettingsScreen(
                 }
             },
             onSelect = { entry ->
-                switchingSourceId = entry.id
-                sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.switching())
-                coroutineScope.launch {
-                    runCatching {
-                        container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
-                    }.onFailure { failure ->
-                        Toast.makeText(
-                            context,
-                            "切换失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                    switchingSourceId = null
-                    sourceStatuses = sourceStatuses - entry.id
-                    sourcePickerVisible = false
-                }
+                // 与「我的」页、登录页同一套逻辑：点一条只把该源带进「连接音乐源」表单，
+                // 由用户点「连接」完成切换。
+                sourcePickerVisible = false
+                onEditSource(entry.id)
             },
             onDelete = { entry ->
                 coroutineScope.launch {

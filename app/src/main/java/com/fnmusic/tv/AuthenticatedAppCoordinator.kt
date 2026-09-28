@@ -3,6 +3,7 @@ package com.fnmusic.tv
 import android.app.Application
 import android.content.Intent
 import com.fnmusic.tv.core.data.preferences.AppPreferences
+import com.fnmusic.tv.core.data.repository.LoginDraft
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.MusicRepository
 import com.fnmusic.tv.core.data.repository.SessionRepository
@@ -29,6 +30,8 @@ internal interface AuthenticatedAppActions {
     fun activeSourceId(): String?
     /** 测试一个已保存的音乐源是否可用（连接 + 凭据校验，且不改动当前会话）。 */
     suspend fun testSource(profileId: String): SourceTestResult
+    /** 已保存音乐源的表单草稿：列表点一条后用它把类型/地址/账号/安全码带进「连接音乐源」。 */
+    fun sourceDraft(profileId: String): LoginDraft?
     suspend fun verifyCurrentSession()
     suspend fun retrySessionRestore()
     suspend fun showLogin()
@@ -156,6 +159,8 @@ internal class AuthenticatedAppCoordinator(
 
     override suspend fun testSource(profileId: String): SourceTestResult =
         sessionRepository.testSource(profileId)
+
+    override fun sourceDraft(profileId: String): LoginDraft? = sessionRepository.loginDraft(profileId)
 
     override suspend fun deleteSavedLoginEntry(profileId: String) {
         sessionRepository.deleteLoginHistory(profileId)

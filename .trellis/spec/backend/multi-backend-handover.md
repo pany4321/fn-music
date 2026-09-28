@@ -333,6 +333,21 @@
   歌单条目自带图（实测 1 个歌单带 Primary）。
 - 从开发机直连 NAS 不通、经本机代理返回 502：**服务端核查只能在手机 App 里做**（或用户开代理时再试）。
 
+#### 1.7.3 音乐源交互统一（用户明确要求）
+
+- **统一规则**：任何音乐源列表（表单里的「已有音乐源」；「我的」/设置页的「音乐源」）点一条 =
+  **带入「连接音乐源」表单**（沿用 `LoginDraft` 预填类型/地址/账号/安全码，密码留空走免密续期），
+  由用户点「连接」确认；列表不再直接切换。
+- 实现要点：`LibraryRoute.SwitchAccount` 变成带 `sourceId` 的 data class（`storageKey` 不变）；
+  路由把 id 作为 `initialSelectedProfileId` 传给表单、并把 `historyDraft` 接到
+  `AuthenticatedAppActions.sourceDraft` —— 之前漏了这一步，所以点列表**完全没反应**（正则匹配
+  失败即 `return`）。UI 侧两处入口都改成 `onEditSource(id)` → `open(SwitchAccount(id))`。
+- 契约与 `app/src/androidTest/.../LoginHistorySmokeTest.kt` 同步成"回填表单 + 登录次数为 0"。
+  顺手修掉了 androidTest 里既有的编译错误（`onLogin` 少一个 `ServerKind`、`PlaybackQueueOverlay`
+  少 `onClose`）——这些测试之前一直编不过，CI 又不跑它们，所以没人发现。
+- 「音乐库」封面（全部歌曲入口卡 73dp + 详情页头 184dp）改用静态图 `cover_fallback_library.png`
+  （用户提供）；`HomeArtworkKind` 五类现在全部走静态图，Canvas 画法留作后备。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报

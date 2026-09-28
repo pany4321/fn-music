@@ -282,7 +282,8 @@ internal fun AuthenticatedApp(
             onArtist = { open(LibraryRoute.ArtistDetail(it)) },
             onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
             onSettings = { open(LibraryRoute.Settings) },
-            onSwitchAccount = { open(LibraryRoute.SwitchAccount) },
+            onSwitchAccount = { open(LibraryRoute.SwitchAccount()) },
+            onEditSource = { sourceId -> open(LibraryRoute.SwitchAccount(sourceId)) },
             onPlayer = { open(LibraryRoute.Player(null)) },
         )
         LibraryRoute.AllPlaylists -> AllPlaylists(container, onBack = back, onOpen = { open(LibraryRoute.PlaylistDetail(it)) })
@@ -458,19 +459,28 @@ internal fun AuthenticatedApp(
             },
             onBack = back,
         )
-                LibraryRoute.Settings -> SettingsScreen(
-                    container,
-                    onBack = back,
-                    onAddSource = { open(LibraryRoute.SwitchAccount) },
-                )
-                LibraryRoute.SwitchAccount -> SwitchAccountRoute(container, onBack = back)
+        LibraryRoute.Settings -> SettingsScreen(
+            container,
+            onBack = back,
+            onAddSource = { open(LibraryRoute.SwitchAccount()) },
+            onEditSource = { sourceId -> open(LibraryRoute.SwitchAccount(sourceId)) },
+        )
+        is LibraryRoute.SwitchAccount -> SwitchAccountRoute(
+            container = container,
+            initialSourceId = route.sourceId,
+            onBack = back,
+        )
             }
         }
     }
 }
 
 @Composable
-private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
+private fun SwitchAccountRoute(
+    container: AuthenticatedAppDependencies,
+    initialSourceId: String? = null,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     var history by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     LaunchedEffect(Unit) {
@@ -483,6 +493,9 @@ private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: 
         recentServers = emptyList(),
         initialError = null,
         loginHistory = history,
+        // 从音乐源列表"带入"来的那条：表单会按它预填类型/地址/账号/安全码，密码留空。
+        initialSelectedProfileId = initialSourceId,
+        historyDraft = container.authenticatedActions::sourceDraft,
         onBack = onBack,
         onLogin = { server, https, user, password, remember, accessCode, kind ->
             try {
@@ -1698,6 +1711,8 @@ private fun BrowseMy(
     onAlbum: (Album) -> Unit,
     onSettings: () -> Unit,
     onSwitchAccount: () -> Unit,
+    /** 从音乐源列表选了一条：打开「连接音乐源」表单并预填该源。 */
+    onEditSource: (String) -> Unit,
     onPlayer: () -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
@@ -1705,7 +1720,6 @@ private fun BrowseMy(
     val coroutineScope = rememberCoroutineScope()
     var sourcePickerVisible by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
-    var switchingSourceId by remember { mutableStateOf<String?>(null) }
     var testingSourceId by remember { mutableStateOf<String?>(null) }
     var sourceStatuses by remember { mutableStateOf<Map<String, SourceRowStatus>>(emptyMap()) }
     LaunchedEffect(sourcePickerVisible) {
@@ -1886,22 +1900,10 @@ private fun BrowseMy(
                 },
                 onDismiss = { sourcePickerVisible = false },
                 onSelect = { entry ->
-                    switchingSourceId = entry.id
-                    sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.switching())
-                    coroutineScope.launch {
-                        runCatching {
-                            container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
-                        }.onFailure { failure ->
-                            Toast.makeText(
-                                context,
-                                "切换失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        }
-                        switchingSourceId = null
-                        sourceStatuses = sourceStatuses - entry.id
-                        sourcePickerVisible = false
-                    }
+                    // 统一逻辑：列表只负责"选源"，点一条就把它带进「连接音乐源」表单，
+                    // 由用户在那里确认后点「连接」完成切换（不再从这里直接切换）。
+                    sourcePickerVisible = false
+                    onEditSource(entry.id)
                 },
                 onDelete = { entry ->
                     coroutineScope.launch {
@@ -4235,7 +4237,7 @@ private enum class HomeArtworkKind { Roam, Favorites, Recent, Collection, Playli
 
 /**
  * 卡片兜底用的静态图（用户提供的插画，统一放 `drawable-nodpi`）。
- * 返回 null 表示这一类仍然用下面 Canvas 画（Collection 黑胶不在静态图范围内）。
+ * 现在五类卡片全部走静态图；下面的 Canvas 画法保留给将来新增的类别使用。
  *
  * 「歌单」兜底刻意与「全部专辑」用同一张图（用户要求两者保持一致）：既保证风格统一，
  * 以后换图也只需要换一个文件。若哪天想给歌单单独出图，把这里改成独立资源即可。
@@ -4245,7 +4247,7 @@ private fun featureArtworkRes(kind: HomeArtworkKind): Int? = when (kind) {
     HomeArtworkKind.Favorites -> R.drawable.cover_fallback_favorites
     HomeArtworkKind.Recent -> R.drawable.cover_fallback_recent
     HomeArtworkKind.PlaylistGrid -> R.drawable.cover_all_albums
-    HomeArtworkKind.Collection -> null
+    HomeArtworkKind.Collection -> R.drawable.cover_fallback_library
 }
 
 @Composable
