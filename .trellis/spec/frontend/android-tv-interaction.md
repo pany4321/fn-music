@@ -274,12 +274,13 @@ interface AuthenticatedAppActions {
   line and `类型 · 地址 · 账号` on the second, plus two separate 76dp actions: `测试音乐源：X`
   (connectivity test, disabled while running, result shown as a status line under the row) and
   `删除音乐源：X`. Vertical D-pad movement keeps each of the three columns aligned with the same
-  column of the neighbouring row. **Activating a row never connects by itself**: it carries that
-  source into the `连接音乐源` form (type/address/account/access code prefilled, password left empty so
-  the saved credentials can renew the session) and the user confirms with the form's `连接` command.
-  This is one single behaviour shared by every entry — the form's own `已有音乐源` dialog
-  (`onAdd = null`, `title = "已有音乐源"`) and the in-app `音乐源` list (`title = "音乐源"` plus
-  `onAdd`/`onClearAll`), which navigates to `LibraryRoute.SwitchAccount(sourceId)`.
+  column of the neighbouring row. Behaviour differs by entry, deliberately:
+  the in-app lists (`切换音乐源` on My, `管理与切换` on Settings; `onAdd`/`onClearAll`) **switch to the
+  tapped source immediately** and only report a failure; the form's own `已有音乐源` dialog
+  (`onAdd = null`, `title = "已有音乐源"`) **never connects by itself** — it carries the source into the
+  form (type/address/account prefilled, password left empty so the saved hash or access token can renew
+  the session) and waits for the user to press `连接`. Both dialogs' `＋ 添加音乐源` opens the empty
+  form.
 - Login form commands use the local foundation-based `LoginActionButton`, including history,
   password visibility, login submission, and history-dialog actions. It owns a real focus target
   plus `Modifier.clickable(Role.Button)` so the same callback works for D-pad and physical pointer

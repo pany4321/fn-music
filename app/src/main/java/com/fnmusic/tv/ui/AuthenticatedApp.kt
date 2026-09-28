@@ -282,8 +282,7 @@ internal fun AuthenticatedApp(
             onArtist = { open(LibraryRoute.ArtistDetail(it)) },
             onAlbum = { open(LibraryRoute.AlbumDetail(it)) },
             onSettings = { open(LibraryRoute.Settings) },
-            onSwitchAccount = { open(LibraryRoute.SwitchAccount()) },
-            onEditSource = { sourceId -> open(LibraryRoute.SwitchAccount(sourceId)) },
+            onSwitchAccount = { open(LibraryRoute.SwitchAccount) },
             onPlayer = { open(LibraryRoute.Player(null)) },
         )
         LibraryRoute.AllPlaylists -> AllPlaylists(container, onBack = back, onOpen = { open(LibraryRoute.PlaylistDetail(it)) })
@@ -462,25 +461,16 @@ internal fun AuthenticatedApp(
         LibraryRoute.Settings -> SettingsScreen(
             container,
             onBack = back,
-            onAddSource = { open(LibraryRoute.SwitchAccount()) },
-            onEditSource = { sourceId -> open(LibraryRoute.SwitchAccount(sourceId)) },
+            onAddSource = { open(LibraryRoute.SwitchAccount) },
         )
-        is LibraryRoute.SwitchAccount -> SwitchAccountRoute(
-            container = container,
-            initialSourceId = route.sourceId,
-            onBack = back,
-        )
+        LibraryRoute.SwitchAccount -> SwitchAccountRoute(container, onBack = back)
             }
         }
     }
 }
 
 @Composable
-private fun SwitchAccountRoute(
-    container: AuthenticatedAppDependencies,
-    initialSourceId: String? = null,
-    onBack: () -> Unit,
-) {
+private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
     val context = LocalContext.current
     var history by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     LaunchedEffect(Unit) {
@@ -493,8 +483,7 @@ private fun SwitchAccountRoute(
         recentServers = emptyList(),
         initialError = null,
         loginHistory = history,
-        // 从音乐源列表"带入"来的那条：表单会按它预填类型/地址/账号/安全码，密码留空。
-        initialSelectedProfileId = initialSourceId,
+        // 表单里的「已有音乐源」弹窗要能把某条源带入表单：这里把"档案草稿"接进去。
         historyDraft = container.authenticatedActions::sourceDraft,
         onBack = onBack,
         onLogin = { server, https, user, password, remember, accessCode, kind ->
@@ -1711,8 +1700,6 @@ private fun BrowseMy(
     onAlbum: (Album) -> Unit,
     onSettings: () -> Unit,
     onSwitchAccount: () -> Unit,
-    /** 从音乐源列表选了一条：打开「连接音乐源」表单并预填该源。 */
-    onEditSource: (String) -> Unit,
     onPlayer: () -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
@@ -1721,6 +1708,7 @@ private fun BrowseMy(
     var sourcePickerVisible by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     var testingSourceId by remember { mutableStateOf<String?>(null) }
+    var switchingSourceId by remember { mutableStateOf<String?>(null) }
     var sourceStatuses by remember { mutableStateOf<Map<String, SourceRowStatus>>(emptyMap()) }
     LaunchedEffect(sourcePickerVisible) {
         if (sourcePickerVisible) {
@@ -1900,10 +1888,23 @@ private fun BrowseMy(
                 },
                 onDismiss = { sourcePickerVisible = false },
                 onSelect = { entry ->
-                    // 统一逻辑：列表只负责"选源"，点一条就把它带进「连接音乐源」表单，
-                    // 由用户在那里确认后点「连接」完成切换（不再从这里直接切换）。
-                    sourcePickerVisible = false
-                    onEditSource(entry.id)
+                    // 「切换音乐源」列表：点一条 = 直接切换（切换失败才提示，不动当前会话）。
+                    switchingSourceId = entry.id
+                    sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.switching())
+                    coroutineScope.launch {
+                        runCatching {
+                            container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
+                        }.onFailure { failure ->
+                            Toast.makeText(
+                                context,
+                                "切换失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        switchingSourceId = null
+                        sourceStatuses = sourceStatuses - entry.id
+                        sourcePickerVisible = false
+                    }
                 },
                 onDelete = { entry ->
                     coroutineScope.launch {

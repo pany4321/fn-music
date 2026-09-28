@@ -58,6 +58,7 @@ internal data class SourceRowStatus(val text: String, val tone: Tone) {
     enum class Tone { Neutral, Positive, Negative }
 
     companion object {
+        fun switching() = SourceRowStatus("正在切换…", Tone.Neutral)
         fun testing() = SourceRowStatus("正在测试…", Tone.Neutral)
     }
 }
