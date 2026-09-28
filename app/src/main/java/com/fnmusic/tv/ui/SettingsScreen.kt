@@ -58,6 +58,7 @@ import android.widget.Toast
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
+import com.fnmusic.tv.core.data.repository.SourceTestResult
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.AppException
 import com.fnmusic.tv.core.model.AppTheme
@@ -116,6 +117,8 @@ internal fun SettingsScreen(
     var sourcePickerVisible by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     var switchingSourceId by remember { mutableStateOf<String?>(null) }
+    var testingSourceId by remember { mutableStateOf<String?>(null) }
+    var sourceStatuses by remember { mutableStateOf<Map<String, SourceRowStatus>>(emptyMap()) }
     LaunchedEffect(Unit) {
         sources = runCatching { container.authenticatedActions.savedLoginEntries() }
             .getOrDefault(emptyList())
@@ -138,10 +141,25 @@ internal fun SettingsScreen(
         SourcePickerDialog(
             sources = sources,
             activeProfileId = container.authenticatedActions.activeSourceId(),
-            switchingProfileId = switchingSourceId,
+            statuses = sourceStatuses,
+            testingProfileId = testingSourceId,
             onDismiss = { sourcePickerVisible = false },
+            onTest = { entry ->
+                if (testingSourceId == null) {
+                    testingSourceId = entry.id
+                    sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.testing())
+                    coroutineScope.launch {
+                        val result = runCatching {
+                            container.authenticatedActions.testSource(entry.id)
+                        }.getOrNull()
+                        sourceStatuses = sourceStatuses + (entry.id to sourceTestStatus(result))
+                        testingSourceId = null
+                    }
+                }
+            },
             onSelect = { entry ->
                 switchingSourceId = entry.id
+                sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.switching())
                 coroutineScope.launch {
                     runCatching {
                         container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
@@ -153,6 +171,7 @@ internal fun SettingsScreen(
                         ).show()
                     }
                     switchingSourceId = null
+                    sourceStatuses = sourceStatuses - entry.id
                     sourcePickerVisible = false
                 }
             },
@@ -488,9 +507,9 @@ internal fun SettingsScreen(
                         modifier = Modifier.size(46.dp),
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("飞牛音乐", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("音乐坞", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "Android TV / 车机 飞牛音乐第三方客户端",
+                            "Android TV / 车机 音乐坞 · 飞牛音乐 / Jellyfin 客户端",
                             color = FnColors.Muted,
                             fontSize = 10.sp,
                             lineHeight = 12.sp,

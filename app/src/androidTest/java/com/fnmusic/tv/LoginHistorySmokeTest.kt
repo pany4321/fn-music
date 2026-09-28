@@ -54,9 +54,9 @@ class LoginHistorySmokeTest {
         }
 
         composeRule.onNodeWithContentDescription("历史").performClick()
-        composeRule.onNodeWithText("test").assertIsDisplayed()
-        composeRule.onNodeWithText("10.0.0.115:5666 (HTTP)").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("登录历史：test").performClick()
+        composeRule.onNodeWithText("飞牛音乐").assertIsDisplayed()
+        composeRule.onNodeWithText("飞牛音乐 · 10.0.0.115:5666 · test").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("音乐源：飞牛音乐").performClick()
         composeRule.waitUntil(5_000) { loginCount.get() == 1 }
 
         assertEquals("profile-1", selectedProfile.get())
@@ -89,7 +89,7 @@ class LoginHistorySmokeTest {
         }
 
         composeRule.onNodeWithContentDescription("历史").performClick()
-        composeRule.onNodeWithContentDescription("删除历史：test").performClick()
+        composeRule.onNodeWithContentDescription("删除音乐源：飞牛音乐").performClick()
         composeRule.waitUntil(5_000) { deleteCount.get() == 1 }
 
         assertEquals(0, loginCount.get())

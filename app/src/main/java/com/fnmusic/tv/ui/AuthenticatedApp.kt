@@ -471,6 +471,7 @@ internal fun AuthenticatedApp(
 
 @Composable
 private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: () -> Unit) {
+    val context = LocalContext.current
     var history by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     LaunchedEffect(Unit) {
         history = runCatching { container.authenticatedActions.savedLoginEntries() }
@@ -484,21 +485,43 @@ private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: 
         loginHistory = history,
         onBack = onBack,
         onLogin = { server, https, user, password, remember, accessCode, kind ->
-            container.authenticatedActions.switchAccountTo(
-                server,
-                https,
-                user,
-                password,
-                remember,
-                accessCode,
-                kind,
-            )
+            try {
+                val connected = container.authenticatedActions.switchAccountTo(
+                    server,
+                    https,
+                    user,
+                    password,
+                    remember,
+                    accessCode,
+                    kind,
+                )
+                // 成功后这一页会离开（会话换人 = 路由栈重置）：只有 Toast 能让用户看到结果。
+                Toast.makeText(
+                    context,
+                    if (connected.isBlank()) "已连接新的音乐源" else "已连接：$connected",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                Toast.makeText(
+                    context,
+                    "连接失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                throw failure
+            } finally {
+                // 重新连接同一个账号时用户 id 不会变、路由栈不会自动重置：
+                // 显式回到上一页，保证"连接成功就离开这一页"始终成立。
+                onBack()
+            }
         },
         onHistoryLogin = { profileId, accessCode, remember ->
             container.authenticatedActions.switchAccountWithHistory(profileId, accessCode, remember)
         },
         onHistoryDelete = { profileId -> container.authenticatedActions.deleteSavedLoginEntry(profileId) },
         onHistoryClear = { container.authenticatedActions.clearSavedLoginEntries() },
+        onTestSource = { profileId -> container.authenticatedActions.testSource(profileId) },
         onProbe = container.authenticatedActions::probeServer,
     )
 }
@@ -794,9 +817,9 @@ private fun BrowseHome(
                 }
                 if (deck.isNotEmpty()) {
                     container.appPreferences.saveHomeDeck(ROAM_DECK_KEY, deck.mapNotNull { it.coverId })
-                    if (persisted.isEmpty()) {
-                        roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
-                    }
+                    // 新采样到的那组立刻上屏：只"留给下次启动"的话，每次启动看到的都是上一组，
+                    // 观感上就是不随机（旧组的首帧已经先画出来了，这里只是换个更衣室）。
+                    roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
                 }
             }
         }
@@ -839,9 +862,8 @@ private fun BrowseHome(
                 val deck = randomTrackDeck { container.musicRepository.randomTrackSample(24) }
                 if (deck.isNotEmpty()) {
                     container.appPreferences.saveHomeDeck(ALL_PLAYLISTS_DECK_KEY, deck.mapNotNull { it.coverId })
-                    if (persisted.isEmpty()) {
-                        allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
-                    }
+                    // 同「随机漫游」：新采样到的那组立刻上屏，否则每次启动都是上一组封面。
+                    allPlaylistsDeckState.snapshot = retainLoadedList(allPlaylistsDeckState.snapshot, deck)
                 }
             }
         }
@@ -1685,6 +1707,8 @@ private fun BrowseMy(
     var sourcePickerVisible by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     var switchingSourceId by remember { mutableStateOf<String?>(null) }
+    var testingSourceId by remember { mutableStateOf<String?>(null) }
+    var sourceStatuses by remember { mutableStateOf<Map<String, SourceRowStatus>>(emptyMap()) }
     LaunchedEffect(sourcePickerVisible) {
         if (sourcePickerVisible) {
             sources = runCatching { container.authenticatedActions.savedLoginEntries() }
@@ -1846,10 +1870,25 @@ private fun BrowseMy(
             SourcePickerDialog(
                 sources = sources,
                 activeProfileId = container.authenticatedActions.activeSourceId(),
-                switchingProfileId = switchingSourceId,
+                statuses = sourceStatuses,
+                testingProfileId = testingSourceId,
+                onTest = { entry ->
+                    if (testingSourceId == null) {
+                        testingSourceId = entry.id
+                        sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.testing())
+                        coroutineScope.launch {
+                            val result = runCatching {
+                                container.authenticatedActions.testSource(entry.id)
+                            }.getOrNull()
+                            sourceStatuses = sourceStatuses + (entry.id to sourceTestStatus(result))
+                            testingSourceId = null
+                        }
+                    }
+                },
                 onDismiss = { sourcePickerVisible = false },
                 onSelect = { entry ->
                     switchingSourceId = entry.id
+                    sourceStatuses = sourceStatuses + (entry.id to SourceRowStatus.switching())
                     coroutineScope.launch {
                         runCatching {
                             container.authenticatedActions.switchAccountWithHistory(entry.id, null, true)
@@ -1861,6 +1900,7 @@ private fun BrowseMy(
                             ).show()
                         }
                         switchingSourceId = null
+                        sourceStatuses = sourceStatuses - entry.id
                         sourcePickerVisible = false
                     }
                 },
@@ -4194,8 +4234,31 @@ private fun PlaylistCoverDeck(
 
 private enum class HomeArtworkKind { Roam, Favorites, Recent, Collection, PlaylistGrid }
 
+/**
+ * 卡片兜底用的静态图（用户提供的四张，1024×1024，统一放 `drawable-nodpi`）。
+ * 返回 null 表示这一类仍然用下面 Canvas 画（Collection 黑胶不在静态图范围内）。
+ */
+private fun featureArtworkRes(kind: HomeArtworkKind): Int? = when (kind) {
+    HomeArtworkKind.Roam -> R.drawable.cover_fallback_roam
+    HomeArtworkKind.Favorites -> R.drawable.cover_fallback_favorites
+    HomeArtworkKind.Recent -> R.drawable.cover_fallback_recent
+    HomeArtworkKind.PlaylistGrid -> R.drawable.cover_fallback_playlist
+    HomeArtworkKind.Collection -> null
+}
+
 @Composable
 private fun HomeFeatureArtwork(kind: HomeArtworkKind, modifier: Modifier) {
+    val artworkRes = featureArtworkRes(kind)
+    if (artworkRes != null) {
+        // 方形图直接裁切填充：歌单瓦片那类 16:9 槽位取中间一条，主体本来就是居中的。
+        Image(
+            painter = painterResource(artworkRes),
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = ContentScale.Crop,
+        )
+        return
+    }
     Canvas(modifier) {
         val shortEdge = minOf(size.width, size.height)
         fun point(x: Float, y: Float) = androidx.compose.ui.geometry.Offset(size.width * x, size.height * y)

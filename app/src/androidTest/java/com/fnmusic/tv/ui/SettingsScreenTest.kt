@@ -42,9 +42,9 @@ class SettingsScreenTest {
             "128 MB",
             "256 MB",
             "关于",
-            "飞牛音乐",
+            "音乐坞",
             "Tag mig hånden",
-            "github.com/QiaoKes/fn-music-tv",
+            "github.com/pany4321/fn-music",
         ).forEach { label ->
             compose.onNodeWithText(label).assertIsDisplayed()
         }

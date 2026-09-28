@@ -1,8 +1,5 @@
 package com.fnmusic.tv.ui
 
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -12,13 +9,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.tv.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -32,7 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.tv.material3.Text
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
+import com.fnmusic.tv.core.data.repository.SourceTestResult
 import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.ui.FnColors
 
@@ -53,22 +53,63 @@ internal fun sourceKindLabel(kind: ServerKind): String = when (kind) {
 internal fun sourceSubtitle(entry: LoginHistoryEntry): String =
     "${sourceKindLabel(entry.kind)} · ${entry.server} · ${entry.username}"
 
+/** 源行下面那行状态：切换中 / 测试中 / 测试结果。 */
+internal data class SourceRowStatus(val text: String, val tone: Tone) {
+    enum class Tone { Neutral, Positive, Negative }
+
+    companion object {
+        fun switching() = SourceRowStatus("正在切换…", Tone.Neutral)
+        fun testing() = SourceRowStatus("正在测试…", Tone.Neutral)
+    }
+}
+
+/** 一行的三个焦点锚点：源行本体 / 测试 / 删除。三列各自纵向相连，遥控器上下键才顺手。 */
+internal class SourceRowFocuses(
+    val body: FocusRequester,
+    val test: FocusRequester,
+    val delete: FocusRequester,
+)
+
+/** 测试结果 → 状态行（失败原因复用设置页/弹窗统一的 errorMessage）。 */
+internal fun sourceTestStatus(result: SourceTestResult?): SourceRowStatus = when (result) {
+    null -> SourceRowStatus("测试没有完成，请再试一次", SourceRowStatus.Tone.Negative)
+    is SourceTestResult.Ok -> SourceRowStatus(
+        text = if (result.renewedCredentials) {
+            "连接正常（${result.elapsedMillis} ms，已用保存的密码续期）"
+        } else {
+            "连接正常（${result.elapsedMillis} ms）"
+        },
+        tone = SourceRowStatus.Tone.Positive,
+    )
+    is SourceTestResult.CredentialsExpired -> SourceRowStatus(
+        text = "服务器可达，但登录凭据已失效，请重新登录",
+        tone = SourceRowStatus.Tone.Negative,
+    )
+    is SourceTestResult.Failed -> SourceRowStatus(
+        text = "无法连接：${errorMessage(result.error)}",
+        tone = SourceRowStatus.Tone.Negative,
+    )
+}
+
 /**
- * 音乐源列表的一行：`[✓] 服务器名 / 类型·地址·账号`，右侧可带删除。
+ * 音乐源列表的一行：`[✓] 服务器名 / 类型·地址·账号`，右侧可带「测试」与删除。
  * 点整行 = 切换到它（当前源点了没反应，避免无意义重连）。
  */
 @Composable
 internal fun SourceRow(
     entry: LoginHistoryEntry,
     active: Boolean,
+    focuses: SourceRowFocuses,
     modifier: Modifier = Modifier,
+    above: SourceRowFocuses? = null,
+    below: SourceRowFocuses? = null,
+    /** 最后一行的"下一项"：弹窗底部的按钮（添加/清空/关闭）。 */
+    bottomFocus: FocusRequester? = null,
     onSelect: () -> Unit,
+    onTest: (() -> Unit)? = null,
+    testing: Boolean = false,
     onDelete: (() -> Unit)? = null,
-    deleteFocus: FocusRequester? = null,
-    upFocus: FocusRequester? = null,
-    downFocus: FocusRequester? = null,
 ) {
-    val shape = RoundedCornerShape(8.dp)
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         LoginActionButton(
             onClick = { if (!active) onSelect() },
@@ -77,10 +118,12 @@ internal fun SourceRow(
                 .height(80.dp)
                 .semantics { contentDescription = "音乐源：${sourceTitle(entry)}" }
                 .focusProperties {
-                    right = deleteFocus ?: FocusRequester.Cancel
-                    up = upFocus ?: FocusRequester.Cancel
-                    down = downFocus ?: FocusRequester.Cancel
-                },
+                    left = FocusRequester.Cancel
+                    right = if (onTest != null) focuses.test else focuses.delete
+                    up = above?.body ?: FocusRequester.Cancel
+                    down = below?.body ?: bottomFocus ?: FocusRequester.Cancel
+                }
+                .focusRequester(focuses.body),
             selected = active,
         ) {
             // 胶囊按钮（50% 圆角）左右两端是弧线：文字必须留内边距，
@@ -120,14 +163,44 @@ internal fun SourceRow(
                 )
             }
         }
+        if (onTest != null) {
+            LoginActionButton(
+                onClick = onTest,
+                enabled = !testing,
+                modifier = Modifier
+                    .width(112.dp)
+                    .height(76.dp)
+                    .semantics { contentDescription = "测试音乐源：${sourceTitle(entry)}" }
+                    .focusProperties {
+                        left = focuses.body
+                        right = focuses.delete
+                        up = above?.test ?: FocusRequester.Cancel
+                        down = below?.test ?: bottomFocus ?: FocusRequester.Cancel
+                    }
+                    .focusRequester(focuses.test),
+            ) {
+                Text(
+                    if (testing) "测试中…" else "测试",
+                    color = if (testing) FnColors.Muted else FnColors.Text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
         if (onDelete != null) {
             LoginActionButton(
                 onClick = onDelete,
                 modifier = Modifier
-                    .height(76.dp)
                     .width(76.dp)
+                    .height(76.dp)
                     .semantics { contentDescription = "删除音乐源：${sourceTitle(entry)}" }
-                    .then(if (deleteFocus != null) Modifier.focusRequester(deleteFocus) else Modifier),
+                    .focusProperties {
+                        left = if (onTest != null) focuses.test else focuses.body
+                        right = FocusRequester.Cancel
+                        up = above?.delete ?: FocusRequester.Cancel
+                        down = below?.delete ?: bottomFocus ?: FocusRequester.Cancel
+                    }
+                    .focusRequester(focuses.delete),
             ) {
                 Text("✕", color = FnColors.Coral, fontSize = 22.sp)
             }
@@ -136,8 +209,10 @@ internal fun SourceRow(
 }
 
 /**
- * 音乐源弹窗：[onSelect] 直接切换（成功前不动当前会话）、[onAdd] 去登录页添加、
- * [onDelete] 删除该源（服务端数据不受影响，只是不再记住它）。
+ * 音乐源弹窗。两个入口共用：
+ * - 「我的」页 / 设置页的**音乐源管理**：能选、能测、能删、能添加（[title] = "音乐源"）；
+ * - 登录页的**已有音乐源**（会话过期时一键重登）：只列已有的，不给添加入口
+ *   （[onAdd] = null），[title] = "已有音乐源"。
  */
 @Composable
 internal fun SourcePickerDialog(
@@ -145,14 +220,34 @@ internal fun SourcePickerDialog(
     activeProfileId: String?,
     onDismiss: () -> Unit,
     onSelect: (LoginHistoryEntry) -> Unit,
-    onDelete: (LoginHistoryEntry) -> Unit,
-    onAdd: () -> Unit,
-    switchingProfileId: String? = null,
+    title: String = "音乐源",
+    statuses: Map<String, SourceRowStatus> = emptyMap(),
+    testingProfileId: String? = null,
+    onTest: ((LoginHistoryEntry) -> Unit)? = null,
+    onDelete: ((LoginHistoryEntry) -> Unit)? = null,
+    onAdd: (() -> Unit)? = null,
+    onClearAll: (() -> Unit)? = null,
+    /**
+     * 1.4.x 遗留的"最近用过的地址"（只有地址、没有凭据，也没被"保持登录"记成档案）。
+     * 点一条只是把地址填回表单，所以这里给它们留一个次级列表，别让老用户白丢这个入口。
+     */
+    recentServers: List<String> = emptyList(),
+    onRecentSelect: ((String) -> Unit)? = null,
 ) {
-    val rowFocuses = remember(sources) { List(sources.size) { FocusRequester() } }
-    val deleteFocuses = remember(sources) { List(sources.size) { FocusRequester() } }
+    val rowFocuses = remember(sources) {
+        List(sources.size) { SourceRowFocuses(FocusRequester(), FocusRequester(), FocusRequester()) }
+    }
+    val recentFocuses = remember(recentServers) { List(recentServers.size) { FocusRequester() } }
     val addFocus = remember { FocusRequester() }
+    val clearFocus = remember { FocusRequester() }
     val closeFocus = remember { FocusRequester() }
+    // 最后一行往下走：先去弹窗底部最左侧那个按钮，再横着走。
+    val bottomFocus = when {
+        onAdd != null -> addFocus
+        onClearAll != null -> clearFocus
+        else -> closeFocus
+    }
+    val legacyVisible = recentServers.isNotEmpty() && onRecentSelect != null
     Dialog(
         onDismissRequest = onDismiss,
         // 平台对话框窗口默认会限制宽度（真机上只有屏宽的四成左右），关掉它自己定宽。
@@ -171,51 +266,129 @@ internal fun SourcePickerDialog(
                     .padding(horizontal = 26.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-            Text("音乐源", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
-            if (sources.isEmpty()) {
-                Text("还没有添加音乐源", color = FnColors.Muted, fontSize = 15.sp)
-            }
-            sources.forEachIndexed { index, entry ->
-                SourceRow(
-                    entry = entry,
-                    active = entry.id == activeProfileId,
-                    onSelect = { onSelect(entry) },
-                    onDelete = { onDelete(entry) },
-                    deleteFocus = deleteFocuses[index],
-                    upFocus = rowFocuses.getOrNull(index - 1),
-                    downFocus = rowFocuses.getOrNull(index + 1) ?: addFocus,
-                )
-                if (switchingProfileId == entry.id) {
-                    Text("正在切换…", color = FnColors.Muted, fontSize = 13.sp)
+                Text(title, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+                if (sources.isEmpty()) {
+                    Text(
+                        if (legacyVisible) "还没有保存的音乐源" else "还没有添加音乐源",
+                        color = FnColors.Muted,
+                        fontSize = 15.sp,
+                    )
                 }
-            }
-            Spacer(Modifier.height(2.dp))
-            // 添加与关闭并排：横屏电视/车机的可视高度很矮，竖着放会把"关闭"挤到屏幕外。
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LoginActionButton(
-                    onClick = onAdd,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(62.dp)
-                        .semantics { contentDescription = "添加音乐源" }
-                        .focusProperties { right = closeFocus }
-                        .focusRequester(addFocus),
-                ) {
-                    Text("＋ 添加音乐源", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                sources.forEachIndexed { index, entry ->
+                    SourceRow(
+                        entry = entry,
+                        active = entry.id == activeProfileId,
+                        focuses = rowFocuses[index],
+                        above = rowFocuses.getOrNull(index - 1),
+                        below = rowFocuses.getOrNull(index + 1),
+                        bottomFocus = if (sources.lastIndex == index) {
+                            recentFocuses.firstOrNull() ?: bottomFocus
+                        } else {
+                            null
+                        },
+                        onSelect = { onSelect(entry) },
+                        onTest = onTest?.let { test -> { test(entry) } },
+                        testing = entry.id == testingProfileId,
+                        onDelete = onDelete?.let { delete -> { delete(entry) } },
+                    )
+                    statuses[entry.id]?.let { status -> SourceStatusLine(status) }
                 }
-                LoginActionButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .width(150.dp)
-                        .height(62.dp)
-                        .semantics { contentDescription = "关闭" }
-                        .focusProperties { left = addFocus }
-                        .focusRequester(closeFocus),
-                ) {
-                    Text("关闭", color = FnColors.Muted, fontSize = 17.sp)
+                if (legacyVisible && onRecentSelect != null) {
+                    Text("最近用过的地址", color = FnColors.Muted, fontSize = 14.sp)
+                    recentServers.forEachIndexed { index, address ->
+                        LoginActionButton(
+                            onClick = { onRecentSelect(address) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .semantics { contentDescription = "最近用过的地址：$address" }
+                                .focusProperties {
+                                    left = FocusRequester.Cancel
+                                    right = FocusRequester.Cancel
+                                    up = rowFocuses.lastOrNull()?.body
+                                        ?: recentFocuses.getOrNull(index - 1)
+                                        ?: FocusRequester.Cancel
+                                    down = recentFocuses.getOrNull(index + 1) ?: bottomFocus
+                                }
+                                .focusRequester(recentFocuses[index]),
+                        ) {
+                            Text(
+                                address,
+                                fontSize = 17.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
-            }
+                Spacer(Modifier.height(2.dp))
+                // 底部按钮并排：横屏电视/车机的可视高度很矮，竖着放会把"关闭"挤到屏幕外。
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (onAdd != null) {
+                        LoginActionButton(
+                            onClick = onAdd,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(62.dp)
+                                .semantics { contentDescription = "添加音乐源" }
+                                .focusProperties { right = if (onClearAll != null) clearFocus else closeFocus }
+                                .focusRequester(addFocus),
+                        ) {
+                            Text("＋ 添加音乐源", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    if (onClearAll != null) {
+                        LoginActionButton(
+                            onClick = onClearAll,
+                            modifier = Modifier
+                                .width(170.dp)
+                                .height(62.dp)
+                                .semantics { contentDescription = "清空全部音乐源" }
+                                .focusProperties {
+                                    left = if (onAdd != null) addFocus else FocusRequester.Cancel
+                                    right = closeFocus
+                                }
+                                .focusRequester(clearFocus),
+                        ) {
+                            Text("清空", color = FnColors.Coral, fontSize = 17.sp)
+                        }
+                    }
+                    LoginActionButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .width(150.dp)
+                            .height(62.dp)
+                            .semantics { contentDescription = "关闭" }
+                            .focusProperties {
+                                left = when {
+                                    onClearAll != null -> clearFocus
+                                    onAdd != null -> addFocus
+                                    else -> FocusRequester.Cancel
+                                }
+                            }
+                            .focusRequester(closeFocus),
+                    ) {
+                        Text("关闭", color = FnColors.Muted, fontSize = 17.sp)
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun SourceStatusLine(status: SourceRowStatus) {
+    val color = when (status.tone) {
+        SourceRowStatus.Tone.Neutral -> FnColors.Muted
+        SourceRowStatus.Tone.Positive -> FnColors.Teal
+        SourceRowStatus.Tone.Negative -> FnColors.Warning
+    }
+    Text(
+        status.text,
+        color = color,
+        fontSize = 13.sp,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(horizontal = 6.dp),
+    )
 }

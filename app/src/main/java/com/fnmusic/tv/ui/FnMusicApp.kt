@@ -78,7 +78,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.verticalScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
@@ -86,6 +85,7 @@ import com.fnmusic.tv.AppUiDependencies
 import com.fnmusic.tv.R
 import com.fnmusic.tv.core.data.repository.LoginDraft
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
+import com.fnmusic.tv.core.data.repository.SourceTestResult
 import com.fnmusic.tv.core.data.repository.SessionState
 import com.fnmusic.tv.core.data.server.ConnectionResolver
 import com.fnmusic.tv.core.data.server.ServerUrlNormalizer
@@ -158,6 +158,7 @@ internal fun FnMusicApp(container: AppUiDependencies, onExitApplication: () -> U
                                     onHistoryDelete = container.sessionRepository::deleteLoginHistory,
                                     onHistoryClear = container.sessionRepository::clearLoginHistory,
                                     historyDraft = container.sessionRepository::loginDraft,
+                                    onTestSource = container.sessionRepository::testSource,
                                 )
                             }
                             is SessionState.SignedIn -> {
@@ -236,7 +237,7 @@ private fun BrandLoading() {
                 contentDescription = null,
                 modifier = Modifier.size(54.dp),
             )
-            Text("飞牛音乐", color = FnColors.Text, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+            Text("音乐坞", color = FnColors.Text, fontSize = 44.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(12.dp))
         Text("正在载入", color = FnColors.Muted, fontSize = 24.sp)
@@ -257,6 +258,10 @@ internal fun LoginScreen(
     onHistoryDelete: suspend (String) -> Unit = {},
     onHistoryClear: suspend () -> Unit = {},
     historyDraft: (String) -> LoginDraft? = { null },
+    /** 「已有音乐源」列表里的"测试"：只测连通性，不改动当前会话。 */
+    onTestSource: suspend (String) -> SourceTestResult = { _ ->
+        SourceTestResult.Failed(AppError.Unknown("source_test_unavailable"), 0)
+    },
     /** 提交前识别这台服务器是哪类后端（命中 Jellyfin 的 Public Info 即 Jellyfin）。 */
     onProbe: suspend (String, Boolean) -> ServerProbe = { _, _ -> ServerProbe(ServerKind.FnOs) },
     /** 应用内“切换账号”时提供返回入口；为 null 表示登录页是顶层界面。 */
@@ -348,7 +353,9 @@ internal fun LoginScreen(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text("登录", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            // 同一个页面要同时承担"首次安装添加源"和"应用内新增源"，
+            // 所以抬头说的是"这一步在做什么"（连接一个音乐源），而不是"登录"。
+            Text("连接音乐源", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -584,12 +591,12 @@ internal fun LoginScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(54.dp)
-                    .semantics { contentDescription = "登录" }
+                    .semantics { contentDescription = "连接" }
                     .focusProperties { up = httpsFocus }
                     .focusRequester(loginFocus),
             ) {
                 Text(
-                    if (submitting) "正在登录" else "登录",
+                    if (submitting) "正在连接" else "连接",
                     modifier = Modifier.fillMaxWidth(),
                     color = if (canSubmit) FnColors.Text else FnColors.Muted,
                     fontSize = 23.sp,
@@ -601,138 +608,72 @@ internal fun LoginScreen(
     }
 
     if (showServerHistory) {
-        val profileIds = loginHistory.map(LoginHistoryEntry::id)
-        val profileRowFocus = remember(profileIds) { List(loginHistory.size) { FocusRequester() } }
-        val profileDeleteFocus = remember(profileIds) { List(loginHistory.size) { FocusRequester() } }
-        val legacyRowFocus = remember(recentServers) { List(recentServers.size) { FocusRequester() } }
-        val clearHistoryFocus = remember { FocusRequester() }
-        val firstHistoryFocus = profileRowFocus.firstOrNull() ?: legacyRowFocus.firstOrNull()
-        Dialog(onDismissRequest = { showServerHistory = false }) {
-            Column(
-                Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth(0.9f)
-                    .background(FnColors.Surface, RoundedCornerShape(8.dp))
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("已有音乐源", fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
-                loginHistory.forEachIndexed { index, entry ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LoginActionButton(
-                            onClick = {
-                                val draft = historyDraft(entry.id) ?: return@LoginActionButton
-                                server = draft.server
-                                https = draft.useHttps
-                                username = draft.username
-                                accessCode = draft.accessCode
-                                password = ""
-                                selectedProfileId = draft.profileId
-                                hasSavedPassword = draft.hasSavedPassword
-                                showServerHistory = false
-                                submitting = true
-                                loginAttempted = true
-                                error = null
-                                scope.launch {
-                                    runCatching {
-                                        onHistoryLogin(
-                                            draft.profileId,
-                                            draft.accessCode.toCharArray(),
-                                            rememberLogin,
-                                        )
-                                    }.onFailure {
-                                        error = (it as? AppException)?.error ?: AppError.Unknown()
-                                    }
-                                    submitting = false
-                                }
-                            },
-                            modifier = Modifier.weight(1f).height(72.dp)
-                                .semantics { contentDescription = "音乐源：${entry.username}" }
-                                .focusProperties {
-                                    right = profileDeleteFocus[index]
-                                    up = profileRowFocus.getOrNull(index - 1) ?: FocusRequester.Cancel
-                                    down = profileRowFocus.getOrNull(index + 1) ?: clearHistoryFocus
-                                }
-                                .focusRequester(profileRowFocus[index]),
-                            shape = RoundedCornerShape(6.dp),
-                            selected = entry.id == selectedProfileId,
-                        ) {
-                            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                                Text(
-                                    entry.username,
-                                    color = FnColors.Text,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    "${entry.server} (${if (entry.useHttps) "HTTPS" else "HTTP"})",
-                                    color = FnColors.Muted,
-                                    fontSize = 16.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        LoginActionButton(
-                            onClick = { scope.launch { onHistoryDelete(entry.id) } },
-                            modifier = Modifier.size(72.dp)
-                                .semantics { contentDescription = "删除历史：${entry.username}" }
-                                .focusProperties {
-                                    left = profileRowFocus[index]
-                                    up = profileDeleteFocus.getOrNull(index - 1) ?: FocusRequester.Cancel
-                                    down = profileDeleteFocus.getOrNull(index + 1) ?: clearHistoryFocus
-                                }
-                                .focusRequester(profileDeleteFocus[index]),
-                            shape = RoundedCornerShape(6.dp),
-                        ) {
-                            DeleteHistoryIcon()
-                        }
+        // 与「我的」页/设置页共用同一个音乐源弹窗：按屏宽自适应、可滚动、可删除，
+        // 并且带上"测试"（原来那套自绘弹窗既不会自适应宽度，也没有滚动，条目一多就移不动）。
+        var statuses by remember { mutableStateOf<Map<String, SourceRowStatus>>(emptyMap()) }
+        var testingId by remember { mutableStateOf<String?>(null) }
+        SourcePickerDialog(
+            title = "已有音乐源",
+            sources = loginHistory,
+            activeProfileId = selectedProfileId,
+            onDismiss = { showServerHistory = false },
+            statuses = statuses,
+            testingProfileId = testingId,
+            onTest = { entry ->
+                if (testingId == null) {
+                    testingId = entry.id
+                    statuses = statuses + (entry.id to SourceRowStatus.testing())
+                    scope.launch {
+                        val result = runCatching { onTestSource(entry.id) }.getOrNull()
+                        statuses = statuses + (entry.id to sourceTestStatus(result))
+                        testingId = null
                     }
                 }
-                if (loginHistory.isEmpty()) {
-                    recentServers.forEachIndexed { index, recent ->
-                        val editable = ServerUrlNormalizer.editableInput(recent, https)
-                        LoginActionButton(
-                            onClick = {
-                                server = editable.address
-                                https = editable.useHttps
-                                selectedProfileId = null
-                                hasSavedPassword = false
-                                showServerHistory = false
-                            },
-                            modifier = Modifier.fillMaxWidth().height(56.dp)
-                                .focusProperties {
-                                    up = legacyRowFocus.getOrNull(index - 1) ?: FocusRequester.Cancel
-                                    down = legacyRowFocus.getOrNull(index + 1) ?: clearHistoryFocus
-                                }
-                                .focusRequester(legacyRowFocus[index]),
-                            shape = RoundedCornerShape(6.dp),
-                        ) {
-                            Text(editable.address, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
+            },
+            onDelete = { entry -> scope.launch { onHistoryDelete(entry.id) } },
+            // 1.4.x 遗留的"最近用过的地址"：点一条只把地址填回表单（没有凭据可用）。
+            recentServers = recentServers,
+            onRecentSelect = { recent ->
+                val editable = ServerUrlNormalizer.editableInput(recent, https)
+                server = editable.address
+                https = editable.useHttps
+                selectedProfileId = null
+                hasSavedPassword = false
+                showServerHistory = false
+            },
+            onClearAll = {
+                scope.launch {
+                    onHistoryClear()
+                    showServerHistory = false
                 }
-                LoginActionButton(
-                    onClick = {
-                        scope.launch {
-                            onHistoryClear()
-                            showServerHistory = false
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(56.dp)
-                        .focusProperties {
-                            up = profileRowFocus.lastOrNull()
-                                ?: legacyRowFocus.lastOrNull()
-                                ?: FocusRequester.Cancel
-                        }
-                        .focusRequester(clearHistoryFocus),
-                    shape = RoundedCornerShape(6.dp),
-                ) { Text("清除全部音乐源", color = FnColors.Coral, fontSize = 19.sp) }
-            }
-        }
-        LaunchedEffect(firstHistoryFocus) { firstHistoryFocus?.let { runCatching { it.requestFocus() } } }
+            },
+            onSelect = { entry ->
+                val draft = historyDraft(entry.id) ?: return@SourcePickerDialog
+                server = draft.server
+                https = draft.useHttps
+                username = draft.username
+                accessCode = draft.accessCode
+                password = ""
+                selectedProfileId = draft.profileId
+                hasSavedPassword = draft.hasSavedPassword
+                showServerHistory = false
+                submitting = true
+                loginAttempted = true
+                error = null
+                scope.launch {
+                    runCatching {
+                        onHistoryLogin(
+                            draft.profileId,
+                            draft.accessCode.toCharArray(),
+                            rememberLogin,
+                        )
+                    }.onFailure {
+                        error = (it as? AppException)?.error ?: AppError.Unknown()
+                    }
+                    submitting = false
+                }
+            },
+        )
     }
 }
 
@@ -774,26 +715,6 @@ private fun HistoryIcon(enabled: Boolean) {
     }
 }
 
-@Composable
-private fun DeleteHistoryIcon() {
-    Canvas(Modifier.size(24.dp)) {
-        val stroke = 2.4.dp.toPx()
-        drawLine(
-            FnColors.Coral,
-            start = androidx.compose.ui.geometry.Offset(size.width * 0.22f, size.height * 0.22f),
-            end = androidx.compose.ui.geometry.Offset(size.width * 0.78f, size.height * 0.78f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round,
-        )
-        drawLine(
-            FnColors.Coral,
-            start = androidx.compose.ui.geometry.Offset(size.width * 0.78f, size.height * 0.22f),
-            end = androidx.compose.ui.geometry.Offset(size.width * 0.22f, size.height * 0.78f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round,
-        )
-    }
-}
 
 @Composable
 private fun VisibilityIcon(hidden: Boolean) {

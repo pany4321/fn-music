@@ -7,6 +7,7 @@ import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.MusicRepository
 import com.fnmusic.tv.core.data.repository.SessionRepository
 import com.fnmusic.tv.core.data.repository.ServerProbe
+import com.fnmusic.tv.core.data.repository.SourceTestResult
 import com.fnmusic.tv.core.data.repository.SessionState
 import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.ServerKind
@@ -26,10 +27,13 @@ internal interface AuthenticatedAppActions {
     suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe
     /** 当前正在使用的音乐源档案 id（"我的"/设置里的源列表用它标记"当前"）。 */
     fun activeSourceId(): String?
+    /** 测试一个已保存的音乐源是否可用（连接 + 凭据校验，且不改动当前会话）。 */
+    suspend fun testSource(profileId: String): SourceTestResult
     suspend fun verifyCurrentSession()
     suspend fun retrySessionRestore()
     suspend fun showLogin()
     suspend fun switchAccount()
+    /** 连接/切换成功后返回服务器显示名（用于"已连接：X"提示）。 */
     suspend fun switchAccountTo(
         server: String,
         useHttps: Boolean,
@@ -38,8 +42,12 @@ internal interface AuthenticatedAppActions {
         remember: Boolean,
         accessCode: CharArray,
         kind: ServerKind?,
-    )
-    suspend fun switchAccountWithHistory(profileId: String, accessCode: CharArray?, remember: Boolean)
+    ): String
+    suspend fun switchAccountWithHistory(
+        profileId: String,
+        accessCode: CharArray?,
+        remember: Boolean,
+    ): String
     suspend fun savedLoginEntries(): List<LoginHistoryEntry>
     suspend fun deleteSavedLoginEntry(profileId: String)
     suspend fun clearSavedLoginEntries()
@@ -146,6 +154,9 @@ internal class AuthenticatedAppCoordinator(
 
     override suspend fun savedLoginEntries(): List<LoginHistoryEntry> = sessionRepository.savedLoginEntries()
 
+    override suspend fun testSource(profileId: String): SourceTestResult =
+        sessionRepository.testSource(profileId)
+
     override suspend fun deleteSavedLoginEntry(profileId: String) {
         sessionRepository.deleteLoginHistory(profileId)
     }
@@ -166,21 +177,27 @@ internal class AuthenticatedAppCoordinator(
         remember: Boolean,
         accessCode: CharArray,
         kind: ServerKind?,
-    ) {
+    ): String {
         val departingNamespace = runCatching { sessionRepository.cacheNamespace() }.getOrNull()
-        sessionRepository.login(server, useHttps, username, password, remember, accessCode)
+        // kind 一定要带上：用户在"音乐源"里显式选的类型不能退化成自动探测。
+        sessionRepository.login(server, useHttps, username, password, remember, accessCode, kind)
         completeAccountSwitch(departingNamespace)
+        return connectedServerName()
     }
 
     override suspend fun switchAccountWithHistory(
         profileId: String,
         accessCode: CharArray?,
         remember: Boolean,
-    ) {
+    ): String {
         val departingNamespace = runCatching { sessionRepository.cacheNamespace() }.getOrNull()
         sessionRepository.loginWithHistory(profileId, accessCode, remember)
         completeAccountSwitch(departingNamespace)
+        return connectedServerName()
     }
+
+    private fun connectedServerName(): String =
+        (sessionRepository.state.value as? SessionState.SignedIn)?.server?.name.orEmpty()
 
     private suspend fun completeAccountSwitch(departingNamespace: String?) {
         runCatching { playbackController.clearSessionDurably() }
