@@ -520,6 +520,35 @@ class SessionRepositoryTest {
         assertEquals(SessionState.Loading, repository.state.value)
     }
 
+    @Test fun `login draft treats a saved jwt token as no-password-needed`() = runBlocking {
+        // Jellyfin：没有密码哈希，但存了访问令牌 —— 带入表单后应当可以直接点"连接"
+        val tokenStore = FakeTokenStore(
+            initialToken = null,
+            initialSession = SecureSessionPayload(
+                profiles = listOf(jellyfinProfile("j-1", "pan", token = "kept-token")),
+                activeProfileId = "j-1",
+            ),
+        )
+        val repository = repository(tokenStore)
+        repository.savedLoginEntries()
+
+        assertEquals(true, repository.loginDraft("j-1")?.hasSavedPassword)
+    }
+
+    @Test fun `login draft asks for a password when nothing can renew it`() = runBlocking {
+        val tokenStore = FakeTokenStore(
+            initialToken = null,
+            initialSession = SecureSessionPayload(
+                profiles = listOf(jellyfinProfile("j-1", "pan", token = null)),
+                activeProfileId = "j-1",
+            ),
+        )
+        val repository = repository(tokenStore)
+        repository.savedLoginEntries()
+
+        assertEquals(false, repository.loginDraft("j-1")?.hasSavedPassword)
+    }
+
     @Test fun `test source for an unknown profile fails without any request`() = runBlocking {
         val repository = repository(FakeTokenStore(initialToken = null))
 

@@ -294,7 +294,12 @@ class SessionRepository internal constructor(
             username = profile.username,
             useHttps = editable.useHttps,
             accessCode = profile.accessCode.orEmpty(),
-            hasSavedPassword = PasswordHash.parse(profile.passwordSha256) != null,
+            // hasSavedPassword 的实际语义是"不输密码也能连上"：
+            //   飞牛 —— 保存了密码哈希，可免密重登；
+            //   Jellyfin —— 服务端只认明文、没有哈希，但保存了访问令牌，续期走令牌。
+            // 两者都算，否则 Jellyfin 用户"从列表带入表单"后必须重新输一次密码才能点连接。
+            hasSavedPassword = PasswordHash.parse(profile.passwordSha256) != null ||
+                !profile.userToken.isNullOrBlank(),
             kind = profile.serverKind,
         )
     }
