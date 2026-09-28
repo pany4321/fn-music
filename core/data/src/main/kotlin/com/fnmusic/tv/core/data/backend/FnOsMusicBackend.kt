@@ -38,6 +38,13 @@ internal class FnOsMusicBackend(
     private val session: SessionRepository,
 ) : MusicBackend {
 
+    /**
+     * 上一次随机取歌用到的页号：下次优先换一页，避免"刷新两次结果一样"。
+     * 只做随机性优化，并发下争用无害（谁后写谁生效）。
+     */
+    @Volatile
+    private var lastRandomTrackPage: Int? = null
+
     override val kind: ServerKind = ServerKind.FnOs
 
     override val capabilities: BackendCapabilities = BackendCapabilities(
@@ -64,8 +71,10 @@ internal class FnOsMusicBackend(
         StreamPlan(url = directStreamUrl(track), mode = StreamMode.Direct)
 
     /**
-     * 随机取歌：先探测总数，再随机挑一页。
-     * 与原实现相同（沿用 `track/list` 的分页语义），只是不再走响应缓存。
+     * 随机取歌：先探测总数，再随机挑**两页**，合并后本地洗牌 + 拆开相邻同专辑。
+     *
+     * 只挑一页是不够随机的：`track/list` 的页内按添加时间排好序，一页 24 首常常就是同一张专辑
+     * （用户看到的就是"前后连着的一串歌"）；而且连续刷新很容易撞回同一页，结果与上次一模一样。
      */
     override suspend fun randomTracks(size: Int): List<Track> {
         val pageSize = size.coerceAtLeast(1)
@@ -75,12 +84,21 @@ internal class FnOsMusicBackend(
             return session.authenticated { it.allTracks(page = 1, size = pageSize) }
                 .list
                 .map(TrackDto::toDomain)
+                .shuffled()
         }
-        val lastPage = (total + pageSize - 1) / pageSize
-        val page = Random.nextInt(1, lastPage + 1)
-        return session.authenticated { it.allTracks(page = page, size = pageSize) }
-            .list
-            .map(TrackDto::toDomain)
+        val pages = randomPages(
+            total = total,
+            pageSize = pageSize,
+            count = RANDOM_SAMPLE_PAGES,
+            exclude = lastRandomTrackPage,
+        )
+        lastRandomTrackPage = pages.lastOrNull() ?: lastRandomTrackPage
+        val merged = pages.flatMap { page ->
+            session.authenticated { it.allTracks(page = page, size = pageSize) }
+                .list
+                .map(TrackDto::toDomain)
+        }
+        return merged.shuffled().spreadByKey { it.albumName }.take(pageSize)
     }
 
     override suspend fun catalogPage(source: CatalogPageSource<*>, page: Int, size: Int): RawPage =
@@ -241,6 +259,9 @@ internal class FnOsMusicBackend(
         const val SEARCH_SORT = "relevance"
         const val FAVORITE_SORT = "favoriteAt,desc"
         const val RECENT_SORT = "recent"
+
+        /** 随机取歌合并的页数：1 页太"整段"，2 页已足够散开，又不会多打请求。 */
+        const val RANDOM_SAMPLE_PAGES = 2
     }
 }
 

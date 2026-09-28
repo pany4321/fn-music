@@ -255,6 +255,21 @@ class JellyfinMappingTest {
         }
     }
 
+    /**
+     * 列表字段必须带上 `ImageTags`：所有 coverId 都由它决定。
+     * 实测漏掉它时，随机漫游 / 全部歌单 / 随机歌曲 / 最近添加这些列表界面全都没有封面
+     * （歌单的"前三首拼排"也因为曲目没有 coverId 而永远拼不出来）。
+     */
+    @Test
+    fun `list item fields request image tags`() {
+        assertTrue(
+            "列表字段缺 ImageTags 会让所有列表界面都没有封面",
+            LIST_ITEM_FIELDS.split(",").contains("ImageTags"),
+        )
+        // 单条目的完整字段是"列表字段 + MediaSources"，同样带上
+        assertTrue(FULL_ITEM_FIELDS.contains("ImageTags"))
+    }
+
     /** 已知 userId 时不多发一次 `/Users/Me`（登录后每条收藏都带真实 id）。 */
     @Test
     fun `favorite with a known user id skips the lookup`() = runBlocking {

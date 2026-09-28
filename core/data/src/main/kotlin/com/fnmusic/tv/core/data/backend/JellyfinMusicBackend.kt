@@ -85,7 +85,10 @@ internal class JellyfinMusicBackend(
         }
 
     override suspend fun randomTracks(size: Int): List<Track> =
-        call { api.randomTracks(userId, size.coerceAtLeast(1)) }.map(JellyfinItemDto::toTrack)
+        call { api.randomTracks(userId, size.coerceAtLeast(1)) }
+            .map(JellyfinItemDto::toTrack)
+            // 服务端已是随机顺序，这里只把相邻同专辑的拆开：列表里"连着好几首一张碟"很扎眼。
+            .spreadByKey { it.albumName }
 
     // ---- 目录：分页 ----
 
@@ -319,6 +322,8 @@ internal class JellyfinMusicBackend(
     private suspend fun fetchRoamSeed(excludeGuid: String?): List<Track> =
         call { api.randomTracks(userId, ROAM_SEED_SIZE) }
             .map(JellyfinItemDto::toTrack)
+            // 漫游是"一首接一首"顺着这批种子走的：同一张碟连播会很出戏，先拆开。
+            .spreadByKey { it.albumName }
             .filter { it.guid.value != excludeGuid }
 
     // ---- 内部工具 ----

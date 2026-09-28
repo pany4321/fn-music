@@ -479,19 +479,24 @@ internal class JellyfinApi(
 
     private companion object {
         val EMPTY_BODY = ByteArray(0).toRequestBody(null, 0, 0)
-
-        /**
-         * 列表/分页用的字段：**不含 `MediaSources`** —— 单个条目的 MediaSources 能到 KB 级，
-         * 一页 50 条就是几十 KB 的无用负载。列表只需要能判断"能不能直连"的 `Container`。
-         */
-        const val LIST_ITEM_FIELDS =
-            "DateCreated,UserData,RunTimeTicks,Container,AlbumArtist,Artists,IndexNumber," +
-                "ParentIndexNumber,ChildCount,RecursiveItemCount,ProductionYear,AlbumCount,MediaType"
-
-        /** 单个条目用完整字段（`streamPlan` 要 MediaSources 判断直连还是转码）。 */
-        const val FULL_ITEM_FIELDS = "MediaSources,$LIST_ITEM_FIELDS"
     }
 }
+
+/**
+ * 列表/分页用的字段：**不含 `MediaSources`** —— 单个条目的 MediaSources 能到 KB 级，
+ * 一页 50 条就是几十 KB 的无用负载。列表只需要能判断"能不能直连"的 `Container`。
+ *
+ * `ImageTags` 必须带上：所有 coverId 都由 `ImageTags.Primary` 决定
+ * （实测漏掉它时，随机漫游/全部歌单/随机歌曲/最近添加这些列表界面全都没有封面，
+ * 歌单的"前三首拼排"也因为曲目没有 coverId 而永远拼不出来）。
+ */
+internal const val LIST_ITEM_FIELDS =
+    "DateCreated,UserData,RunTimeTicks,Container,AlbumArtist,Artists,IndexNumber," +
+        "ParentIndexNumber,ChildCount,RecursiveItemCount,ProductionYear,AlbumCount,MediaType," +
+        "ImageTags"
+
+/** 单个条目用完整字段（`streamPlan` 要 MediaSources 判断直连还是转码）。 */
+internal const val FULL_ITEM_FIELDS = "MediaSources,$LIST_ITEM_FIELDS"
 
 @kotlinx.serialization.Serializable
 internal data class JellyfinAuthRequest(val Username: String, val Pw: String)

@@ -27,8 +27,10 @@ import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.User
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 
 data class LoginHistoryEntry(
@@ -68,6 +71,21 @@ data class ServerProbe(val kind: ServerKind, val identity: ServerIdentity? = nul
 
 /** 当前 Jellyfin 会话的客户端与用户 id（构造 `JellyfinMusicBackend` 用）。 */
 internal class JellyfinSession(val api: JellyfinApi, val userId: String)
+
+/** 音乐源连通性测试的结果（音乐源列表的"测试"按钮）。所有分支都不改动当前会话。 */
+sealed interface SourceTestResult {
+    /**
+     * 地址可达、后端类型匹配、凭据可用。
+     * [renewedCredentials] = 存的访问令牌已过期，但用保存的密码哈希免密重登成功。
+     */
+    data class Ok(val elapsedMillis: Long, val renewedCredentials: Boolean = false) : SourceTestResult
+
+    /** 服务器与类型都对得上，但保存的凭据失效了（需要重新输一次密码）。 */
+    data class CredentialsExpired(val elapsedMillis: Long) : SourceTestResult
+
+    /** 连不上 / 不是这种后端 / 地址或安全码不对，具体原因在 [error]。 */
+    data class Failed(val error: AppError, val elapsedMillis: Long) : SourceTestResult
+}
 
 sealed interface SessionState {
     data object Loading : SessionState
@@ -412,6 +430,87 @@ class SessionRepository internal constructor(
     }
 
     /**
+     * 测试一个**已保存**的音乐源是否还能用：地址可达 + 后端类型对得上 + 凭据有效。
+     *
+     * 和"切换"最大的区别是它**完全不碰当前会话**：用该源自己的令牌临时造一套 connector 与 API，
+     * 令牌过期时（飞牛）再用保存的密码哈希复验一次，但结果只回报状态、不写回任何存储。
+     */
+    suspend fun testSource(
+        profileId: String,
+        timeoutMillis: Long = TEST_TIMEOUT_MILLIS,
+    ): SourceTestResult {
+        loadRememberedCredentials()
+        val profile = securePayload.profiles.firstOrNull { it.id == profileId }
+            ?: return SourceTestResult.Failed(AppError.Unauthenticated, elapsedMillis = 0)
+        val startedAt = System.nanoTime()
+        fun elapsed(): Long = (System.nanoTime() - startedAt) / 1_000_000
+        val kind = profile.serverKind
+        val token = profile.userToken?.takeIf(String::isNotBlank)
+        try {
+            return withTimeout(timeoutMillis) {
+                val connector = testConnector(kind, token)
+                val connection = connector.connect(
+                    ConnectRequest(
+                        input = profile.server,
+                        useHttps = false,
+                        accessCode = profile.accessCode.orEmpty(),
+                        relayMode = profile.relayMode,
+                    ),
+                )
+                try {
+                    connector.me(connection)
+                    SourceTestResult.Ok(elapsed())
+                } catch (cause: AppException) {
+                    when (cause.error) {
+                        AppError.Unauthenticated, AppError.AccountDisabled -> {
+                            // 令牌废了不代表源废了：飞牛还能用保存的密码哈希免密重登一次。
+                            val renewed = kind == ServerKind.FnOs && connector.reLogin(
+                                connection = connection,
+                                username = profile.username,
+                                savedHash = PasswordHash.parse(profile.passwordSha256),
+                                deviceId = deviceId,
+                            ) != null
+                            if (renewed) {
+                                SourceTestResult.Ok(elapsed(), renewedCredentials = true)
+                            } else {
+                                SourceTestResult.CredentialsExpired(elapsed())
+                            }
+                        }
+
+                        else -> SourceTestResult.Failed(cause.error, elapsed())
+                    }
+                }
+            }
+        } catch (cause: TimeoutCancellationException) {
+            return SourceTestResult.Failed(AppError.NetworkUnavailable, elapsed())
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: AppException) {
+            // connect 阶段就失败：地址不通、不是这种后端、安全码不对都在这条路径上。
+            return if (cause.error == AppError.Unauthenticated || cause.error == AppError.AccountDisabled) {
+                SourceTestResult.CredentialsExpired(elapsed())
+            } else {
+                SourceTestResult.Failed(cause.error, elapsed())
+            }
+        } catch (cause: Exception) {
+            return SourceTestResult.Failed(AppError.Unknown(), elapsed())
+        }
+    }
+
+    /** 测试用的 connector：令牌换成"那个源自己的"，因此不会牵动 [memoryToken]。 */
+    private fun testConnector(kind: ServerKind, token: String?): ServerConnector = when (kind) {
+        ServerKind.FnOs -> FnOsConnector(::testClient) { token }
+        ServerKind.Jellyfin -> JellyfinConnector(::testClient, { token }, deviceId)
+    }
+
+    /** 测试用 client：短超时——点"测试"不该让用户干等十几秒。 */
+    private fun testClient(): OkHttpClient = clientFactory().newBuilder()
+        .connectTimeout(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .readTimeout(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .writeTimeout(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        .build()
+
+    /**
      * Re-runs server discovery for the signed-in account and rebinds the API
      * connection (and, via the coordinator, playback credentials) to a reachable
      * candidate — the car scenario of switching from a home LAN IP onto the
@@ -704,6 +803,10 @@ class SessionRepository internal constructor(
         const val RELAY_MODE = "relay_mode"
         const val RECENT_SERVER_PREFIX = "recent_server_"
         const val MAX_LOGIN_HISTORY = 5
+
+        /** "测试"按钮的总超时：局域网内一次连接 + 一次验身份，6 秒足够，超了就当连不上。 */
+        const val TEST_TIMEOUT_MILLIS = 6_000L
+
         val DEFAULT_RETRY_DELAYS = longArrayOf(1_000, 2_000, 4_000, 8_000, 15_000, 30_000)
     }
 

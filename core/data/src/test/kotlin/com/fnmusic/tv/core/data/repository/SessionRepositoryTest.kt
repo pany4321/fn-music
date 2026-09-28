@@ -417,6 +417,118 @@ class SessionRepositoryTest {
         lastUsedAt = 1,
     )
 
+    private fun jellyfinProfile(id: String, username: String, token: String?) = StoredLoginProfile(
+        id = id,
+        server = server.url("/").toString(),
+        relayMode = false,
+        username = username,
+        passwordSha256 = "",
+        userToken = token,
+        lastUsedAt = 1,
+        kind = StoredLoginProfile.kindId(ServerKind.Jellyfin),
+    )
+
+    private fun enqueueJellyfinPublicInfo() {
+        server.enqueue(
+            MockResponse.Builder()
+                .body(
+                    """{"Id":"server-9","ServerName":"Jellyfin","Version":"10.10.7","ProductName":"Jellyfin Server"}""",
+                )
+                .build(),
+        )
+    }
+
+    private fun enqueueJellyfinMe(id: String = "user-1", name: String = "pan") {
+        server.enqueue(MockResponse.Builder().body("""{"Id":"$id","Name":"$name"}""").build())
+    }
+
+    // ---- 音乐源"测试"：能测任意已保存的源，但绝不能碰当前会话 ----
+
+    @Test fun `test source reports ok for a reachable jellyfin profile`() = runBlocking {
+        val tokenStore = FakeTokenStore(
+            initialToken = null,
+            initialSession = SecureSessionPayload(
+                profiles = listOf(jellyfinProfile("j-1", "pan", token = "jelly-token")),
+                activeProfileId = "j-1",
+            ),
+        )
+        val repository = repository(tokenStore)
+        enqueueJellyfinPublicInfo()
+        enqueueJellyfinMe()
+
+        val result = repository.testSource("j-1")
+
+        assertTrue(result is SourceTestResult.Ok)
+        // 没 restore 过会话，测完也不能有任何变化
+        assertEquals(SessionState.Loading, repository.state.value)
+        assertEquals(0, tokenStore.clearCount)
+    }
+
+    @Test fun `test source reports expired credentials when the saved token is rejected`() = runBlocking {
+        val tokenStore = FakeTokenStore(
+            initialToken = null,
+            initialSession = SecureSessionPayload(
+                profiles = listOf(jellyfinProfile("j-1", "pan", token = "stale-token")),
+                activeProfileId = "j-1",
+            ),
+        )
+        val repository = repository(tokenStore)
+        enqueueJellyfinPublicInfo()
+        server.enqueue(MockResponse.Builder().code(401).build())
+
+        val result = repository.testSource("j-1")
+
+        assertTrue(result is SourceTestResult.CredentialsExpired)
+        assertEquals(SessionState.Loading, repository.state.value)
+    }
+
+    @Test fun `test source renews an expired fnos token with the saved password hash`() = runBlocking {
+        val tokenStore = FakeTokenStore(
+            initialToken = null,
+            initialSession = SecureSessionPayload(
+                profiles = listOf(storedProfile("p-1", "pan", "a".repeat(64), "stale-token")),
+                activeProfileId = "p-1",
+            ),
+        )
+        val repository = repository(tokenStore)
+        enqueueSystemConfig()
+        server.enqueue(MockResponse.Builder().code(401).build())
+        enqueueLogin("pan", "fresh-token")
+
+        val result = repository.testSource("p-1")
+
+        assertTrue(result is SourceTestResult.Ok)
+        assertEquals(true, (result as SourceTestResult.Ok).renewedCredentials)
+        assertEquals(SessionState.Loading, repository.state.value)
+    }
+
+    @Test fun `test source fails when the saved address is unreachable`() = runBlocking {
+        val unreachable = storedProfile("p-1", "pan", "a".repeat(64), "token")
+            .copy(server = "http://127.0.0.1:1/music/api/v1/")
+        val tokenStore = FakeTokenStore(
+            initialToken = null,
+            initialSession = SecureSessionPayload(
+                profiles = listOf(unreachable),
+                activeProfileId = "p-1",
+            ),
+        )
+        val repository = repository(tokenStore)
+
+        val result = repository.testSource("p-1")
+
+        assertTrue(result is SourceTestResult.Failed)
+        assertEquals(SessionState.Loading, repository.state.value)
+    }
+
+    @Test fun `test source for an unknown profile fails without any request`() = runBlocking {
+        val repository = repository(FakeTokenStore(initialToken = null))
+
+        val result = repository.testSource("nope")
+
+        assertTrue(result is SourceTestResult.Failed)
+        assertEquals(0, server.requestCount)
+    }
+
     private fun assertSignedOut(repository: SessionRepository, error: AppError?) {
         val state = repository.state.value as SessionState.SignedOut
         assertEquals(error, state.error)

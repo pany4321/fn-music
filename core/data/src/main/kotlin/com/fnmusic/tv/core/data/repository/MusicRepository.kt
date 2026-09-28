@@ -7,6 +7,8 @@ import com.fnmusic.tv.core.data.backend.CatalogPageSource
 import com.fnmusic.tv.core.data.backend.DecodedPage
 import com.fnmusic.tv.core.data.backend.MusicBackend
 import com.fnmusic.tv.core.data.backend.SessionBackends
+import com.fnmusic.tv.core.data.backend.randomPages
+import com.fnmusic.tv.core.data.backend.spreadByKey
 import com.fnmusic.tv.core.data.api.isRetryableRequestFailure
 import com.fnmusic.tv.core.data.local.CachedIndexEntity
 import com.fnmusic.tv.core.data.local.CachedLyricEntity
@@ -47,7 +49,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlin.random.Random
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -199,6 +200,9 @@ class MusicRepository internal constructor(
     private val _favoriteState = MutableStateFlow(FavoriteLibraryState())
     val favoriteState: StateFlow<FavoriteLibraryState> = _favoriteState.asStateFlow()
 
+    /** 上一次"随机专辑"用到的页号：下次优先换一页，避免刷新两次拿到同一页。 */
+    @Volatile private var lastRandomAlbumPage: Int? = null
+
     // Derived playlist artwork: first-track cover ids per playlist guid, used when
     // a playlist carries no cover of its own. Session-lifetime, cleared with the
     // namespace.
@@ -291,14 +295,26 @@ class MusicRepository internal constructor(
     suspend fun allTracks(page: Int, size: Int = 50) =
         cachedPage(CatalogPageSource.AllTracks, page, size).also(::observeFavoriteTracks)
 
-    /** 卡片封面用的轻量随机采样：探测总数后只随机取一页（共 2 次请求）。 */
+    /**
+     * 卡片封面用的轻量随机采样：探测总数 → 两个不同随机页 → 洗牌 + 拆开相邻同歌手。
+     *
+     * 只取一页时"随机专辑"看上去并不随机：页内按名称排序，成段都是同一批歌手；
+     * 而且页号撞上缓存里的同一页就会返回与上次逐条相同的一页。
+     */
     suspend fun randomAlbumSample(size: Int = 24): List<Album> {
         val pageSize = size.coerceAtLeast(1)
         val probe = albums(page = 1, size = 1)
-        val total = probe.total ?: return probe.items
-        if (total <= pageSize) return albums(page = 1, size = pageSize).items
-        val lastPage = (total + pageSize - 1) / pageSize
-        return albums(page = Random.nextInt(1, lastPage + 1), size = pageSize).items
+        val total = probe.total ?: return probe.items.shuffled()
+        if (total <= pageSize) return albums(page = 1, size = pageSize).items.shuffled()
+        val pages = randomPages(
+            total = total,
+            pageSize = pageSize,
+            count = RANDOM_SAMPLE_PAGES,
+            exclude = lastRandomAlbumPage,
+        )
+        lastRandomAlbumPage = pages.lastOrNull() ?: lastRandomAlbumPage
+        val merged = pages.flatMap { page -> albums(page = page, size = pageSize).items }
+        return merged.shuffled().spreadByKey { it.artistName }.take(pageSize)
     }
 
     /**
@@ -799,6 +815,9 @@ private const val PLAYLIST_COVER_PARALLELISM = 4
 
 /** 取候选封面时的取样页大小：3 张封面用不着整页 50 首。 */
 private const val COVER_CANDIDATE_PAGE_SIZE = 12
+
+/** 随机专辑合并的页数：1 页成段连续，2 页足够散开又不会多打请求。 */
+private const val RANDOM_SAMPLE_PAGES = 2
 
 /** 清空收藏的结果：成功删除数与失败数（失败的可以再点一次继续清）。 */
 data class FavoritesClearOutcome(val removed: Int, val failed: Int)
