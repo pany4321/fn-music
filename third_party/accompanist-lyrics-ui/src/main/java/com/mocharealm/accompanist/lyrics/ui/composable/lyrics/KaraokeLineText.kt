@@ -634,8 +634,12 @@ fun KaraokeLineText(
                     val t = currentTimeProvider()
                     val span = (line.end - line.start).coerceAtLeast(1)
                     val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
-                    // 前半段保持行首不滚动（保证开头可读），后半段再平滑滚到行尾。
-                    ((elapsed - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                    // 左移窗口：行的 1/3 处开始向左，90% 处滚到行尾 ——
+                    // 长行"开头卡住不动"的时间从一半缩短到三分之一，行尾也不会压着
+                    // 下一行的切换点（之前要等到 100% 才滚完）。
+                    val scrollStart = 1f / 3f
+                    val scrollEnd = 0.9f
+                    ((elapsed - scrollStart) / (scrollEnd - scrollStart)).coerceIn(0f, 1f)
                 }
             }
             val lineScrollX by animateFloatAsState(
