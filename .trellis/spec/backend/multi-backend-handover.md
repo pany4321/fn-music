@@ -395,6 +395,32 @@
 
 **审查确认"本来就没问题"的疑点**（免得以后再查一遍）：跨源队列恢复被 namespace + Rebind 双层挡住；`rebaseApiUri` 对异源 URI 返回 null 不改写；漫游游标有 generation + namespace 双 guard；ArtworkBitmapCache/ArtworkCache 的在飞写回有 generation 失效；快照（Room 未加密）里**不含凭据**；日志无 token/安全码；401 风暴被 authVerification mutex + connection 身份检查去重。
 
+#### 飞牛转码能力实测（1.8.0 后，用户要求验证；fnOS 1.0.10 / 音乐服务 0.8.41）
+
+**结论：飞牛音乐服务的 API 没有可用的转码端点，`track/stream` 是纯"原文件下载"。**
+实测脚本在 `.trellis/local/probe_fnos_transcode.py` / `probe_fnos_variants.py`（gitignored）。
+
+- 曲库扫描（27823 首）：白名单外格式共 242 首 —— `dsd_msbf`（DFF）215 首、`dsd_lsbf_planar`（DSF）20 首、
+  `pcm_s16le` 7 首；codec 名是 ffmpeg 的枚举（说明服务端用 ffmpeg/ffprobe 做了媒体分析），但分析能力 ≠ 播放转码。
+- `track/stream?guid=<DFF曲目>` 返回 **145MB 完整原始 DFF**（`FRM8` 魔数、`Content-Type: audio/x-dff`）—— 原文件直出。
+- **8 种参数变体全部被忽略**（format=wav/flac/mp3、transcode=true/1、codec=pcm_s16le、bitrate=192），
+  返回逐字节相同的原始 DFF；`track/transcode`、`track/decode`、`track/play` 等候选端点也不存在。
+- 飞牛官方客户端播 DSD 的方式只能是"下载原文件 + 客户端本地解码"（或官方 App 本身不支持）。
+- Web 门户 JS 嗅探无果（桌面壳的 dff/dsf 命中只是文件管理器的扩展名过滤列表）。
+
+**对 App 的实际影响**：飞牛源上这 242 首（DSD/裸 PCM）会播放失败 —— ExoPlayer 解不了 DSD，App 又不做
+客户端解码。同一批曲目在 Jellyfin 源上可播（自动 HLS，AAC 192k）。两个源的曲库基本相同（27.8k vs 27.6k），
+用户可在 Jellyfin 源上听这批歌。
+
+**可选的后续改进（未做，等用户决定）**：
+1. 飞牛源把已知不可解的 codec（dsd_msbf/dsd_lsbf_planar/裸 pcm_*）像 cue 一样标记为不可播 + 明确提示，
+   替代"点播放→转圈→失败"的体验（小改动）。
+2. 客户端本地解码 DSD（嵌 ffmpeg/libdsd 软解 + ExoPlayer 自定义数据源）—— 大工程，不建议。
+3. 向飞牛提需求：音乐服务暴露转码端点。
+
+**风险/既有取舍补充**（安全审查归档）：`NasHostnameVerifier` 对 IP 字面量不校验证书主机名 —— 本轮探测
+用自签证书直连 DDNS 域名时 `check_hostname=False` 与 App 内策略一致（域名访问仍走严格校验）。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报
