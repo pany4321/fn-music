@@ -333,11 +333,17 @@
   歌单条目自带图（实测 1 个歌单带 Primary）。
 - 从开发机直连 NAS 不通、经本机代理返回 502：**服务端核查只能在手机 App 里做**（或用户开代理时再试）。
 
-#### 1.7.3 音乐源交互统一（用户明确要求）
+#### 1.7.3~1.7.5 音乐源交互（用户澄清后的最终规则）
 
-- **统一规则**：任何音乐源列表（表单里的「已有音乐源」；「我的」/设置页的「音乐源」）点一条 =
-  **带入「连接音乐源」表单**（沿用 `LoginDraft` 预填类型/地址/账号/安全码，密码留空走免密续期），
-  由用户点「连接」确认；列表不再直接切换。
+- **最终规则（1.7.5 定稿，别再改错）**：
+  - 「切换音乐源」（我的页）与「管理与切换」（设置页）里的列表：点一条 = **立刻切换**到该源，
+    失败才提示。**不要**把它改成"带入表单"（1.7.3 曾这样改，用户明确要求改回）。
+  - 只有登录页/「连接音乐源」表单里时钟按钮打开的「已有音乐源」列表，点一条才**带入表单**
+    （`LoginDraft` 预填类型/地址/账号/安全码，密码留空），由用户点「连接」确认。
+  - 两个列表里的「＋ 添加音乐源」都打开空表单。
+- **关键实现（别删）**：`SwitchAccountRoute` 必须把 `historyDraft` 接进 `LoginScreen`
+  （`AuthenticatedAppActions.sourceDraft`）—— 漏了它表单内的「已有音乐源」点击会**完全没反应**
+  （`onSelect` 第一行 `?: return`）。`LibraryRoute.SwitchAccount` 已收回成 `data object`。
 - 实现要点：`LibraryRoute.SwitchAccount` 变成带 `sourceId` 的 data class（`storageKey` 不变）；
   路由把 id 作为 `initialSelectedProfileId` 传给表单、并把 `historyDraft` 接到
   `AuthenticatedAppActions.sourceDraft` —— 之前漏了这一步，所以点列表**完全没反应**（正则匹配
