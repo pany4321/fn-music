@@ -363,6 +363,38 @@
 - 顺带发现并修掉：`loginDraft.hasSavedPassword` 只看密码哈希，导致 **Jellyfin 源带入表单后
   必须重新输密码**（它其实有访问令牌可续期）。现在"有哈希或令牌"都算可直接连接（1.7.4）。
 
+#### 1.8.0 专项审查（多后端架构 + 遥控器焦点）
+
+> 审查方法：三路并行代码审查（架构/焦点/UI），逐条给 文件:行号 证据；"已确认"= 代码逻辑链可复现，
+> "需真机验证" = 依赖时序/服务端。以下按严重度归档，**本轮已修**与**记录不修**分开列。
+
+**本轮已修（1.8.0）**
+
+| 严重度 | 问题 | 修法 |
+|---|---|---|
+| 高·架构 | **rehome 后 Jellyfin 界面仍打旧地址**：`SessionBackends` memo 键只有 (kind, namespace)，rehome 换地址后 guid 不变 → 旧 `JellyfinApi`（旧 origin）继续被用；表现"能放歌但界面全挂" | `SessionRepository.connectionRevision`（completeSignIn 单一咽喉 +1）参与 memo 键；rehome 测试断言 revision 递增 |
+| 高·架构 | **跨源切换令牌窗口竞态**：`loginWithCredential` 临时换全局 `memoryToken` 验目标源，窗口内旧会话在飞请求带异源令牌 → 401 连锁可 invalidate 当前会话（Jellyfin 目标最重：无哈希回退 → 被登出、播放终止） | `ServerConnector.me(connection, token)` 参数化（FnOs 构造固定令牌的 `TrimMusicApi`；Jellyfin `api.me(token)`），删掉换令牌逻辑 |
+| 高·焦点 | 音乐源「测试」按钮测试期间 `enabled=false` → 焦点被清、跳回第一行 | 保持可聚焦，onClick 由忙时挡重入 |
+| 高·焦点 | 删除确认弹窗"正在删除"期间按钮被 if/else 移除 → 弹窗无可聚焦项 + BACK 被挡，遥控器全死 | 按钮常驻 + 忙时 onClick 挡掉；状态行固定行高（对齐清空收藏弹窗的模式） |
+| 中·焦点 | 设置页返回按钮遥控器不可达；从"＋添加"返回后焦点强制跳"CD 模式" | 返回钮 DOWN 接音乐源行；focusedKey rememberSaveable 恢复 |
+| 中·焦点 | 「切换音乐源」UP 跳过搜索框直上顶栏 | `up = searchUpFocus ?: myTabFocus` |
+| 中·焦点 | 「检查更新」检查期间 disable → 清焦 | onClick 挡重入，不再 disable |
+| 安全 | 飞牛/FNID 候选地址 http 优先（凭据明文过局域网） | buildCandidates 每个 IP **https 先于 http**（http 仍兜底）；ConnectionResolverTest 通过 |
+
+**记录不修（后续处理），按严重度**
+
+- 中·架构 **M1 收藏失败完全静默**：`FavoriteLibraryState.rollback` 写了 error 但无 UI 消费；且 `errorMessage(NotFound)` 映射为"服务器接口不可用"、fnOS 把 403/400/429 归 NetworkUnavailable —— 语义跨后端未对齐。修时先统一 AppError→文案映射，再把 favoriteState.error 接到 Toast。
+- 中·架构 **M2 Jellyfin 单曲播放重复拉全量条目**：`prepare()` 的 trackMetadata（有缓存）之后 `streamPlan` 内部又 `api.item()`（无缓存），每次点歌两个 KB 级请求。修法候选：streamPlan 复用 metadata 结果或给它加缓存。
+- 中·架构 **M3 内存缓存命中仍全量反序列化**：`SerializedResponseCache` 存字符串、每次命中都 `decodePage`。可选：缓存 decoded 对象（注意内存 ×N）。
+- 中·架构 **M4 冷启动媒体键恢复可能"A 源队列 + B 源头"**：`LAST_NAMESPACE` 与当前激活档案脱钩（logout 不清播放会话）。修法候选：恢复时校验快照 namespace == 当前 namespace。
+- 中·架构 **M5 `_playlistCovers` 不参与 namespace 化**（切源瞬间在飞写回会落旧数据；同服务器换账号共享候选）。低概率。
+- 中·架构 **M7 随机/漫游服务端代价**：Jellyfin `SortBy=Random+Recursive` 在 27k 库上全表排序；FnOs randomTracks 1 探测 + 3 串行取页（4 RTT）。真机观察加载时长再决定。
+- 低·架构 **L1**：CACHE_CONTRACT_VERSION 升版后旧 Room 行成为死数据（LRU 淘汰，白占预算）。**L6**：`completeAccountSwitch` 依赖"无挂起点"隐式时序（改动时小心）。**L7**：容器字段缺失的曲库整队列走转码。
+- 中·焦点 **F-H3 播放器队列选歌**：`queueFocus.requestFocus()` 打在已卸载 requester 上（靠竞态兜底，行为可用）。**F-M1 首页四行**：行级 FocusRequester 固定挂 index 0，纵向再进入回行首并重置横向滚动（对比：我的页 MediaBand 有 returnFocusKey 契约）。**F-M4 播放器 BACK**：队列态一次按到底（关队列+收控制条），spec 要求三层。**F-M6**：功能卡 UP→tab→DOWN 固定回"随机漫游"。**L1 新建歌单**空名时 DOWN 落空（自愈）。**L4 搜索页 CENTER 呼出键盘**需真机验证。
+- 风险清单（安全，**保持现状**）：`NasHostnameVerifier` 对 **IP 字面量主机不校验证书主机名**（IP+HTTPS 可被持任意有效公共证书的中间人拦截；域名不受影响；TvMusicApplication 将其设为进程级默认，含播放器）；`SecureTokenStore` 密码哈希无盐（它本身就是 fnOS 协议的重放凭据，加密存储下可接受）。
+
+**审查确认"本来就没问题"的疑点**（免得以后再查一遍）：跨源队列恢复被 namespace + Rebind 双层挡住；`rebaseApiUri` 对异源 URI 返回 null 不改写；漫游游标有 generation + namespace 双 guard；ArtworkBitmapCache/ArtworkCache 的在飞写回有 generation 失效；快照（Room 未加密）里**不含凭据**；日志无 token/安全码；401 风暴被 authVerification mutex + connection 身份检查去重。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报

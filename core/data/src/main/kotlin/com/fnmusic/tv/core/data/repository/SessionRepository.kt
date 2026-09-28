@@ -394,6 +394,17 @@ class SessionRepository internal constructor(
         }
     }
 
+    /**
+     * 连接换代计数：每次 `completeSignIn`（登录、会话恢复、rehome 换地址）都会 +1。
+     * `SessionBackends` 用它参与 memo 键 —— rehome 只换地址、guid 不变，没有这个计数
+     * 时 memo 会继续返回绑着旧 origin 的 Jellyfin 后端（"能放歌但界面全挂"的根因）。
+     */
+    val connectionRevision: Long
+        get() = connectionRevisionField
+
+    @Volatile
+    private var connectionRevisionField: Long = 0
+
     fun cacheNamespace(): String {
         val current = _state.value as? SessionState.SignedIn ?: throw AppException(AppError.Unauthenticated)
         return "${current.server.guid.value}:${current.user.guid.value}"
@@ -632,14 +643,12 @@ class SessionRepository internal constructor(
             connector.login(connected, username, password, deviceId)
         } else {
             val viaToken = savedToken?.takeIf(String::isNotBlank)?.let { token ->
-                // ⚠️ 令牌续期必须临时把内存令牌换成"目标源的令牌"：
-                // 否则验的是当前会话的令牌（跨源切换时必然 401，切换会无谓失败）。
-                val previousToken = memoryToken
-                memoryToken = token
-                val user = runCatching { connector.me(connected) }.getOrNull()
-                // 验不过就把令牌还回去——当前会话不受影响，由调用方决定回落到密码登录。
-                if (user == null) memoryToken = previousToken
-                user?.let { ServerLoginResult(token, it, connected) }
+                // 令牌续期：把"目标源的令牌"显式传给 me()，**不动全局内存令牌**——
+                // 切换瞬间旧会话的在飞请求还在跑，换全局令牌会让它们带错凭据、
+                // 401 连锁把当前会话打成未登录（真机踩过）。
+                runCatching { connector.me(connected, token) }
+                    .getOrNull()
+                    ?.let { ServerLoginResult(token, it, connected) }
             }
             connector.reLogin(connected, username, savedHash, deviceId)
                 ?: viaToken
@@ -681,6 +690,7 @@ class SessionRepository internal constructor(
 
     private fun completeSignIn(connected: ServerConnection, user: User) {
         connection = connected
+        connectionRevisionField += 1
         connectionAccess = (connected as? ServerConnection.FnOs)?.access ?: ConnectionAccess()
         _state.value = SessionState.SignedIn(connected.identity, user)
     }

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 歌手兜底头像：实心人头 + 圆角肩部剪影。
+     路径用白色绘制，实际颜色由 Compose Icon 的 tint 提供（FnColors.Teal，随主题变化）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 头：正圆 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,18 a20,20 0 1,1 -0.01,0 Z" />
+    <!-- 肩：从两侧向上收拢的圆顶，底部平齐 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,63 C71,63 85,74 86.5,90 L87,96 L21,96 L21.5,90 C23,74 37,63 54,63 Z" />
+</vector>

@@ -119,8 +119,12 @@ internal interface ServerConnector {
         deviceId: String,
     ): ServerLoginResult?
 
-    /** 当前登录用户（会话校验用）。 */
-    suspend fun me(connection: ServerConnection): User
+    /**
+     * 当前登录用户（会话校验用）。
+     * [token] 非空时用这个令牌校验，**不读全局内存令牌** —— 跨源切换的令牌续期
+     * 用它传"目标源的令牌"，避免临时替换全局令牌造成并发请求带错凭据。
+     */
+    suspend fun me(connection: ServerConnection, token: String? = null): User
 
     suspend fun logout(connection: ServerConnection)
 }
@@ -201,10 +205,13 @@ internal class FnOsConnector(
         return ServerLoginResult(result.userToken, result.user.toDomain(), fnOs)
     }
 
-    override suspend fun me(connection: ServerConnection): User {
+    override suspend fun me(connection: ServerConnection, token: String?): User {
         val fnOs = connection as? ServerConnection.FnOs
             ?: throw AppException(AppError.Unauthenticated)
-        return fnOs.api.me().toDomain()
+        if (token.isNullOrBlank()) return fnOs.api.me().toDomain()
+        // 显式令牌：临时构造一个"认这个令牌"的 api 实例（不动全局 tokenProvider）。
+        val api = TrimMusicApi(fnOs.normalized, clientFactory(), { token }, fnOs.access)
+        return api.me().toDomain()
     }
 
     override suspend fun logout(connection: ServerConnection) {
@@ -298,10 +305,10 @@ internal class JellyfinConnector(
         deviceId: String,
     ): ServerLoginResult? = null
 
-    override suspend fun me(connection: ServerConnection): User {
+    override suspend fun me(connection: ServerConnection, token: String?): User {
         val jellyfin = connection as? ServerConnection.Jellyfin
             ?: throw AppException(AppError.Unauthenticated)
-        val me = jellyfin.api.me()
+        val me = jellyfin.api.me(token)
         // 令牌路径建起来的连接 userId 是空的：这里验身份顺手把它补上，
         // 之后 requireJellyfinSession() 交给后端的就不是空值了。
         if (jellyfin.userId.isBlank()) jellyfin.userId = me.Id

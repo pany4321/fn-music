@@ -70,11 +70,15 @@ class SessionRepositoryTest {
         server.enqueue(MockResponse.Builder().code(401).build())
         enqueueLogin("pan", "fresh-token")
 
+        val revisionBefore = repository.connectionRevision
         val rehomed = repository.rehomeConnection()
 
         assertTrue(rehomed)
         assertTrue(repository.state.value is SessionState.SignedIn)
         assertEquals("fresh-token", repository.playbackAuth().headers["Authorization"])
+        // rehome 换了连接必须换代：SessionBackends 靠这个重建绑着新地址的后端，
+        // 否则 Jellyfin 场景下界面会继续打 rehome 前的旧地址（"能放歌但界面全挂"）。
+        assertTrue(repository.connectionRevision > revisionBefore)
     }
 
     @Test fun `rehome on a signed-out session returns false without touching storage`() = runBlocking {

@@ -128,6 +128,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
 import androidx.tv.material3.Button as TvMaterialButton
+import androidx.tv.material3.Icon
 import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Border
 import androidx.tv.material3.LocalContentColor
@@ -292,12 +293,15 @@ internal fun AuthenticatedApp(
             stateKey = "genre:" + route.genre.guid.value + ":tracks",
             title = route.genre.name,
             subtitle = "风格",
+            // 风格条目有自带封面时显示真图；没有则用"均衡器"静态图兜底（见 Genre 兜底分支）。
+            coverId = route.genre.coverId,
             loader = { container.musicRepository.genreTracks(route.genre.guid.value, it) },
             queueSource = { sort -> QueueSource.Genre(route.genre.guid.value, sort) },
             onPlayer = { open(LibraryRoute.Player(it)) },
             detailHeader = TrackDetailHeader(
                 kind = "风格",
                 declaredTrackCount = route.genre.trackCount,
+                artworkFallback = CollectionArtworkFallback.Genre,
                 onBack = back,
             ),
             emptyMessage = "该风格暂无歌曲",
@@ -2070,7 +2074,9 @@ private fun ProfileStrip(
                 .focusProperties {
                     left = settingsFocus
                     right = FocusRequester.Cancel
-                    up = myTabFocus
+                    // 与旁边"设置"一致：UP 回搜索框（正上方横贯全宽），
+                    // 之前直接跳到顶栏 tab，多跳一层。
+                    up = searchUpFocus ?: myTabFocus
                     down = artistRowFocus
                 }
                 .focusRequester(switchAccountFocus)
@@ -2805,7 +2811,7 @@ private data class TrackDetailHeader(
     val onBack: () -> Unit,
 )
 
-private enum class CollectionArtworkFallback { Initial, Artist, Favorites, Recent, Collection, PlaylistGrid }
+private enum class CollectionArtworkFallback { Initial, Artist, Favorites, Recent, Collection, PlaylistGrid, Genre }
 
 private sealed interface TrackCollectionPrimaryAction {
     data object PlayAll : TrackCollectionPrimaryAction
@@ -3474,47 +3480,58 @@ private fun TrackCollection(
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
                 )
-                if (removingTrack) {
-                    Text("正在删除…", color = FnColors.Muted, fontSize = 14.sp)
-                } else {
-                    removeMessage?.let {
-                        Text(it, color = FnColors.Warning, fontSize = 14.sp)
+                // 忙时状态行与按钮都保留：按钮被整体移除会让弹窗短暂没有可聚焦项，
+                // 遥控器全死（慢网络下数秒）；焦点也不该因重组而丢。
+                // 状态行固定占一行（没有消息时透明占位），出现/消失高度不变、按钮不跳。
+                @Composable fun RemoveStatusLine() {
+                    // 忙时/无消息时不渲染文本但保留行高，按钮位置稳定。
+                    val message = if (removingTrack) "正在删除…" else removeMessage
+                    if (message != null) {
+                        Text(
+                            message,
+                            color = if (removingTrack) FnColors.Muted else FnColors.Warning,
+                            fontSize = 14.sp,
+                            modifier = Modifier.height(19.dp),
+                        )
+                    } else {
+                        Spacer(Modifier.height(19.dp))
                     }
-                    val dialogShape = RoundedCornerShape(24.dp)
-                    val dialogScale = ButtonDefaults.scale(focusedScale = 1.05f)
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                }
+                RemoveStatusLine()
+                val dialogShape = RoundedCornerShape(24.dp)
+                val dialogScale = ButtonDefaults.scale(focusedScale = 1.05f)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    Button(
+                        onClick = { if (!removingTrack) pendingRemoveTrack = null },
+                        modifier = Modifier
+                            .size(width = 132.dp, height = 46.dp)
+                            .focusRequester(cancelFocus),
+                        shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
+                        scale = dialogScale,
+                        contentPadding = PaddingValues(0.dp),
                     ) {
-                        Button(
-                            onClick = { pendingRemoveTrack = null },
-                            modifier = Modifier
-                                .size(width = 132.dp, height = 46.dp)
-                                .focusRequester(cancelFocus),
-                            shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
-                            scale = dialogScale,
-                            contentPadding = PaddingValues(0.dp),
-                        ) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("取消", fontSize = 14.sp)
-                            }
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("取消", fontSize = 14.sp)
                         }
-                        Button(
-                            onClick = { confirmRemove(track) },
-                            modifier = Modifier.size(width = 132.dp, height = 46.dp),
-                            shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
-                            scale = dialogScale,
-                            colors = ButtonDefaults.colors(
-                                containerColor = FnColors.Coral,
-                                contentColor = FnColors.Text,
-                                focusedContainerColor = FnColors.Coral,
-                                focusedContentColor = FnColors.Text,
-                            ),
-                            contentPadding = PaddingValues(0.dp),
-                        ) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("删除", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            }
+                    }
+                    Button(
+                        onClick = { if (!removingTrack) confirmRemove(track) },
+                        modifier = Modifier.size(width = 132.dp, height = 46.dp),
+                        shape = ButtonDefaults.shape(dialogShape, dialogShape, dialogShape, dialogShape, dialogShape),
+                        scale = dialogScale,
+                        colors = ButtonDefaults.colors(
+                            containerColor = FnColors.Coral,
+                            contentColor = FnColors.Text,
+                            focusedContainerColor = FnColors.Coral,
+                            focusedContentColor = FnColors.Text,
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("删除", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -3806,11 +3823,15 @@ private fun CollectionArtworkFallbackContent(
     shape: Shape,
 ) {
     when (fallback) {
-        CollectionArtworkFallback.Artist -> ArtistAvatarPlaceholder(
-            title = title,
-            modifier = modifier,
-            fontSize = 58.sp,
-        )
+        CollectionArtworkFallback.Artist -> ArtistAvatarPlaceholder(modifier = modifier)
+        CollectionArtworkFallback.Genre -> Box(modifier.clip(shape)) {
+            Image(
+                painter = painterResource(R.drawable.bg_genre_equalizer),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
         CollectionArtworkFallback.Favorites -> Box(modifier.clip(shape)) {
             HomeFeatureArtwork(HomeArtworkKind.Favorites, Modifier.fillMaxSize())
         }
@@ -4593,10 +4614,10 @@ private fun ArtistLockup(
                     modifier = Modifier.size(61.dp),
                     shape = CircleShape,
                     contentScale = ContentScale.Crop,
-                    placeholderContent = { ArtistAvatarPlaceholder(title, Modifier.size(61.dp)) },
+                    placeholderContent = { ArtistAvatarPlaceholder(Modifier.size(61.dp)) },
                 )
             } else {
-                ArtistAvatarPlaceholder(title, Modifier.size(61.dp))
+                ArtistAvatarPlaceholder(Modifier.size(61.dp))
             }
             Spacer(Modifier.width(10.dp))
             LockupLabels(title, subtitle, Modifier.weight(1f))
@@ -4606,19 +4627,18 @@ private fun ArtistLockup(
 
 @Composable
 private fun ArtistAvatarPlaceholder(
-    title: String,
     modifier: Modifier = Modifier,
-    fontSize: TextUnit = 23.sp,
 ) {
+    // 兜底头像：灰圆底 + 实心人形剪影（矢量按圆形容器等比缩放，61dp 卡片与 184dp 详情页头共用）。
     Box(
         modifier.background(FnColors.Hairline, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            title.trim().take(1).ifBlank { "音" }.uppercase(),
-            color = FnColors.Teal,
-            fontSize = fontSize,
-            fontWeight = FontWeight.SemiBold,
+        Icon(
+            painter = painterResource(R.drawable.ic_avatar_person),
+            contentDescription = null,
+            tint = FnColors.Teal,
+            modifier = Modifier.fillMaxWidth(0.62f),
         )
     }
 }

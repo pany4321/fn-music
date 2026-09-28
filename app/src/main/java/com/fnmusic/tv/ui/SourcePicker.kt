@@ -165,8 +165,9 @@ internal fun SourceRow(
         }
         if (onTest != null) {
             LoginActionButton(
-                onClick = onTest,
-                enabled = !testing,
+                // 测试期间保持可聚焦（禁用会把焦点从图里摘掉、跳回第一行），
+                // 重入由调用点的"已有测试在跑就不受理"挡住。
+                onClick = { if (!testing) onTest() },
                 modifier = Modifier
                     .width(112.dp)
                     .height(76.dp)

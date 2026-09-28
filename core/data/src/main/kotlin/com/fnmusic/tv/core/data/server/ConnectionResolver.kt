@@ -166,8 +166,10 @@ class ConnectionResolver internal constructor(
     internal fun buildCandidates(fnId: String, params: FnConnectionParams): List<ProbeCandidate> = buildList {
         fun addIp(host: String, ipv6: Boolean = false) {
             val serialized = if (ipv6) "[$host]" else host
-            addCandidate("http://$serialized:${params.httpPort}", relayMode = false)
+            // https 优先：登录凭据（密码哈希/令牌）不该明文过局域网。
+            // https 端口没开的 NAS 会自然回落到 http（resolve 取第一个可达者），行为不回退。
             addCandidate("https://$serialized:${params.httpsPort}", relayMode = false)
+            addCandidate("http://$serialized:${params.httpPort}", relayMode = false)
         }
         params.internalIpv4.forEach { addIp(it) }
         params.publicIpv6.forEach { addIp(it, ipv6 = true) }

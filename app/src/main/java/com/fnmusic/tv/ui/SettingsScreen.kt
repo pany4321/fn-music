@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -132,9 +133,18 @@ internal fun SettingsScreen(
         container.musicRepository.applyArtworkBudget()
         refreshUsage()
     }
+    // 返回本页时回到离开前的控件（如从"＋添加"的表单页返回）；
+    // 首次进入仍聚焦"CD 模式"（页内第一个常规控件）。
+    var focusedKey by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         yield()
-        runCatching { coverStyleFocus.requestFocus() }
+        val target = when (focusedKey) {
+            "manage-sources" -> manageSourcesFocus
+            "add-source" -> addSourceFocus
+            else -> coverStyleFocus
+        }
+        runCatching { target.requestFocus() }
+        focusedKey = null
     }
 
     if (sourcePickerVisible) {
@@ -215,7 +225,16 @@ internal fun SettingsScreen(
                 ),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                DetailBackButton(onClick = onBack)
+                DetailBackButton(
+                    onClick = onBack,
+                    // 之前返回按钮不可聚焦（遥控器够不到，只能按 BACK 退出）；
+                    // DOWN 接到页内第一个控件，把它接进焦点链。
+                    modifier = Modifier.focusProperties {
+                        down = manageSourcesFocus
+                        right = FocusRequester.Cancel
+                        up = FocusRequester.Cancel
+                    },
+                )
                 Spacer(Modifier.width(16.dp))
                 Text("设置", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
             }
@@ -242,6 +261,7 @@ internal fun SettingsScreen(
                                 up = FocusRequester.Cancel
                                 down = coverStyleFocus
                             }
+                            .onFocusChanged { if (it.isFocused) focusedKey = "manage-sources" }
                             .focusRequester(manageSourcesFocus),
                     )
                     SettingsChoiceButton(
@@ -256,6 +276,7 @@ internal fun SettingsScreen(
                                 up = FocusRequester.Cancel
                                 down = coverStyleFocus
                             }
+                            .onFocusChanged { if (it.isFocused) focusedKey = "add-source" }
                             .focusRequester(addSourceFocus),
                     )
                 }
@@ -510,7 +531,7 @@ internal fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("音乐坞", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "Android TV / 车机 音乐坞 · 飞牛音乐 / Jellyfin 客户端",
+                            "Android TV / 车机 音乐播放器",
                             color = FnColors.Muted,
                             fontSize = 10.sp,
                             lineHeight = 12.sp,
@@ -540,8 +561,12 @@ internal fun SettingsScreen(
                         SettingsActionButton(
                             label = updateButtonLabel(updateState),
                             leading = "↓",
-                            enabled = (updateState as? UpdateUiState.Checking)?.source != UpdateCheckSource.Manual,
-                            onClick = container.updateController::checkManually,
+                            // 忙时不 disable：禁用会把焦点从图里摘掉。重入由 onClick 挡住。
+                            onClick = {
+                                if ((updateState as? UpdateUiState.Checking)?.source != UpdateCheckSource.Manual) {
+                                    container.updateController.checkManually()
+                                }
+                            },
                                     modifier = Modifier
                                         .width(128.dp)
                                         .height(48.dp)

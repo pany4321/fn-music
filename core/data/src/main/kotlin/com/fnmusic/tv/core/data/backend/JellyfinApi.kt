@@ -61,10 +61,11 @@ internal class JellyfinApi(
         return result
     }
 
-    suspend fun me(): JellyfinUserDto =
+    /** [token] 非空时用它鉴权（令牌续期场景），否则读全局令牌提供者。 */
+    suspend fun me(token: String? = null): JellyfinUserDto =
         request<JellyfinUserDto>(
             Request.Builder().url(url("Users/Me")).get(),
-            token = requireToken(),
+            token = token?.takeIf(String::isNotBlank) ?: requireToken(),
         ).also { cachedUserId = it.Id }
 
     /**
