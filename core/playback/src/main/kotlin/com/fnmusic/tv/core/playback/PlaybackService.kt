@@ -76,7 +76,7 @@ internal fun createPlaybackRenderersFactory(context: Context): DefaultRenderersF
 internal fun createPlaybackHttpDataSourceFactory(): DefaultHttpDataSource.Factory =
     DefaultHttpDataSource.Factory()
         .setAllowCrossProtocolRedirects(false)
-        .setUserAgent("FnMusicTV/0.1")
+        .setUserAgent("MusicDock/1.0")
 
 internal fun deleteLegacyAudioCache(cacheDirectory: File): Boolean = runCatching {
     val legacyCache = File(cacheDirectory.canonicalFile, LEGACY_AUDIO_CACHE_DIRECTORY)

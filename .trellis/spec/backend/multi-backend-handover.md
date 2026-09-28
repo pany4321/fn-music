@@ -22,7 +22,8 @@
 - **1.5.0** = 多后端（Multibackend）第一步：后端分层骨架（行为不变，已发布，见 §5）；
 - **1.5.1** = Jellyfin 实际接入（登录识别 + 客户端漫游 + 转码/HLS），在 1.5.0 基础上升版；
 - `1.4.x` 只留给上个发布版的维护分支小修。
-- **2.0.0** = 改名「音乐坞」+ `applicationId` 改 `com.musicdock.tv`（破坏性，用户需重装）。
+- **1.7.0** = 显示名已改「**音乐坞（MusicDock）**」，`applicationId` 仍是 `com.fnmusic.tv`，
+  老用户可直接覆盖升级。**2.0.0 只在真要换包名时才做**（`com.musicdock.tv`，破坏性、必须重装）。
 
 ---
 
@@ -41,7 +42,9 @@
 :core:playback  播放内核（仅接上 Hls/Transcode 与 backend 提供的 URL 判定）
 :app            UI + 依赖装配（按会话的 ServerKind 选择后端）
 ```
-**命名**：显示名改「**音乐坞（MusicDock）**」；`applicationId` 改 `com.musicdock.tv`，但 **Gradle `namespace` 与源码包路径保持 `com.fnmusic.tv` 不动**（避免全库移动目录、diff 爆炸）。
+**命名**：显示名「**音乐坞（MusicDock）**」——**1.7.0 已落地**（`app_name`、启动页、关于页、
+更新提示、UA、README/文档一起改）；`applicationId` 仍是 `com.fnmusic.tv`。若将来真要换包名，
+`namespace` 与源码包路径也应保持 `com.fnmusic.tv` 不动（避免全库移动目录）。
 
 ---
 
@@ -275,7 +278,9 @@
 ### 收尾
 13. ⏳ **真机双后端串行验收**：Jellyfin 侧已跑（见 §3.2 验证状态），飞牛侧在本版改动后**只差登录 + 全流程复验**
    （已知踩点在 §3.2：登录页 BACK 会退出页面、登录按钮 disabled 时焦点不移动）。发版：**1.5.1**。
-14. 之后再单独做 **2.0.0**：改名「音乐坞」+ `applicationId com.musicdock.tv` + 同步 CI 产物名/更新清单/UA/README + 旧包最后一次发布里写明"请安装新版音乐坞"（换包名后旧版无法自更新）。
+14. ✅ 显示名已在 **1.7.0** 改成「音乐坞」且包名不变；CI 产物名 `fn-music-tv-*`、更新清单包名校验、
+    签名别名都保持原样，所以升级路径不变。**2.0.0**（换包名 `com.musicdock.tv`）仅在确有需要时再做，
+    届时要同步 CI 产物名/更新清单/UA/README，并在旧包最后一次发布里写明"请安装新版音乐坞"。
 
 ### 3.4 用户反馈的两个缺陷（1.6.2）
 
@@ -283,6 +288,18 @@
 |---|---|---|
 | **点收藏提示"收藏失败"**（Jellyfin；浏览/播放都正常） | 连接是"先探测、后凭令牌"建的（重装/重启后的令牌恢复、跨源切换都是这条路径），那时 `userId` 还是空：`/Items?userId=` 照样能用（服务端按令牌认人），但**路径式**接口 `/Users//FavoriteItems/{id}` 直接 404。日志一行锁定：`HTTP 404 POST /Users//FavoriteItems/{id}` | `JellyfinApi.uid()`：空 userId 先 `/Users/Me` 再缓存（登录响应里的 id 也缓存），所有带 userId 的接口统一过它；`JellyfinConnector.me()` 顺手回填连接上的 userId。**真机验证**：令牌恢复会话下点收藏 → 服务端 `IsFavorite` False→True、无 404，再点一次 → True→False（服务端状态已还原） |
 | **音乐源窗口按钮文字"跑到按钮外"**（手机上） | 源行按钮是胶囊形（`LoginActionButton` 默认 `RoundedCornerShape(50)`，80dp 高 = 40dp 圆角），而行内文字**没有横向内边距**：首字正好压在圆角的弧线上，视觉上像出界 | 源行内容加 `padding(horizontal = 22.dp)`。设置页那两个按钮（12sp 标签）本身没问题，一并核对过 ✓ |
+
+### 3.5 1.7.0：音乐源管理增强 / 封面与随机修复 / 改名
+
+| 主题 | 内容 |
+|---|---|
+| **Jellyfin 四处缺封面** | 根因是 `LIST_ITEM_FIELDS` **从没请求过 `ImageTags`**，而所有 `coverId` 只由 `ImageTags.Primary` 决定 → 随机漫游 / 全部歌单 / 随机歌曲 / 最近添加全都没有封面，歌单的"前三首拼排"也因为曲目没有 coverId 而永远拼不出来。现在列表字段带上 `ImageTags`（体积可忽略），单条目字段自动继承。 |
+| **随机不够随机** | 飞牛只能按分页随机挑页，而页内是按添加时间排好序的（一页 24 首常常是同一张专辑），连续刷新还容易撞回同一页。现在：飞牛取**两个不同随机页**合并后洗牌；随机专辑同理（并避开上一次的页号）；两侧都加 `spreadByKey` 把相邻同专辑/同歌手的条目拆开；首页"随机漫游/全部歌单"卡片的封面 deck 也从"只在缓存为空时采样一次"改成**冷启动先用上次那组出画、随后重采样上屏**。工具函数在 `core/data/.../backend/RandomSampling.kt`。 |
+| **音乐源连通性测试** | 新增 `SessionRepository.testSource(profileId)`：用**该源自己的令牌**临时造 connector 与 API，`connect()` 验地址/类型/安全码、`me()` 验令牌，飞牛令牌过期但存了密码哈希时用 `reLogin` 复验；**全程不碰当前会话**（不改 memoryToken/connection/state），6 秒总超时。返回 `SourceTestResult`（Ok / CredentialsExpired / Failed）→ 弹窗里行下方的状态行 + Toast。 |
+| **连接音乐源页文案与提示** | 抬头从「登录」改成「连接音乐源」、按钮改成「连接/正在连接」（同一页既要服务首次安装，也要服务应用内新增）。连接成功弹 Toast「已连接：X」并**显式回退该页**（原来靠 `user.guid` 变化重置路由，重新连同一个账号时页面不会关）；失败除了页内状态行再多一个 Toast。顺带修掉 `switchAccountTo` **丢掉 `kind` 参数**的真 bug（显式选的类型曾被自动探测覆盖）。 |
+| **登录页「已有音乐源」弹窗** | 原来的自绘弹窗不会自适应宽度、也没有滚动（条目一多就移不动）。现在与「我的」/设置页共用 `SourcePickerDialog`（自适应宽度 + 滚动 + 删除 + **测试**）；1.4.x 遗留的"最近用过的地址"仍以次级列表保留（点一条只回填地址）。交互契约与 `LoginHistorySmokeTest` 已同步。 |
+| **静态兜底图** | 卡片空态从 Canvas 插画改为静态图：`app/src/main/res/drawable-nodpi/cover_fallback_{roam,favorites,recent,playlist}.png`（1024×1024，用户提供，`HomeFeatureArtwork` 里走 `painterResource` + `ContentScale.Crop`；`Collection` 黑胶仍用 Canvas 画）。 |
+| **改名** | 显示名改「音乐坞（MusicDock）」：`app_name`、启动页、关于页、更新提示、播放器/歌词 UA、README 与文档、`rootProject.name`。**不动**：`applicationId`/`namespace`、签名别名与目录、CI 产物名、更新清单包名校验、`sourceKindLabel(FnOs)="飞牛音乐"`（那是服务器类型名）。 |
 
 #### 已知问题（本轮未修，与改动无关）
 

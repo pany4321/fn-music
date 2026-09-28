@@ -267,10 +267,16 @@ interface AuthenticatedAppActions {
 - History and password visibility are 52dp icon-only buttons. Use familiar recent-history and eye
   glyphs, preserve content descriptions `历史` and `显示或隐藏密码`, and do not place `历史`,
   `显示密码`, or `隐藏密码` inside the buttons.
-- Login history uses the project palette in one non-nested dialog. Each saved server/account row is
-  72dp high with account on the first line and `server (HTTP|HTTPS)` on the second, a separately
-  focusable delete action, selected-row treatment, and one bottom `清除所有历史记录` command.
-  Activating a profile closes the dialog and starts login immediately without another confirmation.
+- Login history and in-app music-source management share **one** dialog (`SourcePickerDialog`):
+  platform-default dialog width is disabled (0.86 of the screen, capped at 1000dp) and the content
+  scrolls under a height cap, because a fixed-width non-scrolling dialog clipped rows on phones.
+  Each source row is 80dp high with the server name (falling back to the backend label) on the first
+  line and `类型 · 地址 · 账号` on the second, plus two separate 76dp actions: `测试音乐源：X`
+  (connectivity test, disabled while running, result shown as a status line under the row) and
+  `删除音乐源：X`. Vertical D-pad movement keeps each of the three columns aligned with the same
+  column of the neighbouring row. Activating a row connects to that source immediately, without
+  another confirmation; the login page passes `onAdd = null` (no add entry) and `title = "已有音乐源"`,
+  the in-app entry uses `title = "音乐源"` plus `onAdd`/`onClearAll`.
 - Login form commands use the local foundation-based `LoginActionButton`, including history,
   password visibility, login submission, and history-dialog actions. It owns a real focus target
   plus `Modifier.clickable(Role.Button)` so the same callback works for D-pad and physical pointer
@@ -416,7 +422,7 @@ interface AuthenticatedAppActions {
   cross-module operations through `AuthenticatedAppActions`. Do not expose `AppContainer` to UI or
   duplicate logout/cache/playback ordering in a page callback. Playback error display may use the
   typed failure's display name, but behavior must use its typed properties.
-- The user-facing product name is `飞牛音乐`. `@string/app_name`, loading/login branding,
+- The user-facing product name is `音乐坞（MusicDock）`. `@string/app_name`, loading/login branding,
   launcher label, baseline-profile selectors, README title, launcher icon, and TV banner must move
   together. The authenticated Home/My top bar keeps its left slot empty when no media is available;
   it does not repeat the product name. The mark is a coral record with an inner groove and a charcoal sound wave pressed into it on a
@@ -553,7 +559,7 @@ interface AuthenticatedAppActions {
 | Physical pointer taps an enabled Login action | Invoke its command exactly once; Login clears the submitted password and starts submission |
 | Physical pointer taps a disabled Login action | Do not invoke its command or create a focus target |
 | 1920x1080 login first frame | Show the complete Login button with no clipped bottom edge or overlapping control |
-| Launcher/app surface after rebrand | Display `飞牛音乐`; icon and TV banner share the coral record mark |
+| Launcher/app surface after rebrand | Display `音乐坞`; icon and TV banner share the coral record mark |
 | Existing signed installation receives the rebrand | Preserve `com.fnmusic.tv` and signer; increment managed version code |
 | New presentation identity/revision | Publish three `Loading` states and cancel the prior token |
 | Late resource result has an old namespace/media/revision/style | Ignore it; current UI state is unchanged |
@@ -629,7 +635,7 @@ interface AuthenticatedAppActions {
   12 seconds, and request a relative seek of about 78 seconds without changing TV focus contracts.
 - Good: render the same centered login form on TV and a smaller landscape device; the TV shows the
   complete form initially, while the smaller viewport scrolls the same tree to the Login button.
-- Good: install `飞牛音乐` over the previous signed package and preserve app data because the package
+- Good: install `音乐坞` over the previous signed package and preserve app data because the package
   name and signer are unchanged while the version code increases.
 - Good: switch A(rev 1) -> B(rev 2) -> A(rev 3), complete requests in reverse order, and display
   only A rev 3 metadata, artwork, and lyrics.
@@ -828,7 +834,7 @@ interface AuthenticatedAppActions {
   physical pixels of height at 320 dpi, and no lower title glyph is clipped at the configured font
   scale. Inspect rendered title pixels, not only semantic bounds.
 - Brand resource check: search user-facing sources for the retired product name, assert the merged
-  manifest label resolves to `飞牛音乐`, visually inspect the record mark at launcher size, and
+  manifest label resolves to `音乐坞`, visually inspect the record mark at launcher size, and
   verify the newly versioned signed APK installs with replace over the prior package.
 - Home device test: focus the now-playing pill, press Center once, and assert the player title and
   progress semantics are present. Theme tests keep primary, muted, and status colors readable on
@@ -1026,11 +1032,11 @@ Button(
 
 ```xml
 <!-- Wrong: launcher text changes while in-app branding and upgrade identity drift. -->
-<string name="app_name">飞牛音乐</string>
+<string name="app_name">音乐坞</string>
 <!-- applicationId = "com.example.echostage" -->
 
 <!-- Correct: update all user-facing brand resources but preserve the installed identity. -->
-<string name="app_name">飞牛音乐</string>
+<string name="app_name">音乐坞</string>
 <!-- applicationId remains com.fnmusic.tv; versionCode increases for the formal release. -->
 ```
 
