@@ -421,6 +421,17 @@
 **风险/既有取舍补充**（安全审查归档）：`NasHostnameVerifier` 对 IP 字面量不校验证书主机名 —— 本轮探测
 用自签证书直连 DDNS 域名时 `check_hostname=False` 与 App 内策略一致（域名访问仍走严格校验）。
 
+#### 歌词左移修复与实测（1.8.2）
+
+- **逐行 LRC 的左移从未生效（真 BUG，用户实测发现）**：`SyncedLineText` 的 `Text` 在
+  `fillMaxWidth` 的 Box 里按父约束测量，超长内容被截断，`onTextLayout` 返回宽度恒等于容器宽 →
+  `overflowPx` 恒 0。修法：`Text.requiredWidth(IntrinsicSize.Max)`（突破父约束按完整内容宽测量，
+  外层 `clipToBounds`）。逐字行（`KaraokeLineText`）是自绘 Canvas 主动放宽画布，所以一直正常。
+- **左移窗口统一改为 1/3 → 90%**（两种歌词；用户要求不要等到 100%）：`KaraokeLineText` 与
+  `SyncedLineText` 同步。
+- **真机验证**：Jellyfin 源播《后来》（在线匹配的逐行 LRC）——超长行行首被逐步裁出、滚动连续推进 ✓；
+  逐字歌词此前已正常。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报
