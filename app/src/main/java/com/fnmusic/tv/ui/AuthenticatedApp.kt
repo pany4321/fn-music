@@ -4235,14 +4235,17 @@ private fun PlaylistCoverDeck(
 private enum class HomeArtworkKind { Roam, Favorites, Recent, Collection, PlaylistGrid }
 
 /**
- * 卡片兜底用的静态图（用户提供的四张，1024×1024，统一放 `drawable-nodpi`）。
+ * 卡片兜底用的静态图（用户提供的插画，统一放 `drawable-nodpi`）。
  * 返回 null 表示这一类仍然用下面 Canvas 画（Collection 黑胶不在静态图范围内）。
+ *
+ * 「歌单」兜底刻意与「全部专辑」用同一张图（用户要求两者保持一致）：既保证风格统一，
+ * 以后换图也只需要换一个文件。若哪天想给歌单单独出图，把这里改成独立资源即可。
  */
 private fun featureArtworkRes(kind: HomeArtworkKind): Int? = when (kind) {
     HomeArtworkKind.Roam -> R.drawable.cover_fallback_roam
     HomeArtworkKind.Favorites -> R.drawable.cover_fallback_favorites
     HomeArtworkKind.Recent -> R.drawable.cover_fallback_recent
-    HomeArtworkKind.PlaylistGrid -> R.drawable.cover_fallback_playlist
+    HomeArtworkKind.PlaylistGrid -> R.drawable.cover_all_albums
     HomeArtworkKind.Collection -> null
 }
 
