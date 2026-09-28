@@ -3983,7 +3983,11 @@ private fun DetailTrackRow(
                     modifier = Modifier.width(220.dp),
                 )
                 Text(
-                    if (track.isCue) "需兼容" else formatDuration(track.durationMs ?: 0),
+                    when {
+                        track.isCue -> "需兼容"
+                        track.unplayableReason != null -> "不支持"
+                        else -> formatDuration(track.durationMs ?: 0)
+                    },
                     color = contentColor.copy(alpha = 0.72f),
                     fontSize = 14.sp,
                     textAlign = TextAlign.End,
@@ -4095,7 +4099,9 @@ internal fun exactTrackQueueWindow(
 }
 
 private fun isTrackPlayable(track: Track): Boolean =
-    !track.isCue && (track.accessStatus == null || track.accessStatus == 0)
+    !track.isCue && (track.accessStatus == null || track.accessStatus == 0) &&
+        // 飞牛源对本机解不了的格式（DSD 等）打的原因标：null = 可播
+        track.unplayableReason == null
 
 @Composable
 private fun PlaylistTile(
@@ -5500,7 +5506,10 @@ private fun SearchRoute(
                             TrackResultRow(
                                 index = index + 1,
                                 title = track.title,
-                                subtitle = track.artistName.orEmpty(),
+                                subtitle = listOfNotNull(
+                                    track.artistName?.takeIf(String::isNotBlank),
+                                    track.unplayableReason,
+                                ).joinToString(" · "),
                                 coverId = track.coverId,
                                 modifier = if (firstSection == "track" && index == 0) {
                                     Modifier.focusRequester(resultsFocus)

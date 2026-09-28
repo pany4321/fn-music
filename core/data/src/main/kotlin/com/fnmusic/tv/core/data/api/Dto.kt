@@ -141,7 +141,35 @@ data class TrackDto(
         accessStatus = accessStatus,
         audioFormat = sourceAudioSpec.displayFormat(),
         isFavorite = isFavorite,
+        unplayableReason = fnOsUnplayableReason(
+            container = sourceAudioSpec.container,
+            codec = sourceAudioSpec.codec,
+        ),
     )
+}
+
+/**
+ * 飞牛源没有转码兜底（`track/stream` 实测为原文件直出，见交接文档"飞牛转码能力实测"）：
+ * 客户端解码器放不了的格式在映射期就打上"不可播"，列表里直接说明原因，
+ * 替代"点播放 → 转圈 → 播放失败"。判定用已知解不了的格式清单（黑名单），
+ * 不认识的格式宁可放行让它试 —— 黑名单只会漏报不会误伤。
+ */
+internal fun fnOsUnplayableReason(container: String, codec: String): String? {
+    val containerLower = container.trim().lowercase()
+    val codecLower = codec.trim().lowercase()
+    val format = containerLower.ifBlank { codecLower }
+    if (format.isBlank()) return null
+    return when {
+        // DSD（dsf/dff 两种打包、msbf/lsbf 两种位序）ExoPlayer 一律解不了：
+        // codec 与容器都要看（实测曲库里 codec=dsd_msbf 而容器写 dsf 的都有）
+        "dsd" in codecLower || "dsd" in format -> "DSD 格式暂不支持播放"
+        // 已知 ExoPlayer 核心不带的音频编码
+        format in setOf("ape", "wma", "wv", "tak") || codecLower in setOf("ape", "wma", "wv", "tak") ->
+            "该格式暂不支持播放"
+        // 裸 PCM 流（没有 WAV 等容器包着）无法直接喂给解码器
+        containerLower.isBlank() && codecLower.startsWith("pcm_") -> "该格式暂不支持播放"
+        else -> null
+    }
 }
 
 @Serializable data class SortedPageListDto<T>(val list: List<T> = emptyList(), val total: Int = list.size, val sort: String = "")

@@ -66,6 +66,11 @@ data class Track(
      * 歌单内条目的 id（Jellyfin 从歌单删曲目用 `entryIds`；其它后端为 null）。
      */
     val playlistEntryId: String? = null,
+    /**
+     * 非空 = 后端判定本机解码器放不了这个格式（如飞牛源的 DSD/裸 PCM，飞牛没有转码兜底），
+     * 文案直接给 UI 的行提示用；null = 可播。Jellyfin 源恒为 null（不支持就转码）。
+     */
+    val unplayableReason: String? = null,
 )
 
 data class SharedLibrary(

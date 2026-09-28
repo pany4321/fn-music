@@ -464,6 +464,7 @@ class MusicRepository internal constructor(
         if (track.accessStatus != null && track.accessStatus != 0) throw AppException(AppError.UnavailableTrack)
         val refreshed = trackMetadata(track.guid.value)
         if (refreshed.isCue) throw AppException(AppError.TranscodeUnavailable)
+        if (refreshed.unplayableReason != null) throw AppException(AppError.TranscodeUnavailable)
         val plan = backend.streamPlan(refreshed)
         return PlaybackTrack(
             refreshed,
@@ -477,6 +478,7 @@ class MusicRepository internal constructor(
         tracks.asSequence()
             .filter { it.accessStatus == null || it.accessStatus == 0 }
             .filterNot(Track::isCue)
+            .filter { it.unplayableReason == null }
             .take(250)
             .map { track ->
                 val plan = backend.queueStreamPlan(track)
