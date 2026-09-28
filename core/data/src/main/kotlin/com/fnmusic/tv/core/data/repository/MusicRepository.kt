@@ -656,7 +656,9 @@ class MusicRepository internal constructor(
     ): Page<T> {
         require(pageSize > 0)
         val namespace = session.cacheNamespace()
-        val sourceKey = if (source.sizeSensitive) sizedPageSourceKey(source.cacheKey, pageSize) else source.cacheKey
+        val sourceKey = contractVersionedKey(
+            if (source.sizeSensitive) sizedPageSourceKey(source.cacheKey, pageSize) else source.cacheKey,
+        )
         val key = ResponseCacheKey(namespace, "page", sourceKey, page)
         var decoded: DecodedPage<T>? = null
         val payload = responses.getOrFetch(
@@ -702,13 +704,14 @@ class MusicRepository internal constructor(
     /** 目录索引：与 [cachedPage] 同一套缓存语义（内存 + Room），只是不分页。 */
     private suspend fun <T> cachedIndex(source: CatalogIndexSource<T>): T {
         val namespace = session.cacheNamespace()
-        val cacheKey = ResponseCacheKey(namespace, "index", source.cacheKey)
+        val sourceKey = contractVersionedKey(source.cacheKey)
+        val cacheKey = ResponseCacheKey(namespace, "index", sourceKey)
         var decoded: T? = null
         val payload = responses.getOrFetch(
             key = cacheKey,
             persist = { encoded ->
                 bestEffort {
-                    localStore.saveIndex(CachedIndexEntity(namespace, source.cacheKey, encoded, now()))
+                    localStore.saveIndex(CachedIndexEntity(namespace, sourceKey, encoded, now()))
                 }
             },
         ) {
@@ -720,7 +723,7 @@ class MusicRepository internal constructor(
                 throw cause
             } catch (cause: AppException) {
                 if (cause.error != AppError.NetworkUnavailable) throw cause
-                val cached = fallback { localStore.index(namespace, source.cacheKey) } ?: throw cause
+                val cached = fallback { localStore.index(namespace, sourceKey) } ?: throw cause
                 decoded = try {
                     backend.decodeIndex(source, cached.payload)
                 } catch (decodeFailure: Exception) {
@@ -815,6 +818,18 @@ private const val PLAYLIST_COVER_PARALLELISM = 4
 
 /** 取候选封面时的取样页大小：3 张封面用不着整页 50 首。 */
 private const val COVER_CANDIDATE_PAGE_SIZE = 12
+
+/**
+ * 列表响应的"数据契约版本"，会拼进页面/索引的缓存键。
+ *
+ * 为什么需要它：缓存按 (namespace, 源键, 页) 命中，**不关心请求里带了哪些字段**。
+ * 一旦某个查询请求的字段集合变了（例如 1.7.0 给 Jellyfin 补上 `ImageTags` 来拿封面），
+ * 旧版本缓存下来的那份 payload 会继续被读出来 —— 升级后界面看起来"没修好"。
+ * 改字段/改响应形状时把这里 +1，让旧 payload 自然作废（封面缓存按 coverId 单独存，不受影响）。
+ */
+private const val CACHE_CONTRACT_VERSION = 3
+
+internal fun contractVersionedKey(key: String): String = "$CACHE_CONTRACT_VERSION:$key"
 
 /** 随机专辑合并的页数：1 页成段连续，3 页把取样窗口拉开一截。 */
 private const val RANDOM_SAMPLE_PAGES = 3

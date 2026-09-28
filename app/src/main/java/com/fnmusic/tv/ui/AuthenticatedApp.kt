@@ -501,19 +501,18 @@ private fun SwitchAccountRoute(container: AuthenticatedAppDependencies, onBack: 
                     if (connected.isBlank()) "已连接新的音乐源" else "已连接：$connected",
                     Toast.LENGTH_SHORT,
                 ).show()
+                // 重新连接同一个账号时用户 id 不变、路由栈不会自动重置：显式回退这一页。
+                onBack()
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
+                // 失败**留在这一页**：页内状态行已经写明原因，用户还要在这里改地址/密码再试。
                 Toast.makeText(
                     context,
                     "连接失败：${errorMessage((failure as? AppException)?.error ?: AppError.Unknown())}",
                     Toast.LENGTH_SHORT,
                 ).show()
                 throw failure
-            } finally {
-                // 重新连接同一个账号时用户 id 不会变、路由栈不会自动重置：
-                // 显式回到上一页，保证"连接成功就离开这一页"始终成立。
-                onBack()
             }
         },
         onHistoryLogin = { profileId, accessCode, remember ->

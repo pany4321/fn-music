@@ -60,6 +60,24 @@ class JellyfinMappingTest {
     }
 
     @Test
+    fun `track without its own art borrows the album cover`() {
+        // 合辑里的曲目常常自己没有 Primary（实测"最近添加"整排字母占位的原因）
+        val json = """{"Id":"t1","Name":"浪卓","AlbumId":"album-9","ImageTags":{},
+            "AlbumArtist":"众艺术家"}"""
+
+        val track = ApiDecoder.json.decodeFromString<JellyfinItemDto>(json).toTrack()
+
+        assertEquals("album-9", track.coverId)
+    }
+
+    @Test
+    fun `track without any art has no cover at all`() {
+        val json = """{"Id":"t1","Name":"No Art","ImageTags":{}}"""
+
+        assertNull(ApiDecoder.json.decodeFromString<JellyfinItemDto>(json).toTrack().coverId)
+    }
+
+    @Test
     fun `item without primary image has no cover`() {
         val json = """{"Id":"abc","Name":"No Art","ImageTags":{}}"""
 
@@ -268,6 +286,8 @@ class JellyfinMappingTest {
         )
         // 单条目的完整字段是"列表字段 + MediaSources"，同样带上
         assertTrue(FULL_ITEM_FIELDS.contains("ImageTags"))
+        // AlbumId 用来给"条目没有图、专辑有图"的曲目借封面
+        assertTrue(LIST_ITEM_FIELDS.split(",").contains("AlbumId"))
     }
 
     /** 已知 userId 时不多发一次 `/Users/Me`（登录后每条收藏都带真实 id）。 */

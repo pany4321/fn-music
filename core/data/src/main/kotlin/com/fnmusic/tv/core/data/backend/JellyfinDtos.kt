@@ -95,7 +95,10 @@ internal fun JellyfinItemDto.toTrack(): Track = Track(
     title = Name,
     artistName = Artists.takeIf { it.isNotEmpty() }?.joinToString(" / ") ?: AlbumArtist,
     albumName = Album,
-    coverId = Id.takeIf { ImageTags.containsKey("Primary") },
+    // 条目自己没有 Primary 图时**借专辑的图**：合辑/多碟里常见"曲目没有图，专辑有图"
+    // （实测"最近添加"整排都是字母占位就是这个原因）。专辑也没图时取图会 404，
+    // 上层照旧落到占位图，与改动前一样。
+    coverId = Id.takeIf { ImageTags.containsKey("Primary") } ?: AlbumId,
     durationMs = RunTimeTicks?.takeIf { it > 0 }?.div(TICKS_PER_MS),
     isCue = false,
     audioFormat = (Container ?: MediaSources.firstOrNull()?.Container)

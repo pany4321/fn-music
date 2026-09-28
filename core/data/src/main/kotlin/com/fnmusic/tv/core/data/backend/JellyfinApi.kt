@@ -493,7 +493,7 @@ internal class JellyfinApi(
 internal const val LIST_ITEM_FIELDS =
     "DateCreated,UserData,RunTimeTicks,Container,AlbumArtist,Artists,IndexNumber," +
         "ParentIndexNumber,ChildCount,RecursiveItemCount,ProductionYear,AlbumCount,MediaType," +
-        "ImageTags"
+        "ImageTags,AlbumId"
 
 /** 单个条目用完整字段（`streamPlan` 要 MediaSources 判断直连还是转码）。 */
 internal const val FULL_ITEM_FIELDS = "MediaSources,$LIST_ITEM_FIELDS"
