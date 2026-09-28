@@ -71,10 +71,11 @@ internal class FnOsMusicBackend(
         StreamPlan(url = directStreamUrl(track), mode = StreamMode.Direct)
 
     /**
-     * 随机取歌：先探测总数，再随机挑**两页**，合并后本地洗牌 + 拆开相邻同专辑。
+     * 随机取歌：先探测总数，再随机挑**三页**，合并后本地洗牌 + 拆开相邻同专辑。
      *
      * 只挑一页是不够随机的：`track/list` 的页内按添加时间排好序，一页 24 首常常就是同一张专辑
      * （用户看到的就是"前后连着的一串歌"）；而且连续刷新很容易撞回同一页，结果与上次一模一样。
+     * 三页能把取样窗口再拉开一截，代价只是多一次分页请求。
      */
     override suspend fun randomTracks(size: Int): List<Track> {
         val pageSize = size.coerceAtLeast(1)
@@ -260,8 +261,8 @@ internal class FnOsMusicBackend(
         const val FAVORITE_SORT = "favoriteAt,desc"
         const val RECENT_SORT = "recent"
 
-        /** 随机取歌合并的页数：1 页太"整段"，2 页已足够散开，又不会多打请求。 */
-        const val RANDOM_SAMPLE_PAGES = 2
+        /** 随机取歌合并的页数：1 页太"整段"，3 页能把取样窗口拉开一截。 */
+        const val RANDOM_SAMPLE_PAGES = 3
     }
 }
 

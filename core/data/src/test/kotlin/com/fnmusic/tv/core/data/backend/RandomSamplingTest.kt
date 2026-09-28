@@ -39,6 +39,17 @@ class RandomSamplingTest {
     }
 
     @Test
+    fun `random pages can draw three distinct pages for the wider sample window`() {
+        // 随机歌曲/随机专辑都取三页：三页必须互不相同，且不选上一次用过的页
+        val pages = randomPages(total = 10_000, pageSize = 24, count = 3, exclude = 42)
+
+        assertEquals(3, pages.size)
+        assertEquals(3, pages.distinct().size)
+        assertTrue(pages.none { it == 42 })
+        assertTrue(pages.all { it in 1..417 })
+    }
+
+    @Test
     fun `spread separates items that belong to the same group`() {
         // A A A B C：洗牌后的典型"连续三段"形态
         val tracks = listOf("A", "A", "A", "B", "C")

@@ -296,10 +296,10 @@ class MusicRepository internal constructor(
         cachedPage(CatalogPageSource.AllTracks, page, size).also(::observeFavoriteTracks)
 
     /**
-     * 卡片封面用的轻量随机采样：探测总数 → 两个不同随机页 → 洗牌 + 拆开相邻同歌手。
+     * 卡片封面用的轻量随机采样：探测总数 → 三个不同随机页 → 洗牌 + 拆开相邻同歌手。
      *
      * 只取一页时"随机专辑"看上去并不随机：页内按名称排序，成段都是同一批歌手；
-     * 而且页号撞上缓存里的同一页就会返回与上次逐条相同的一页。
+     * 而且页号撞上缓存里的同一页就会返回与上次逐条相同的一页。三页把取样窗口再拉开一截。
      */
     suspend fun randomAlbumSample(size: Int = 24): List<Album> {
         val pageSize = size.coerceAtLeast(1)
@@ -816,8 +816,8 @@ private const val PLAYLIST_COVER_PARALLELISM = 4
 /** 取候选封面时的取样页大小：3 张封面用不着整页 50 首。 */
 private const val COVER_CANDIDATE_PAGE_SIZE = 12
 
-/** 随机专辑合并的页数：1 页成段连续，2 页足够散开又不会多打请求。 */
-private const val RANDOM_SAMPLE_PAGES = 2
+/** 随机专辑合并的页数：1 页成段连续，3 页把取样窗口拉开一截。 */
+private const val RANDOM_SAMPLE_PAGES = 3
 
 /** 清空收藏的结果：成功删除数与失败数（失败的可以再点一次继续清）。 */
 data class FavoritesClearOutcome(val removed: Int, val failed: Int)
