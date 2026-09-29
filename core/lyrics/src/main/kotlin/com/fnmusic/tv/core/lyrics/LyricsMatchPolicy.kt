@@ -26,7 +26,23 @@ data class LyricsMatchPolicy(
         LyricsSourceId.Kugou,
         LyricsSourceId.Lrclib,
     ),
-)
+) {
+    /**
+     * 本地与候选的时长容差：**以 ±5 秒为下限，长曲按 1% 放宽**。
+     *
+     * 为什么不能只用绝对值：VBR/AAC 的时长与母带差异、以及古典/民乐长曲的起收尾留白，
+     * 在 10 分钟以上的曲子上经常超过 5 秒 —— 而 5 秒对 10 分钟的曲子只占 0.8%，会把
+     * 正确版本误杀。反过来对 3 分钟的流行曲，1% 只有 1.8 秒，比 5 秒更严，所以取两者较大值。
+     */
+    fun durationToleranceMs(localDurationMs: Long?): Long = max(
+        maximumDurationDeltaMs,
+        (localDurationMs ?: 0L) / RELATIVE_DURATION_DIVISOR,
+    )
+
+    private companion object {
+        const val RELATIVE_DURATION_DIVISOR = 100L
+    }
+}
 
 data class ScoredLyricsCandidate(
     val candidate: LyricsCandidate,
@@ -81,7 +97,7 @@ class LyricsCandidateScorer(
     private fun scoreOne(request: LyricsMatchRequest, candidate: LyricsCandidate): ScoredLyricsCandidate? {
         if (candidate.title.isBlank() || request.title.isBlank()) return null
         val durationDelta = knownDurationDelta(request.durationMs, candidate.durationMs)
-        if (durationDelta != null && durationDelta > policy.maximumDurationDeltaMs) return null
+        if (durationDelta != null && durationDelta > policy.durationToleranceMs(request.durationMs)) return null
         if (hasHardVersionConflict(request.title, candidate.title, candidate.instrumental)) return null
 
         val titleScore = titleScore(request.title, candidate.title)
@@ -94,7 +110,8 @@ class LyricsCandidateScorer(
                 titleScore * 0.5 + artistScore * 0.5,
                 titleScore * 0.5 + artistScore * 0.35 + albumScore * 0.15,
             )
-            request.artists.isNotEmpty() && candidate.artists.isNotEmpty() -> titleScore * 0.5 + artistScore * 0.5
+            request.artists.isNotEmpty() && candidate.artists.isNotEmpty() ->
+                titleScore * 0.5 + artistScore * 0.5
             albumScore != null -> max(titleScore * 0.7 + albumScore * 0.3, titleScore * 0.8)
             else -> titleScore
         }
@@ -118,6 +135,14 @@ class LyricsCandidateScorer(
         return max(full, base)
     }
 
+    /**
+     * 歌手分：**以较短一方为分母**。
+     *
+     * 早先用 `max(local.size, remote.size)` 作分母是个结构性错误：在线库常常只列主唱，而本地标签
+     * 是「A / B / C」（或反过来，在线列一串 featuring 而本地只有主唱）。此时**即使主唱完全一致，
+     * 分数也会被钉死在 33 分以下**，配合权重后必然低于入选门槛 —— 实测这是仅次于"版本时长不同"
+     * 的漏配原因。改为除以较短一方后，语义变成"较短列表能被较长列表容纳得多好"，主唱一致即得满分。
+     */
     private fun artistScore(left: List<String>, right: List<String>): Double {
         val local = splitArtists(left)
         val remote = splitArtists(right)
@@ -135,7 +160,7 @@ class LyricsCandidateScorer(
                 total += sequenceRatio(artist, best.value)
             }
         }
-        return total / max(local.size, remote.size) * 100.0
+        return total / shorter.size * 100.0
     }
 
     private fun splitArtists(values: List<String>): List<String> = values

@@ -94,6 +94,45 @@ class LyricsCandidateScorerTest {
         assertTrue(scorer.score(local, listOf(remote)).isEmpty())
     }
 
+    @Test fun `a single lead artist matches a multi artist remote`() {
+        // 分母曾经用"较长一方"：本地 1 人 vs 在线 3 人 → 即使主唱完全一致也只得 33 分。
+        // 这里把专辑置空，确保不是专辑项把分数救了回来。
+        val local = request.copy(artists = listOf("周杰伦"), album = null)
+        val remote = candidate(artists = listOf("周杰伦", "方文山", "黄俊郎"), album = null)
+
+        val scored = scorer.score(local, listOf(remote))
+
+        assertEquals(1, scored.size)
+        assertEquals(100.0, scored.single().score, 0.001)
+    }
+
+    @Test fun `title outweighs a partially disagreeing artist list`() {
+        // 标题完全一致、歌手只有一半对得上（Bob 与 Zed 无共同字符 → 歌手分 50）：
+        // 常规闸门得 75 分仍被拒，但标题与时长都吻合，由 R3 兜底放行
+        val local = request.copy(title = "Song", artists = listOf("Alice", "Bob"), album = null)
+        val remote = candidate(title = "Song", artists = listOf("Alice", "Zed"), album = null)
+
+        val scored = scorer.score(local, listOf(remote))
+
+        assertEquals(1, scored.size)
+        assertEquals(75.0, scored.single().score, 0.001)
+    }
+
+    @Test fun `long tracks get a relative duration tolerance`() {
+        // 20 分钟的长曲：±5 秒只占 0.4%，VBR/母带差异极易超过；容差按 1% 放宽到 12 秒
+        val long = request.copy(durationMs = 1_200_000)
+        val remote = candidate(durationMs = 1_208_000)
+
+        assertEquals(1, scorer.score(long, listOf(remote)).size)
+    }
+
+    @Test fun `short tracks keep the absolute five second tolerance`() {
+        val short = request.copy(durationMs = 180_000)
+        val remote = candidate(durationMs = 186_000)
+
+        assertTrue(scorer.score(short, listOf(remote)).isEmpty())
+    }
+
     private fun candidate(
         source: LyricsSourceId = LyricsSourceId.QqMusic,
         remoteId: String = "1",
