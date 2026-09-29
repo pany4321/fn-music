@@ -23,6 +23,17 @@ internal class ArtworkBitmapCache(
 
     private val lock = Any()
     private val loadPermits = Semaphore(maxConcurrentLoads)
+
+    /**
+     * 缩略图变体（Compact/Grid，单张 9-70KB、解码产物 ≤640KB）用**独立的宽并发**：
+     * 网络/解码阶段都没有 OOM 风险，2-3 的旧并发把首屏约百张封面串成了长队（真机实测主因）。
+     * 大图变体（Player/Poster，解码产物 2.5-4MB/张）保留防 OOM 的保守并发。
+     */
+    private val thumbnailPermits = Semaphore(THUMBNAIL_CONCURRENCY)
+
+    private fun permitsFor(variant: CoverVariant): Semaphore =
+        if (variant.ordinal >= CoverVariant.Player.ordinal) loadPermits else thumbnailPermits
+
     private val memory = object : LruCache<Key, Bitmap>(maxBytes) {
         override fun sizeOf(key: Key, value: Bitmap): Int = value.allocationByteCount.coerceAtLeast(1)
     }
@@ -84,7 +95,7 @@ internal class ArtworkBitmapCache(
             // 解码兜底：老设备（如 Android 6 电视）堆紧张时宁可让这一张显示占位图，
             // 也不让整页崩掉——清掉内存缓存，把可用堆让给后面的绘制。
             val decoded = try {
-                loadPermits.withPermit { loader(key.coverId, key.variant) }
+                permitsFor(key.variant).withPermit { loader(key.coverId, key.variant) }
             } catch (_: OutOfMemoryError) {
                 synchronized(lock) { memory.evictAll() }
                 null
@@ -108,6 +119,9 @@ internal class ArtworkBitmapCache(
     private companion object {
         const val DEFAULT_MAX_BYTES = 40 * 1024 * 1024
         const val DEFAULT_MAX_CONCURRENT_LOADS = 3
+
+        /** 缩略图变体的并发许可：与 largePermits 拆开（见 [permitsFor] 的文档）。 */
+        const val THUMBNAIL_CONCURRENCY = 6
 
         /** 小堆设备阈值：低于它就按更保守的策略跑（老电视 / 盒子）。 */
         private const val SMALL_HEAP_BYTES = 192L * 1024 * 1024

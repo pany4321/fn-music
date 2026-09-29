@@ -691,6 +691,45 @@ method `DoSearchForQQMusicDesktop`，param `{num_per_page:"20", page_num:"1", qu
 - app 层测试无一依赖歌词源行为，1.9.0 源变化不破坏 app 测试；lint 0 警告（7 条 AutoboxingStateCreation hint）。
 - LRCLIB `/api/get/{id}` 回落路径有效（官方文档确认该端点存在）。
 
+#### 封面加载性能诊断与修复（真机反馈"封面加载慢"，已完成未发布）
+
+**诊断方法**：两路代码深查（数据层管线 / UI 请求模式）+ 对电视实际使用的两个地址做真实测量
+（`.trellis/tmp/probe_cover_perf.py`、`probe_fnos_ddns_cover.py`；测体积/耗时/ALPN/keep-alive）。
+
+**测量基线（2026-09-29）**：
+| 项 | 飞牛 DDNS(h2) | Jellyfin DDNS(h2) | 飞牛局域网(h1.1) |
+|---|---|---|---|
+| 200px / 400px / 800px / 原图 | 9.4 / 26 / 71 / 244KB | 15-21 / 56-63 / 49-199 / 48-199KB | 同 DDNS 体积 |
+| 单请求延迟（新连接） | 82-125ms | 150-680ms | 15-55ms |
+| keep-alive 8 连发 vs 每次新连接 | 39ms vs 70ms/请求 | **72ms vs 232ms/请求** | 12ms vs 20ms |
+| ALPN | **h2** | **h2** | h1.1（纯 HTTP） |
+
+两个关键反证：电视实际用的两个 HTTPS 地址都协商 **h2**，`Connection: close` 拦截器（只对
+HTTP/1.1 生效）在该配置下**不触发**；封面"原图"其实只有 48-244KB（不是假设的数 MB）。
+**主因是客户端：全局 Semaphore(2)（小堆电视）串行化约 100 个"下载+解码"任务**——首页 5 行
+非懒加载全量入队，100 ÷ 2 × (82-680ms) ≈ 10-20 秒才能全部就绪，单张快、整体慢。
+
+**已修**：
+| 修复 | 位置 | 说明 |
+|---|---|---|
+| 【P0】缩略图并发与 大图并发 拆分 | ArtworkBitmapCache.kt | Compact/Grid 走独立 Semaphore(6)（单张字节 ≤70KB、解码产物 ≤640KB，无 OOM 风险）；Player/Poster 保留 2-3（解码产物 2.5-4MB/张）。这是最大的一刀：100÷6×150ms ≈ 2.5s |
+| 【P0】恢复 keep-alive + 超时兜底 | TrimMusicApi.client() | 删掉上游遗留的 `Connection: close` 拦截器（无文档动机；h2 下本就不生效，纯 HTTP 场景每请求省 8ms-160ms）；恢复 OkHttp 默认的陈旧连接静默重试；补 connectTimeout(5s)+callTimeout(20s)（此前无超时，卡死连接占住许可 20s+） |
+| 【P0】变体对齐 | AuthenticatedApp.kt | 三处聚焦预取 Grid→Compact（渲染用 Compact，缓存键含 variant，预取 Grid 全部落空）；风格瓦片 73dp 去掉倒置的 fallback=Grid（原来先 await 400px 大图才首绘） |
+| 【P1】touch 磁盘写节流 | ArtworkCache.kt | 内存命中每次 setLastModified → 一屏 20 张已缓存封面排队做串行 flash 写并与磁盘读抢 diskMutex；节流 5 分钟 |
+| 【P1】404 封面负缓存 | MusicRepository.artwork | 无封面条目每次重组都重发注定失败的请求；现在失败负缓存 5 分钟（currentArtwork 播放器路径不受影响，仍带重试） |
+| 【P1】Jellyfin 缩略图 quality 90→80 | JellyfinApi.imageUrl | 缩略图体积换带宽；原图路径不带 quality 不受影响 |
+| 【P2】Poster 变体 1024 上限 | Models.kt | null=下载原图改为 1024：实测原图虽小（48-244KB），但极端内嵌大图无上限保护；1080p 海报足够 |
+
+**审查后撤销/不改的**：
+- ~~验证性二次解码简化为 bounds-only~~：`ArtworkValidationTest` 证明它拦的是"头 8 字节完好、
+  IDAT 截断"的损坏图进永久缓存——有真实价值，保留。
+- ~~首页可见性调度~~：许可提到 6 后全屏就绪约 2.5s，收益递减；非懒行是为焦点保的，不动。
+- 特性卡/歌单拼排的 Grid+Compact 渐进组合：小堆设备本就跳过渐进（单次下载），普通堆设备
+  "先小图后大图"是合理的体感优化，保留。
+
+**待真机验证**：冷启动首页封面全部就绪时间、播放页换歌封面时间（改前后对比）；确认无 OOM
+（小堆电视上 6 并发解码 400px 位图瞬时 ≤4MB，理论安全）。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报

@@ -160,5 +160,7 @@ enum class CoverVariant(val width: Int?) {
     Compact(200),
     Grid(400),
     Player(800),
-    Poster(null),
+    // 1024：1080p 电视海报足够清晰。曾经用 null=下载原图，实测两台服务器的专辑原图
+    // 虽然只有 48-244KB，但内嵌大图的 FLAC/极端封面没有上限保护，广域网换歌会卡。
+    Poster(1024),
 }

@@ -63,6 +63,7 @@ internal class ArtworkCache(
     private var memoryBytes = 0
     private var trackedDiskBytes: Long? = null
     private var fullDiskScans = 0
+    private val lastTouchAt = HashMap<String, Long>()
 
     suspend fun get(
         namespace: String,
@@ -303,7 +304,19 @@ internal class ArtworkCache(
         }
     }
 
+    /**
+     * touch 有 5 分钟节流：内存命中路径每次都 setLastModified，会让一屏已缓存的封面
+     * 排着队做串行 flash 写，并与真正的磁盘读互相排队（diskMutex 是全局单把）。
+     * lastModified 只服务于 LRU 淘汰精度，5 分钟粒度完全够用。
+     */
     private suspend fun touch(file: File) {
+        val now = clock()
+        val path = file.absolutePath
+        synchronized(lastTouchAt) {
+            val last = lastTouchAt[path]
+            if (last != null && now - last < TOUCH_THROTTLE_MS) return
+            lastTouchAt[path] = now
+        }
         diskMutex.withLock {
             withContext(Dispatchers.IO) { if (file.isFile) file.setLastModified(clock()) }
         }
@@ -413,5 +426,8 @@ internal class ArtworkCache(
 
     private companion object {
         val TEMP_SEQUENCE = AtomicLong()
+
+        /** touch 的节流窗口（见 [touch] 的文档）。 */
+        const val TOUCH_THROTTLE_MS = 5 * 60 * 1_000L
     }
 }

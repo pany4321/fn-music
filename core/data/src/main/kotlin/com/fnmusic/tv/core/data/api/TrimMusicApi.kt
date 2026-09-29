@@ -17,7 +17,7 @@ import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import javax.net.ssl.HttpsURLConnection
 import okhttp3.OkHttpClient
-import okhttp3.Protocol
+import java.util.concurrent.TimeUnit
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -316,18 +316,13 @@ class TrimMusicApi(
         fun client(): OkHttpClient = OkHttpClient.Builder()
             .followRedirects(false)
             .followSslRedirects(false)
-            .retryOnConnectionFailure(false)
+            // 不再对 HTTP/1.1 强制 `Connection: close`（上游遗留、无文档动机）：它杀死了
+            // keep-alive，让首屏约百张封面每张都付一次 TCP(+TLS) 握手。HTTPS 下协商 h2 本来
+            // 就不受影响；纯 HTTP 局域网实测 keep-alive 每请求省 ~8ms、广域网差距更大。
+            // 恢复 OkHttp 默认的"陈旧连接静默重试"，避免复用连接偶发失败变成封面加载失败。
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
             .hostnameVerifier(NasHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier()))
-            .addNetworkInterceptor { chain ->
-                val request = if (chain.connection()?.protocol() == Protocol.HTTP_1_1) {
-                    chain.request().newBuilder()
-                        .header("Connection", "close")
-                        .build()
-                } else {
-                    chain.request()
-                }
-                chain.proceed(request)
-            }
             .build()
     }
 }

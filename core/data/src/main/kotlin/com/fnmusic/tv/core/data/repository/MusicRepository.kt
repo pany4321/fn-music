@@ -197,6 +197,9 @@ class MusicRepository internal constructor(
         matcher = onlineLyricsMatcher,
     )
     private val favoriteMutationMutex = Mutex()
+
+    /** 无封面条目的负缓存（key 含 namespace/variant），5 分钟后允许重试。 */
+    private val negativeArtworkUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val _favoriteState = MutableStateFlow(FavoriteLibraryState())
     val favoriteState: StateFlow<FavoriteLibraryState> = _favoriteState.asStateFlow()
 
@@ -526,12 +529,26 @@ class MusicRepository internal constructor(
         return backend.previousRoam(roamId).also { observeFavoriteWindow(it, namespace) }
     }
 
-    suspend fun artwork(coverId: String, variant: CoverVariant): ByteArray? = try {
-        loadArtwork(coverId, variant)
-    } catch (cause: CancellationException) {
-        throw cause
-    } catch (_: AppException) {
-        null
+    suspend fun artwork(coverId: String, variant: CoverVariant): ByteArray? {
+        val namespace = runCatching(session::cacheNamespace).getOrNull() ?: return null
+        // 404/失败负缓存：无封面的条目（每次滚动回可视区都重组）不再重发注定失败的请求
+        negativeArtworkUntil["$namespace|$coverId|$variant"]?.let { until ->
+            if (now() < until) return null
+            negativeArtworkUntil.remove("$namespace|$coverId|$variant")
+        }
+        val bytes = try {
+            loadArtwork(coverId, variant)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (_: AppException) {
+            null
+        }
+        if (bytes == null) {
+            negativeArtworkUntil["$namespace|$coverId|$variant"] = now() + NEGATIVE_ARTWORK_TTL_MS
+        } else {
+            negativeArtworkUntil.remove("$namespace|$coverId|$variant")
+        }
+        return bytes
     }
 
     suspend fun currentArtwork(
@@ -543,6 +560,7 @@ class MusicRepository internal constructor(
 
     suspend fun invalidateNamespace(namespace: String, includeEssential: Boolean = false) {
         responses.invalidateNamespace(namespace)
+        negativeArtworkUntil.keys.removeAll { it.startsWith("$namespace|") }
         artworkCache.clearNamespace(namespace)
         localStore.clearNamespace(namespace, includeEssential)
         _playlistCovers.value = emptyMap()
@@ -553,7 +571,10 @@ class MusicRepository internal constructor(
         invalidateNamespace(namespace, includeEssential)
     }
 
-    suspend fun clearArtwork() = artworkCache.clearAll()
+    suspend fun clearArtwork() {
+        negativeArtworkUntil.clear()
+        artworkCache.clearAll()
+    }
 
     suspend fun clearAllEvictableCaches() {
         responses.invalidateAll()
@@ -842,6 +863,9 @@ internal fun contractVersionedKey(key: String): String = "$CACHE_CONTRACT_VERSIO
 
 /** 随机专辑合并的页数：1 页成段连续，3 页把取样窗口拉开一截。 */
 private const val RANDOM_SAMPLE_PAGES = 3
+
+/** 无封面（下载失败/404）负缓存的时长：期间直接返回 null，不再打网络。 */
+private const val NEGATIVE_ARTWORK_TTL_MS = 5 * 60 * 1_000L
 
 /** 清空收藏的结果：成功删除数与失败数（失败的可以再点一次继续清）。 */
 data class FavoritesClearOutcome(val removed: Int, val failed: Int)

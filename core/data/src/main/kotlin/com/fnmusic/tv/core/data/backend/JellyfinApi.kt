@@ -339,7 +339,7 @@ internal class JellyfinApi(
             if (width != null) {
                 addQueryParameter("fillWidth", width.toString())
                 addQueryParameter("fillHeight", width.toString())
-                addQueryParameter("quality", "90")
+                addQueryParameter("quality", "80")
             }
         }.build().toString()
 

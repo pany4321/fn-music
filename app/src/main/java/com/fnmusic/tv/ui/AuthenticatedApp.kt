@@ -3017,7 +3017,8 @@ private fun DetailAlbumCard(album: Album, modifier: Modifier = Modifier, onClick
             .height(106.dp)
             .onFocusChanged { state ->
                 if (state.isFocused && albumCoverId != null) {
-                    container.artworkBitmapCache.prefetch(albumCoverId, CoverVariant.Grid)
+                    // 与 DetailAlbumCard 渲染的 Compact 一致（见上）
+                    container.artworkBitmapCache.prefetch(albumCoverId, CoverVariant.Compact)
                 }
             },
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
@@ -4602,7 +4603,9 @@ private fun ArtistLockup(
             .size(width = 170.dp, height = 95.dp)
             .onFocusChanged { state ->
                 if (state.isFocused && coverId != null) {
-                    container.artworkBitmapCache.prefetch(coverId, CoverVariant.Grid)
+                    // 预取变体必须与下方 RemoteArtwork 的渲染变体一致（缓存键含 variant，
+                    // 预取 Grid 而渲染 Compact = 预取全部落空）
+                    container.artworkBitmapCache.prefetch(coverId, CoverVariant.Compact)
                 }
             },
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
@@ -4684,7 +4687,9 @@ private fun AlbumLockup(
             .size(width = 165.dp, height = 95.dp)
             .onFocusChanged { state ->
                 if (state.isFocused && coverId != null) {
-                    container.artworkBitmapCache.prefetch(coverId, CoverVariant.Grid)
+                    // 预取变体必须与下方 RemoteArtwork 的渲染变体一致（缓存键含 variant，
+                    // 预取 Grid 而渲染 Compact = 预取全部落空）
+                    container.artworkBitmapCache.prefetch(coverId, CoverVariant.Compact)
                 }
             },
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
@@ -4772,7 +4777,8 @@ private fun GenreLockup(
                         container = container,
                         coverId = coverId,
                         variant = CoverVariant.Compact,
-                        fallbackVariant = CoverVariant.Grid,
+                        // 不要 fallback=Grid：那是"先显示更大的前导图再上小图"，方向反了，
+                        // 会让 73dp 瓦片先等 400px 下载完才首绘
                         modifier = Modifier.matchParentSize(),
                         shape = artworkShape,
                         contentScale = ContentScale.Crop,

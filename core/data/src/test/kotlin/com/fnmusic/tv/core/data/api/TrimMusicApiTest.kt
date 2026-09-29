@@ -20,6 +20,7 @@ import okhttp3.Response
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
@@ -246,7 +247,7 @@ class TrimMusicApiTest {
         assertEquals("/music/api/v1/user/me", server.takeRequest().target)
     }
 
-    @Test fun `http1 requests close their connection without transport retries`() = runBlocking {
+    @Test fun `http1 connections are reused and transport retries stay enabled`() = runBlocking {
         repeat(2) {
             server.enqueue(
                 MockResponse.Builder()
@@ -262,13 +263,18 @@ class TrimMusicApiTest {
         api.systemConfig()
         api.systemConfig()
 
+        // keep-alive 是封面批量加载的关键：首屏约百张封面必须复用连接，不再每张付一次握手
         val first = server.takeRequest()
         val second = server.takeRequest()
-        assertEquals("close", first.headers["Connection"])
-        assertEquals("close", second.headers["Connection"])
-        assertNotEquals(first.connectionIndex, second.connectionIndex)
+        // OkHttp 默认显式声明 Keep-Alive（旧实现强制 close）
+        assertEquals("Keep-Alive", first.headers["Connection"])
+        assertEquals("Keep-Alive", second.headers["Connection"])
+        assertEquals(first.connectionIndex, second.connectionIndex)
         assertEquals(2, server.requestCount)
-        assertFalse(client.retryOnConnectionFailure)
+        assertTrue(client.retryOnConnectionFailure)
+        // 超时兜底：卡死的连接不得长期占住封面加载的并发许可
+        assertEquals(5_000, client.connectTimeoutMillis)
+        assertEquals(20_000, client.callTimeoutMillis)
     }
 
     @Test fun `cover json responses decode api envelopes without becoming transient failures`() {
@@ -308,14 +314,19 @@ class TrimMusicApiTest {
                 AppError.NetworkUnavailable,
                 false,
             ),
+            // OkHttp 对 GET 的 408 会按幂等请求自动重试一次（retryOnConnectionFailure=true），
+            // 所以入队两条 408：第一条被传输层消费，第二条才到达应用的分类逻辑
             Case(MockResponse.Builder().code(408).build(), AppError.NetworkUnavailable, true),
             Case(MockResponse.Builder().code(429).build(), AppError.NetworkUnavailable, true),
             Case(MockResponse.Builder().code(500).build(), AppError.NetworkUnavailable, true),
             Case(MockResponse.Builder().code(400).build(), AppError.NetworkUnavailable, false),
         )
+        // 每个用例实际发生的请求数（408 = 传输层重试 + 应用各一次）
+        val requestCounts = listOf(1, 1, 1, 2, 1, 1, 1)
 
+        var totalRequests = 0
         cases.forEachIndexed { index, case ->
-            server.enqueue(case.response)
+            repeat(requestCounts[index]) { server.enqueue(case.response) }
 
             val error = assertThrows(AppException::class.java) {
                 runBlocking { api().cover("cover-$index", 320) }
@@ -323,7 +334,8 @@ class TrimMusicApiTest {
 
             assertEquals(case.error, error.error)
             assertEquals(case.retryable, error.isRetryableRequestFailure)
-            assertEquals(index + 1, server.requestCount)
+            totalRequests += requestCounts[index]
+            assertEquals(totalRequests, server.requestCount)
         }
     }
 
