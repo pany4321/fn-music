@@ -59,6 +59,16 @@ data class LyricsSearchQuery(
 
 interface LyricsSource {
     val id: LyricsSourceId
+
+    /**
+     * 本源的搜索是否利用 [LyricsSearchQuery.keyword]（「歌手 - 标题」形态）。
+     *
+     * 不利用的源（例如 QQ 桌面搜索**只认标题**，带歌手反而带偏）应返回 false：
+     * 编排层在主关键词没有合格候选时，会用纯标题对支持关键词变化的源再试一次；
+     * 对不支持的源重试只会发出一模一样的请求，纯属浪费。
+     */
+    val supportsKeywordVariants: Boolean get() = true
+
     suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate>
     suspend fun fetch(candidate: LyricsCandidate): SyncedLyrics
 }

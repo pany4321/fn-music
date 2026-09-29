@@ -54,15 +54,32 @@ class LyricsCandidateScorerTest {
     }
 
     @Test fun `version tags from the LDDC vocabulary are recognized`() {
-        // mixed / edited / solo / tv size / anime size / サイズ 这些写法旧表漏掉了
+        // mixed / edited / solo / tv size / anime size / tvサイズ 这些写法旧表漏掉了
         listOf(
             "晴天 (Mixed)",
             "晴天 (Edited)",
             "晴天 Solo Ver.",
             "晴天 (Anime Size)",
-            "晴天 サイズ",
+            "晴天 TVサイズ",
+            "晴天 アニメサイズ",
+            "晴天 (剪辑版)",
         ).forEach { remote ->
             assertTrue("应识别为版本冲突：$remote", scorer.score(request, listOf(candidate(title = remote))).isEmpty())
+        }
+    }
+
+    @Test fun `ordinary title suffixes are not mistaken for version tags`() {
+        // 「专辑版」是网易云/QQ 的常见正常后缀，不是版本标记：不得与无后缀的同一录音互相拒配。
+        // （历史回归：`剪?辑版` 会把"专辑版"的子串"辑版"命中，误杀候选。）
+        // 裸「サイズ」同理——只有带 tv/アニメ 前缀才算时长版标记。
+        // 用 5 字标题：保证标题分 ≥50、常规闸门能过，让"词表误报"成为唯一的拒绝原因。
+        val local = request.copy(title = "突然好想你", album = null)
+        listOf(
+            "突然好想你 (专辑版)",
+            "突然好想你 (录音室版)",
+            "突然好想你 サイズ",
+        ).forEach { remote ->
+            assertTrue("不应判为版本冲突：$remote", scorer.score(local, listOf(candidate(title = remote, album = null))).isNotEmpty())
         }
     }
 

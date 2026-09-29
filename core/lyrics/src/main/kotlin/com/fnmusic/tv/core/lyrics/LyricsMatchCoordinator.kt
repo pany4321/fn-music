@@ -39,12 +39,22 @@ class LyricsMatchCoordinator(
     }
 
     private suspend fun matchAllSources(request: LyricsMatchRequest): LyricsMatchResult = supervisorScope {
-        val fast = runRound(sources, sourceTimeoutMs, request)
+        // 轮级整体预算：单源超时是各自独立计时的（搜索可能两次 + 取词最多 3 个候选），
+        // 没有轮预算时最坏 2×timeout + 3×timeout，两轮合计可逼近 31.5s 的歌词 Loading。
+        val fast = withTimeoutOrNull(FAST_ROUND_DEADLINE_MS) {
+            runRound(sources, sourceTimeoutMs, request)
+        } ?: RoundOutcome(failure = FailureKind.NetworkFailure)
         fast.found?.let { return@supervisorScope it }
-        val deep = if (deepSources.isEmpty()) {
+
+        // 离线短路：快源**全体**网络失败（不是"没搜到"）时，深挖轮只会同样失败，纯浪费。
+        val offline = fast.searchOutcomes.isNotEmpty() &&
+            fast.searchOutcomes.all { it.failure == FailureKind.NetworkFailure }
+        val deep = if (deepSources.isEmpty() || offline) {
             RoundOutcome()
         } else {
-            runRound(deepSources, deepSourceTimeoutMs, request)
+            withTimeoutOrNull(DEEP_ROUND_DEADLINE_MS) {
+                runRound(deepSources, deepSourceTimeoutMs, request)
+            } ?: RoundOutcome(failure = FailureKind.NetworkFailure)
         }
         deep.found?.let { return@supervisorScope it }
         classifyFailure(fast, deep)
@@ -95,27 +105,39 @@ class LyricsMatchCoordinator(
         )
     }
 
+    /**
+     * 主关键词搜索 + （需要时）纯标题重试。
+     *
+     * 重试与主搜索**分开捕获异常**：重试失败只记录失败、保留主候选 —— 此前两者共用一个 try 块，
+     * 主搜索成功但重试超时会把整个源标成 NetworkFailure 且候选清零（恰好"主候选全不合格"正是
+     * 触发重试的条件，所以丢候选无害，但失败标记会让本可负缓存的"无歌词"变成"网络故障"，
+     * 每次播放都全量重探）。
+     */
     private suspend fun searchSource(
         source: LyricsSource,
         primaryKeyword: String,
         request: LyricsMatchRequest,
         timeoutMs: Long,
-    ): SearchOutcome = try {
-        val primaryCandidates = search(source, primaryKeyword, request, timeoutMs)
-        val candidates = if (
-            primaryKeyword != request.title &&
-            scorer.score(request, primaryCandidates).isEmpty()
-        ) {
-            (primaryCandidates + search(source, request.title, request, timeoutMs))
-                .distinctBy { it.source to it.remoteId }
-        } else {
-            primaryCandidates
+    ): SearchOutcome {
+        val primaryCandidates = try {
+            search(source, primaryKeyword, request, timeoutMs)
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: Throwable) {
+            return SearchOutcome(source, emptyList(), cause.toFailureKind())
         }
-        SearchOutcome(source, candidates)
-    } catch (cause: CancellationException) {
-        throw cause
-    } catch (cause: Throwable) {
-        SearchOutcome(source, emptyList(), cause.toFailureKind())
+        val shouldRetryWithTitle = primaryKeyword != request.title &&
+            source.supportsKeywordVariants &&
+            scorer.score(request, primaryCandidates).isEmpty()
+        if (!shouldRetryWithTitle) return SearchOutcome(source, primaryCandidates)
+        return try {
+            val retryCandidates = search(source, request.title, request, timeoutMs)
+            SearchOutcome(source, (primaryCandidates + retryCandidates).distinctBy { it.source to it.remoteId })
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (cause: Throwable) {
+            SearchOutcome(source, primaryCandidates, cause.toFailureKind())
+        }
     }
 
     private suspend fun fetchSource(
@@ -179,7 +201,8 @@ class LyricsMatchCoordinator(
     private fun classifyFailure(vararg rounds: RoundOutcome): LyricsMatchResult {
         val failures = rounds.flatMap { round ->
             round.searchOutcomes.mapNotNull(SearchOutcome::failure) +
-                round.fetchOutcomes.mapNotNull(FetchOutcome::failure)
+                round.fetchOutcomes.mapNotNull(FetchOutcome::failure) +
+                listOfNotNull(round.failure)
         }
         return when {
             FailureKind.InvalidResponse in failures -> LyricsMatchResult.InvalidResponse
@@ -213,6 +236,8 @@ class LyricsMatchCoordinator(
         val searchOutcomes: List<SearchOutcome> = emptyList(),
         val fetchOutcomes: List<FetchOutcome> = emptyList(),
         val found: LyricsMatchResult.Found? = null,
+        /** 轮级整体预算超时时的失败标记（此时 searchOutcomes 已不可得）。 */
+        val failure: FailureKind? = null,
     )
 
     private data class SearchOutcome(
@@ -238,5 +263,13 @@ class LyricsMatchCoordinator(
 
     private companion object {
         const val MAX_FETCH_ATTEMPTS_PER_SOURCE = 3
+
+        /**
+         * 轮级整体预算：单源超时各自独立计时（搜索最多两次 + 取词最多 3 个候选），
+         * 没有轮预算时快轮最坏 9s、深挖轮最坏 22.5s。取值 = 各自单源预算 × 上限的宽松覆盖，
+         * 超时的轮按 NetworkFailure 计（不进负缓存，下次播放重试）。
+         */
+        const val FAST_ROUND_DEADLINE_MS = 8_000L
+        const val DEEP_ROUND_DEADLINE_MS = 14_000L
     }
 }

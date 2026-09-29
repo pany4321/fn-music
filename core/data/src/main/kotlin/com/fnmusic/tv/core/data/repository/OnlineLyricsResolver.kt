@@ -272,4 +272,11 @@ private fun CachedLyricsLine.toSdk(): ISyncedLine? {
 private fun CachedSyllable.toSdk(): KaraokeSyllable? =
     takeIf { end >= start }?.let { KaraokeSyllable(content, start, end, phonetic) }
 
-private const val MATCH_PROTOCOL_VERSION = "lyrics-sdk-4"
+/**
+ * 在线匹配的"协议版本"，拼进缓存指纹（见 [lyricsFingerprint]）。
+ *
+ * **改过 `LyricsMatchPolicy`（评分闸门/词表/权重）就必须 +1**：匹配结果按指纹永久缓存，
+ * 指纹不含规则版本时，旧规则选出的歌词会在新规则下永久命中（1.8.6→1.9.0 的三次规则变更
+ * 都漏了这一步，靠审查才补上）。歌词内容/缓存结构的变更则 bump 顶部的 MATCHED_LYRICS_SCHEMA_VERSION。
+ */
+private const val MATCH_PROTOCOL_VERSION = "lyrics-sdk-5"

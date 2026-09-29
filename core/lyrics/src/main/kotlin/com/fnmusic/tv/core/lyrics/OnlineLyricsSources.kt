@@ -41,12 +41,13 @@ object DefaultLyricsSources {
     /**
      * 第二轮（深挖）：只在快源**一首都没命中**时跑，所以可以给更宽的预算。
      * QQ 的老搜索接口召回最好但实测中位 3.01 秒（20/20 超快源预算），正适合放在这里。
+     * LRCLIB **不放**这里：它的检索实测约 1.28s，快源预算足够，放进来只会对同一关键词
+     * 重复检索（它还是四家里唯一明文限流的接口）。
      */
     fun createDeep(client: OkHttpClient): List<LyricsSource> {
         val http = OkHttpLyricsHttpClient(client)
         return listOf(
             QqMusicLyricsSource(http, deepSearch = true),
-            LrclibLyricsSource(http),
         )
     }
 }
@@ -75,6 +76,12 @@ class QqMusicLyricsSource(
     private val deepSearch: Boolean = false,
 ) : LyricsSource {
     override val id = LyricsSourceId.QqMusic
+
+    /**
+     * 桌面搜索**只认标题**（带歌手会把合辑标签带偏），所以「纯标题重试」对它必然发出
+     * 一模一样的请求 —— 声明不支持关键词变化，让编排层跳过重试。深挖老接口正常吃关键词。
+     */
+    override val supportsKeywordVariants: Boolean get() = deepSearch
 
     override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> =
         if (deepSearch) deepSearchCandidates(query) else liteSearchCandidates(query)
@@ -413,11 +420,6 @@ class LrclibLyricsSource(
 ) : LyricsSource {
     override val id = LyricsSourceId.Lrclib
 
-    /** 命中 429 后的冷却截止时刻：冷却期内不再发请求，避免把临时限流升级成封禁。 */
-    @Volatile
-    private var cooldownUntilMs = 0L
-    private var lastRequestAtMs = 0L
-
     /** 检索响应内联的逐行歌词，按 record id 暂存给 [fetch] 用（先进先出，有上限）。 */
     private val inlineLyrics = LinkedHashMap<String, String>()
     private val inlineLock = Any()
@@ -459,25 +461,35 @@ class LrclibLyricsSource(
     }
 
     private suspend fun requestText(url: String, query: Map<String, String> = emptyMap()): String {
-        if (now() < cooldownUntilMs) throw LyricsTransportException("Lrclib is cooling down after HTTP 429")
+        if (now() < LrclibSharedState.cooldownUntilMs) {
+            throw LyricsTransportException("Lrclib is cooling down after HTTP 429")
+        }
         pace()
         return try {
             http.get(url, query)
         } catch (cause: LyricsTransportException) {
             if (cause.status == HTTP_TOO_MANY_REQUESTS) {
                 val waitMs = (cause.retryAfterMs ?: DEFAULT_COOLDOWN_MS).coerceIn(MIN_COOLDOWN_MS, MAX_COOLDOWN_MS)
-                cooldownUntilMs = now() + waitMs
+                LrclibSharedState.cooldownUntilMs = now() + waitMs
             }
             throw cause
         } finally {
-            lastRequestAtMs = now()
+            LrclibSharedState.lastRequestAtMs = now()
         }
     }
 
-    /** 官方要求客户端顺序发送、并在请求之间留出 200–500ms；这里只约束本源自己的相邻请求。 */
+    /**
+     * 官方要求客户端顺序发送、并在请求之间留出 200–500ms。
+     *
+     * 冷却与步调是**进程级共享**（见 [LrclibSharedState]）：编排层可能持有多个本源实例
+     * （历史上快源/深挖工厂各建过一个），实例字段会让一个实例吃到的 429 冷却对另一个失效 ——
+     * 恰好违背官方"必须遵守 Retry-After"的强制要求。
+     */
     private suspend fun pace() {
-        if (interRequestDelayMs <= 0L || lastRequestAtMs <= 0L) return
-        val remaining = interRequestDelayMs - (now() - lastRequestAtMs)
+        if (interRequestDelayMs <= 0L) return
+        val last = LrclibSharedState.lastRequestAtMs
+        if (last <= 0L) return
+        val remaining = interRequestDelayMs - (now() - last)
         if (remaining > 0L) delay(remaining)
     }
 
@@ -499,13 +511,32 @@ class LrclibLyricsSource(
     private companion object {
         const val SEARCH_ENDPOINT = "https://lrclib.net/api/search"
         const val GET_ENDPOINT = "https://lrclib.net/api/get"
-        const val ARTIST_JOINER = " - "
         const val INTER_REQUEST_DELAY_MS = 200L
         const val DEFAULT_COOLDOWN_MS = 60_000L
         const val MIN_COOLDOWN_MS = 1_000L
         const val MAX_COOLDOWN_MS = 10 * 60 * 1_000L
         const val MAX_INLINE_ENTRIES = 64
         const val HTTP_TOO_MANY_REQUESTS = 429
+    }
+}
+
+/**
+ * LRCLIB 的**进程级共享** 429 冷却与请求步调。
+ *
+ * 编排层可能持有多个本源实例（历史上快源/深挖工厂各建过一个），实例字段会让一个实例吃到的
+ * 429 冷却对另一个失效 —— 恰好违背官方"必须遵守 Retry-After"的强制要求。测试之间用
+ * [resetForTest] 归零，避免用例互相污染。
+ */
+internal object LrclibSharedState {
+    @Volatile
+    var cooldownUntilMs: Long = 0L
+
+    @Volatile
+    var lastRequestAtMs: Long = 0L
+
+    fun resetForTest() {
+        cooldownUntilMs = 0L
+        lastRequestAtMs = 0L
     }
 }
 

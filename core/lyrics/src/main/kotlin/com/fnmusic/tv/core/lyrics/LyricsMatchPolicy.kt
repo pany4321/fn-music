@@ -202,10 +202,14 @@ class LyricsCandidateScorer(
         Remix(Regex("(?:^|\\W)(?:remix|mix(?:ed)?|混音)(?:$|\\W)")),
         Acoustic(Regex("(?:^|\\W)(?:acoustic|unplugged|不插电)(?:$|\\W)")),
         Cover(Regex("(?:^|\\W)(?:cover|翻唱)(?:$|\\W)")),
-        // LDDC 的标签词表补进来的三类：编辑版 / 独唱版 / 电视与动画时长版
-        Edit(Regex("(?:^|\\W)(?:edit(?:ed)?|剪?辑版)(?:$|\\W)")),
+        // LDDC 的标签词表补进来的三类：编辑版 / 独唱版 / 电视与动画时长版。
+        // 注意必须用完整词"剪辑版/编辑版"：写成 `剪?辑版` 会把「专辑版」的子串"辑版"也命中
+        // （汉字在 Java 正则里都算 \W，边界条件总被满足），误杀大量「歌名（专辑版）」条目。
+        Edit(Regex("(?:^|\\W)(?:edit(?:ed)?|剪辑版|编辑版)(?:$|\\W)")),
         Solo(Regex("(?:^|\\W)(?:solo|独唱版)(?:$|\\W)")),
-        Short(Regex("(?:^|\\W)(?:tv\\s*size|anime\\s*size|radio\\s*edit|short\\s*ver|サイズ)(?:$|\\W)")),
+        // サイズ 必须带 tv/アニメ 前缀：裸サイズ会误报任何含该词的日文歌名，
+        // 而无前缀要求时「TVサイズ」（动画版标准写法，前导 v 是 \w）反而测不到。
+        Short(Regex("(?:^|\\W)(?:tv\\s*size|anime\\s*size|radio\\s*edit|short\\s*ver|(?:tv|アニメ)\\s*サイズ)(?:$|\\W)")),
     }
 
     companion object {

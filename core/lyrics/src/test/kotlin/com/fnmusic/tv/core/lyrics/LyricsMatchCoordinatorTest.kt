@@ -367,11 +367,63 @@ class LyricsMatchCoordinatorTest {
         assertTrue(result is LyricsMatchResult.NetworkFailure)
     }
 
+    @Test fun `deep round is skipped when every fast search failed on the network`() = runBlocking {
+        // 离线：快源全体 NetworkFailure（不是"没搜到"）→ 深挖轮只会同样失败，必须短路
+        val offline = FakeSource(
+            LyricsSourceId.Netease,
+            searchFailure = LyricsTransportException("offline"),
+            candidates = { emptyList() },
+        )
+        val deep = FakeSource(LyricsSourceId.QqMusic)
+
+        val result = LyricsMatchCoordinator(
+            sources = listOf(offline),
+            deepSources = listOf(deep),
+            sourceTimeoutMs = 500,
+        ).match(request)
+
+        assertTrue(result is LyricsMatchResult.NetworkFailure)
+        assertEquals(0, deep.searchCalls)
+        assertEquals(0, deep.fetchCalls)
+    }
+
+    @Test fun `a failed title retry keeps the failure but not the whole source`() = runBlocking {
+        // 主搜索成功但候选全不合格、纯标题重试超时：源应记为 NetworkFailure（不进负缓存），
+        // 而不是像旧实现那样连主候选一起丢（此处主候选本就不合格，重点是失败分类不被夸大成"没歌词"）
+        val retryTimeout = LyricsTransportException("retry timed out")
+        val source = FakeSource(
+            LyricsSourceId.Netease,
+            candidates = { emptyList() },
+            failSecondSearchWith = retryTimeout,
+        )
+
+        val result = LyricsMatchCoordinator(listOf(source), sourceTimeoutMs = 500).match(request)
+
+        assertTrue(result is LyricsMatchResult.NetworkFailure)
+        assertEquals(2, source.searchCalls)
+    }
+
+    @Test fun `sources that ignore keywords are not retried with the title`() = runBlocking {
+        // QQ 桌面搜索只认标题：主关键词没有合格候选时，纯标题重试只会发一模一样的请求
+        val source = FakeSource(
+            LyricsSourceId.QqMusic,
+            candidates = { emptyList() },
+            overrideSupportsKeywordVariants = false,
+        )
+
+        val result = LyricsMatchCoordinator(listOf(source), sourceTimeoutMs = 500).match(request)
+
+        assertTrue(result is LyricsMatchResult.NotFound)
+        assertEquals(1, source.searchCalls)
+    }
+
     private class FakeSource(
         override val id: LyricsSourceId,
         private val searchDelayMs: Long = 0,
         private val fetchDelayMs: Long = 0,
         private val searchFailure: Throwable? = null,
+        private val failSecondSearchWith: Throwable? = null,
+        private val overrideSupportsKeywordVariants: Boolean? = null,
         private val candidates: (LyricsSearchQuery) -> List<LyricsCandidate> = { query ->
             listOf(candidate(id, id.name, durationMs = query.request.durationMs))
         },
@@ -380,10 +432,14 @@ class LyricsMatchCoordinatorTest {
         var fetchCalls = 0
         var searchCalls = 0
 
+        override val supportsKeywordVariants: Boolean
+            get() = overrideSupportsKeywordVariants ?: true
+
         override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> {
+            val failure = if (searchCalls == 0) searchFailure else failSecondSearchWith
             searchCalls++
             delay(searchDelayMs)
-            searchFailure?.let { throw it }
+            failure?.let { throw it }
             return candidates(query)
         }
 

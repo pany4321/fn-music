@@ -5,10 +5,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Before
 import org.junit.Test
 
 class LrclibLyricsSourceTest {
     private val request = LyricsMatchRequest("id", "晴天", listOf("周杰伦"), "叶惠美", 270_000)
+
+    @Before fun resetSharedState() = LrclibSharedState.resetForTest()
 
     @Test fun `search maps records and sends a single keyword request`() = runBlocking {
         val http = RecordingHttp(bodies = mapOf("api/search" to "[${record(id = 17788, duration = 270.0)}]"))
@@ -171,6 +174,27 @@ class LrclibLyricsSourceTest {
         clock += 31_000
         runCatching { source.search(LyricsSearchQuery("周杰伦 - 晴天", request)) }
         assertEquals(2, http.calls.size)
+    }
+
+    @Test fun `cooldown is shared across instances`() = runBlocking {
+        // 编排层历史上会持有多个本源实例（快源/深挖工厂各一）：一个实例吃到的 429 冷却
+        // 必须对另一个实例同样生效，否则等于无视 LRCLIB 的 Retry-After 强制要求。
+        var clock = 1_000_000L
+        val http429 = RecordingHttp(
+            errors = mapOf("api/search" to LyricsTransportException("Lyrics HTTP 429", status = 429, retryAfterMs = 30_000)),
+        )
+        val first = source(http429) { clock }
+        runCatching { first.search(LyricsSearchQuery("周杰伦 - 晴天", request)) }
+        assertEquals(1, http429.calls.size)
+
+        val httpOk = RecordingHttp(bodies = mapOf("api/search" to "[${record(id = 2, duration = 270.0)}]"))
+        val second = source(httpOk) { clock }
+        runCatching { second.search(LyricsSearchQuery("周杰伦 - 晴天", request)) }
+        assertTrue("另一实例在冷却期内不得发请求", httpOk.calls.isEmpty())
+
+        clock += 31_000
+        second.search(LyricsSearchQuery("周杰伦 - 晴天", request))
+        assertEquals(1, httpOk.calls.size)
     }
 
     @Test fun `rate limit without retry after falls back to the default cooldown`() = runBlocking {

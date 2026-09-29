@@ -613,7 +613,9 @@ class MusicRepository internal constructor(
      */
     private suspend fun lyricDocument(trackGuid: String): LyricDocument? {
         val namespace = session.cacheNamespace()
-        val key = ResponseCacheKey(namespace, "lyric", trackGuid)
+        // 缓存键拼上数据契约版本：服务端歌词的解码/响应形状变了，旧 payload 必须能作废
+        // （与 page/index 键同一机制；磁盘行的离线兜底键保持裸 guid，不参与版本化）。
+        val key = ResponseCacheKey(namespace, "lyric", contractVersionedKey(trackGuid))
         var decoded: LyricDocument? = null
         var resolved = false
         val payload = responses.getOrFetch(
