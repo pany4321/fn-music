@@ -7,6 +7,7 @@ import java.util.zip.DeflaterOutputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,29 +20,52 @@ class OnlineLyricsSourcesTest {
         )
         val translation = encryptQrc("[00:01.00]Hello")
         val http = FixtureHttp(
-            getFixtures = mapOf(
-                "client_search_cp" to searchFixture(),
-            ),
             postFixtures = mapOf(
-                "musicu.fcg" to """{"request":{"data":{"lyric":"$original","qrc_t":1,"lrc_t":0,"trans":"$translation","trans_t":1,"roma":""}}}""",
+                "PlayLyricInfo" to """{"request":{"data":{"lyric":"$original","qrc_t":1,"lrc_t":0,"trans":"$translation","trans_t":1,"roma":""}}}""",
+                "SearchCgiService" to searchFixture(),
             ),
         )
         val source = QqMusicLyricsSource(http)
 
-        val lyrics = source.fetch(source.search(LyricsSearchQuery("Song", request)).single())
+        val lyrics = source.fetch(source.search(LyricsSearchQuery("Artist - Song", request)).single())
 
         val line = lyrics.lines.single() as KaraokeLine
         assertEquals("你好", line.lyricText())
         assertEquals("Hello", line.translation)
-        assertEquals(1, http.postCalls)
+    }
+
+    @Test fun `qq search sends the title only and maps the full metadata`() = kotlinx.coroutines.runBlocking {
+        val http = FixtureHttp(postFixtures = mapOf("SearchCgiService" to searchFixture()))
+        val source = QqMusicLyricsSource(http)
+
+        val candidate = source.search(LyricsSearchQuery("Artist - Song", request)).single()
+
+        // 只传标题：带「歌手 - 标题」整串会把合辑歌手标签（群星 / Various Artists）带成垃圾或 0 结果
+        assertTrue(http.postBodies.single().contains("\"query\":\"Song\""))
+        assertFalse(http.postBodies.single().contains("Artist - Song"))
+        assertEquals("97773", candidate.remoteId)
+        assertEquals("mid", candidate.mediaId)
+        assertEquals("Song", candidate.title)
+        assertEquals(listOf("Artist", "Second"), candidate.artists)
+        assertEquals("Album", candidate.album)
+        assertEquals(180_000L, candidate.durationMs)
+    }
+
+    @Test fun `qq search without a title sends nothing`() = kotlinx.coroutines.runBlocking {
+        val http = FixtureHttp()
+        val source = QqMusicLyricsSource(http)
+
+        assertTrue(source.search(LyricsSearchQuery("", request.copy(title = "  "))).isEmpty())
+        assertTrue(http.postBodies.isEmpty())
     }
 
     @Test fun `qq falls back to ordinary lrc when native qrc fails`() = kotlinx.coroutines.runBlocking {
         val http = FixtureHttp(
             getFixtures = mapOf(
-                "client_search_cp" to searchFixture(),
                 "fcg_query_lyric_new" to """{"lyric":"[00:01.00]Hello","trans":"[00:01.00]你好"}""",
             ),
+            postFixtures = mapOf("SearchCgiService" to searchFixture()),
+            postFailures = setOf("PlayLyricInfo"),
         )
         val source = QqMusicLyricsSource(http)
 
@@ -84,14 +108,24 @@ class OnlineLyricsSourcesTest {
         assertTrue(lyrics.lines.single() is KaraokeLine)
     }
 
+    /** 桌面搜索接口：一次 15 条，字段齐全（时长、专辑、歌手数组）。 */
     private fun searchFixture() =
-        """{"data":{"song":{"list":[{"songid":1,"songmid":"mid","songname":"Song","albumname":"Album","interval":180,"singer":[{"name":"Artist"}]}]}}}"""
+        """{"req":{"data":{"body":{"song":{"list":[""" +
+            """{"id":97773,"mid":"mid","title":"Song","interval":180,"album":{"name":"Album"},""" +
+            """"singer":[{"name":"Artist"},{"name":"Second"}]}""" +
+            """]}}}}}"""
 
+    /**
+     * POST 的搜索 / QRC / 详情都走同一个 URL（musicu.fcg），所以按**请求体**里的模块名区分 fixture；
+     * [postFailures] 里的键同样按请求体匹配。
+     */
     private class FixtureHttp(
-        private val getFixtures: Map<String, String>,
+        private val getFixtures: Map<String, String> = emptyMap(),
         private val postFixtures: Map<String, String> = emptyMap(),
+        private val postFailures: Set<String> = emptySet(),
     ) : LyricsHttpClient {
         var postCalls = 0
+        val postBodies = mutableListOf<String>()
 
         override suspend fun get(url: String, query: Map<String, String>, headers: Map<String, String>): String =
             getFixtures.entries.firstOrNull { (key, _) -> url.contains(key) }?.value
@@ -99,7 +133,9 @@ class OnlineLyricsSourcesTest {
 
         override suspend fun post(url: String, body: String, headers: Map<String, String>): String {
             postCalls++
-            return postFixtures.entries.firstOrNull { (key, _) -> url.contains(key) }?.value
+            postBodies += body
+            if (postFailures.any(body::contains)) throw LyricsTransportException("POST disabled in this test")
+            return postFixtures.entries.firstOrNull { (key, _) -> body.contains(key) }?.value
                 ?: error("No fixture for $url")
         }
     }

@@ -31,6 +31,7 @@ object DefaultLyricsSources {
         val http = OkHttpLyricsHttpClient(client)
         return listOf(
             NeteaseLyricsSource(http),
+            QqMusicLyricsSource(http),
             KugouLyricsSource(http),
             LrclibLyricsSource(http),
         )
@@ -38,12 +39,19 @@ object DefaultLyricsSources {
 }
 
 /**
- * QQ 音乐：**当前未注册**（见 [DefaultLyricsSources]）。
+ * QQ 音乐：逐字（QRC）覆盖最好的一家，也是离线实测"候选通过门槛最多"的源。
  *
- * 保留实现是因为它本身可用（逐字 QRC 覆盖最好），但它的搜索接口
- * `client_search_cp` 在真实网络上要 1.8–3.3 秒，已经顶到单源 1.8 秒预算：
- * 匹配编排会 `awaitAll` 等齐所有源，一个慢源会把**每首歌**的歌词上屏都拖到上限，
- * 而它自己往往还是超时被丢。若接入更快的查询通道，可以把它加回列表。
+ * **搜索走桌面客户端的搜索接口** `music.search.SearchCgiService` / `DoSearchForQQMusicDesktop`
+ * （实测 0.40–0.63 秒，一次返回 15 条，字段齐全：标题、歌手数组、专辑、时长、mid、id）。
+ * 对比过另外两条路，都不能用：
+ * - 老接口 `client_search_cp`：召回好（20 首样本 16 首能过闸门），但**实测中位 3.01 秒、
+ *   最快 2.23 秒、20/20 全部超出编排层 1.8 秒单源预算** —— 应用内永远等不到，还会把每首歌的
+ *   歌词上屏拖到上限（这就是它一度被下架的原因）；
+ * - 联想接口 `smartbox_new.fcg`：够快（0.25–0.35 秒）但只给 4 条、偏热门/翻唱，召回只有 17%。
+ *
+ * **查询只传标题**：联想接口实测带「歌手 - 标题」整串会返回微博台 demo 之类垃圾、合辑歌手标签
+ * （群星 / TAS / Various Artists）直接 0 条；搜索接口上同理，"四季红 群星" 会把结果带偏。
+ * 歌手对不对交给评分器判断。
  */
 class QqMusicLyricsSource(
     private val http: LyricsHttpClient,
@@ -51,31 +59,45 @@ class QqMusicLyricsSource(
     override val id = LyricsSourceId.QqMusic
 
     override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> {
-        val root = parseObject(
-            http.get(
-                "https://c.y.qq.com/soso/fcgi-bin/client_search_cp",
-                mapOf("w" to query.keyword, "format" to "json", "p" to "1", "n" to "20", "cr" to "1", "g_tk" to "5381"),
-                QQ_HEADERS,
-            ),
+        val title = query.request.title.trim().takeIf(String::isNotBlank) ?: return emptyList()
+        val body = buildJsonObject {
+            put("comm", buildJsonObject {
+                put("ct", "19")
+                put("cv", "1859")
+                put("uin", "0")
+            })
+            put("req", buildJsonObject {
+                put("method", "DoSearchForQQMusicDesktop")
+                put("module", "music.search.SearchCgiService")
+                put("param", buildJsonObject {
+                    put("num_per_page", MAX_CANDIDATES.toString())
+                    put("page_num", "1")
+                    put("query", title)
+                    put("search_type", 0)
+                })
+            })
+        }.toString()
+        val root = parseObject(http.post(QQ_MUSICU_URL, body, QQ_NATIVE_HEADERS))
+        return root.objectAt("req")?.objectAt("data")?.objectAt("body")
+            ?.objectAt("song")?.arrayAt("list").orEmpty()
+            .mapNotNull { item -> item.asObject()?.let(::toCandidate) }
+            .take(MAX_CANDIDATES)
+    }
+
+    private fun toCandidate(song: JsonObject): LyricsCandidate? {
+        val remoteId = song.longAt("id")?.toString() ?: song.stringAt("id")?.takeIf(String::isNotBlank)
+            ?: return null
+        val title = decodeHtml(song.stringAt("title").orEmpty()).takeIf(String::isNotBlank) ?: return null
+        return LyricsCandidate(
+            source = id,
+            remoteId = remoteId,
+            mediaId = song.stringAt("mid")?.takeIf(String::isNotBlank),
+            title = title,
+            artists = song.arrayAt("singer").orEmpty()
+                .mapNotNull { it.asObject()?.stringAt("name")?.let(::decodeHtml)?.takeIf(String::isNotBlank) },
+            album = song.objectAt("album")?.stringAt("name")?.let(::decodeHtml)?.takeIf(String::isNotBlank),
+            durationMs = song.longAt("interval")?.takeIf { it > 0 }?.times(1_000L),
         )
-        return root.objectAt("data")?.objectAt("song")?.arrayAt("list").orEmpty().mapNotNull { item ->
-            val song = item.asObject() ?: return@mapNotNull null
-            val remoteId = song.stringAt("songid") ?: return@mapNotNull null
-            val mediaId = song.stringAt("songmid") ?: return@mapNotNull null
-            val title = decodeHtml(song.stringAt("songname").orEmpty()).takeIf(String::isNotBlank)
-                ?: return@mapNotNull null
-            LyricsCandidate(
-                source = id,
-                remoteId = remoteId,
-                mediaId = mediaId,
-                title = title,
-                artists = song.arrayAt("singer").orEmpty()
-                    .mapNotNull { it.asObject()?.stringAt("name")?.let(::decodeHtml) },
-                album = song.stringAt("albumname")?.let(::decodeHtml),
-                durationMs = song.longAt("interval")?.times(1_000L),
-                instrumental = song.longAt("pure") == 1L,
-            )
-        }
     }
 
     override suspend fun fetch(candidate: LyricsCandidate): SyncedLyrics = try {
@@ -153,6 +175,9 @@ class QqMusicLyricsSource(
             "Cookie" to "tmeLoginType=-1;",
             "User-Agent" to "okhttp/3.14.9",
         )
+
+        /** 搜索一次最多收下多少条候选（实测接口返回 15 条），全部交给评分器。 */
+        const val MAX_CANDIDATES = 20
     }
 }
 
