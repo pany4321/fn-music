@@ -652,6 +652,45 @@ method `DoSearchForQQMusicDesktop`，param `{num_per_page:"20", page_num:"1", qu
 把"0 候选"当作正常情况（我们本来就是），不能据此判定歌曲没有歌词。也说明**深挖轮的存在有额外价值**：
 一条通道静默失效时，另一条还能兜。
 
+#### 1.9.0 发布后的批判性代码审查（三路并行深查，全部发现归档）
+
+审查范围：core/lyrics 全模块 + core/data 歌词链路 + 测试与文档一致性。按处理结果三栏归档：
+
+**已修（本轮，未发布）**
+| 发现 | 位置 | 修法 |
+|---|---|---|
+| 【高】`剪?辑版` 误杀「专辑版」后缀（1.9.0 回归：`剪?` 可选 + 汉字皆 `\W` 使"辑版"子串命中） | LyricsMatchPolicy.kt:206 | 改完整词 `剪辑版\|编辑版`；补「专辑版/录音室版/裸サイズ不冲突、剪辑版/TVサイズ冲突」单测（注意：2 字标题加后缀标题分 <50 本来就会被拒，测试必须用 ≥5 字标题才能让"词表误报"成为唯一拒绝原因） |
+| 【高】永久缓存 × 规则变更无失效（3 次规则变更都没失效旧缓存） | OnlineLyricsResolver.kt:275 | `MATCH_PROTOCOL_VERSION` → `lyrics-sdk-5`；铁律入 §9.3 第 9 条 |
+| 【高】LRCLIB 双实例状态分叉：快轮 429 冷却对深挖实例无效（违背官方 Retry-After 强制要求）；同关键词最多重复检索 4 次 | OnlineLyricsSources.kt | 冷却/步调上移为 `LrclibSharedState`（internal object，@Volatile，`resetForTest`）；`createDeep` 移除 LRCLIB（实测 1.28s 快轮预算足够）；补跨实例冷却单测 |
+| 【中】两轮无总预算（最坏 31.5s Loading：搜索×2 + 取词×3 各自计时） | LyricsMatchCoordinator.kt | 轮级 deadline（快 8s/深 14s，`withTimeoutOrNull` 包 `runRound`），超时记 NetworkFailure（不进负缓存） |
+| 【中】离线时深挖轮照跑 | 同上 | 快源 searchOutcomes 全为 NetworkFailure 时短路深挖；补单测 |
+| 【中】纯标题重试失败把整个源标成 NetworkFailure 且丢候选 → 本可负缓存的"无歌词"每次播放全量重探 | Coordinator searchSource（旧 :113-129 共用 try 块） | 重试独立 try/catch：失败保留主候选、只记失败；补单测 |
+| 【中】QQ lite 忽略 keyword → 标题重试发一模一样的请求 | OnlineLyricsSources.kt:116 | `LyricsSource.supportsKeywordVariants`（默认 true），QQ lite 返回 false，编排层跳过重试；补单测 |
+| 【中】「TVサイズ」漏检、裸「サイズ」误报（假名皆 `\W`） | LyricsMatchPolicy.kt:208 | Short 词表改 `(?:tv\|アニメ)\s*サイズ`（要求前缀）；已并入词表单测 |
+| 【中】first-party 歌词缓存键无任何版本，响应形状变更无法作废 | MusicRepository.kt:616 | 键套 `contractVersionedKey(trackGuid)`（磁盘离线兜底键保持裸 guid） |
+| 【中】文档过期：README"四源并发检索"；contracts 的"并发+等全部终态"契约与两轮冲突 | README.md:37、android-client-contracts.md:339-345 | 改为两轮口径（含"跨轮召回优先"是明示取舍） |
+| 【高·测试缺口】QQ 深挖老接口（client_search_cp）零单测 | OnlineLyricsSourcesTest | 补 2 条：参数/字段映射/pure 标志/空标题跳过 + 工厂接线（快源 4 家顺序、深挖仅 QQ、两实例 supportsKeywordVariants 相反） |
+
+**记录在案（不修，含理由）**
+- 快源四家 instrumental 全为 false（QQ 桌面接口无 pure 字段、网易/酷狗不返回、LRCLIB 纯音乐记录无逐行歌词会被丢弃）→ 纯音乐硬闸在快轮基本死代码。误配概率低；要修得改数据面，收益小。
+- 元数据富化触发**两条**歌词重启路径（presenter 立即重启 + replaceMediaItem→presentationRevision 换 identity 整体重启）→ 首播缺元数据的歌在线匹配双打；且已 Ready 的次优匹配富化后不重匹配、被永久缓存。修复涉及 presenter 生命周期，风险大于收益，先记录。
+- SerializedResponseCache 全局锁内整包 JSON 验签；歌词落盘在 accept 路径内联 VACUUM/checkpoint → 切歌可能被磁盘维护卡顿（性能，非正确性）。
+- 字节数统计 `length(payload)`（字符数）与字节数口径差可达 3 倍 → auditBudget 触发淘汰偏晚。
+- 429 与断网都归 NetworkFailure；Retry-After 只解析秒数形式（LRCLIB 落默认 60s 冷却，可接受）。
+- 协程取消后 `body.string()` 仍会读完响应体（占 OkHttp dispatcher 线程）；建议将来给 OkHttpClient 加 `callTimeout`。
+- 翻译对齐 alignSidecar 贪心最近邻会错配、MAX_SIDECAR_DELTA_MS=1.5s 与词级 2s 阈值不一致；QqQrcParser 丢行尾残余文本；JAPANESE_ANNOTATION 可能剥掉全角括号内的真实演唱内容。
+- 负缓存仅 5 分钟 → 无歌词的歌每次播放重探两轮（有轮级 deadline 兜底后成本可控）。
+- `knownDurationDelta` 在 Coordinator 与 Policy 各一份（易漂移）；businessKey 已含 guid、指纹又含 guid（冗余）；磁盘 matched 行主键 (namespace, trackGuid) 不含指纹，指纹变体间互相覆盖。
+- CHANGELOG 1.9.0 写"15 条"而 MAX_CANDIDATES=20（实测接口返回 15，代码上限 20）——口径不一致，非矛盾。
+
+**核实无误（免得以后再查）**
+- SerializedResponseCache.getOrFetch 有 single-flight（同 key 合并等待者）；快轮/深挖各自 awaitAll，轮内首结果不压制后到的更优结果。
+- NowPlayingPresenter 的 token/ordinal 竞态防护完整（launch 后二次校验 + applyLyrics 校验）。
+- QQ_NATIVE_HEADERS 的 User-Agent 覆盖确实生效（OkHttp `header()` 同名替换，基头先设）。
+- clearAllEvictable/clearNamespace/统计路径全部覆盖 cache_matched_lyric 表。
+- app 层测试无一依赖歌词源行为，1.9.0 源变化不破坏 app 测试；lint 0 警告（7 条 AutoboxingStateCreation hint）。
+- LRCLIB `/api/get/{id}` 回落路径有效（官方文档确认该端点存在）。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报
@@ -752,6 +791,10 @@ rm -f /tmp/staged.patch
 8. **老设备（Android 6 电视，堆 96–192MB）**：不要把大量条目一次性铺开（搜索已改 `LazyColumn`）；
    图片内存缓存按堆封顶（`min(40MB, heap/8)`）、小堆时并发解码 3→2 且跳过渐进加载；Manifest 已开 `largeHeap`；
    解码要能扛 `OutOfMemoryError`（失败退化成占位图，不许崩）。
+9. **改 `LyricsMatchPolicy`（评分闸门/词表/权重/归一化）必须 bump `MATCH_PROTOCOL_VERSION`**
+   （OnlineLyricsResolver.kt，当前 `lyrics-sdk-5`）：在线匹配结果按指纹**永久缓存**，指纹含协议版本；
+   漏 bump 则旧规则选出的歌词在新规则下永久命中（1.8.6→1.9.0 三次规则变更都漏了，靠 1.9.0 后的
+   代码审查才补上）。歌词内容/缓存结构变更则 bump 同文件的 `MATCHED_LYRICS_SCHEMA_VERSION`。
 
 ### 9.4 环境与工具限制
 - **JDK 必须显式设置**：`JAVA_HOME="D:/research/android/env/jdk-21.0.12.1+1"`（默认环境的 JDK 版本不对）。

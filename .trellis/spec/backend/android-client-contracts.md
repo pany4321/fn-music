@@ -336,13 +336,23 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
   Parser order is QQ `QqQrcParser`, `NeteaseYrcParser`, `KugouKrcParser`, then
   `EnhancedLrcParser`; the project owns only the narrow QRC parser because the SDK does not provide
   one. Do not add a second LRC/YRC/KRC parser, timeline model, or app-layer conversion.
-- Provider order is Netease, QQ Music, then Kugou. Prefer each provider's native word format
+- Provider order is Netease, QQ Music, Kugou, then Lrclib (last: mostly traditional-Chinese text,
+  no word timing, no translation — the fallback when the Chinese platforms come up empty, and the
+  only provider with a public documented API). Prefer each provider's native word format
   (`yrc`, `qrc`, `krc`) and retain that provider's LRC endpoint only as a transport fallback.
   Decryption/decompression is provider transport work; parsed output is always `SyncedLyrics`.
-- Metadata eligibility remains a hard gate. Search every enabled provider concurrently, keep each
-  search/fetch bounded by its source timeout, and wait for all provider terminal outcomes. A global
-  deadline or early aggregation window must not let the first plain result suppress a later richer
-  result.
+  QQ Music appears twice on purpose: the desktop search API (`DoSearchForQQMusicDesktop`,
+  title-only query) in the fast round, and the legacy `client_search_cp` (full keyword, best
+  recall, ~3s) as the only deep-round source.
+- Metadata eligibility remains a hard gate. Matching runs in **two rounds**: the fast round
+  (Netease, QQ desktop, Kugou, Lrclib) returns immediately on any match; the deep round
+  (QQ legacy search, wider per-source and round-level deadlines) runs only when the fast round
+  matched nothing at all. Each round still awaits all of its providers' terminal outcomes before
+  ranking, so a first plain result never suppresses a later richer result *within a round*;
+  across rounds, recall-first (a fast hit wins even if a deep source might have offered a richer
+  variant) is an accepted, documented trade-off. A round-level deadline converts a stalled round
+  into a network failure so unmatchable tracks are not cached as "no lyrics" while probing was
+  incomplete.
 - Fetch at most three metadata-ranked candidates per provider and rank every usable fetched result.
   The deterministic content tuple is: any translation first, translation coverage second, eligible
   word timing third, known duration delta ascending fourth, provider order fifth, and remote ID
