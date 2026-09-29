@@ -10,6 +10,14 @@ import kotlin.math.max
 data class LyricsMatchPolicy(
     val minimumScore: Double = 80.0,
     val minimumTitleScore: Double = 50.0,
+    /**
+     * 本地与候选的时长容差：**固定 ±5 秒**。
+     *
+     * 曾按"长曲放宽 1%"改过（理由是 VBR/母带差异），自审后撤回：时长的绝对差才是判别力所在 ——
+     * 同一录音的容器/编码差异最多一两秒（±5 秒足够），而**长曲上几秒到几十秒的差几乎一定意味着
+     * 不同版本**（不同演出、剪辑、淡出）。按 1% 放宽等于让 60 分钟的曲子接受 36 秒偏差，而古典/民乐
+     * 不同演的内部时间轴差异是分钟级的，总时长相近也毫无保证。实测该改动在真实曲库上零收益。
+     */
     val maximumDurationDeltaMs: Long = 5_000L,
     val maximumWordTimingDeltaMs: Long = 2_000L,
     /** 兜底闸门：标题几乎一致时所需的标题分。 */
@@ -26,23 +34,7 @@ data class LyricsMatchPolicy(
         LyricsSourceId.Kugou,
         LyricsSourceId.Lrclib,
     ),
-) {
-    /**
-     * 本地与候选的时长容差：**以 ±5 秒为下限，长曲按 1% 放宽**。
-     *
-     * 为什么不能只用绝对值：VBR/AAC 的时长与母带差异、以及古典/民乐长曲的起收尾留白，
-     * 在 10 分钟以上的曲子上经常超过 5 秒 —— 而 5 秒对 10 分钟的曲子只占 0.8%，会把
-     * 正确版本误杀。反过来对 3 分钟的流行曲，1% 只有 1.8 秒，比 5 秒更严，所以取两者较大值。
-     */
-    fun durationToleranceMs(localDurationMs: Long?): Long = max(
-        maximumDurationDeltaMs,
-        (localDurationMs ?: 0L) / RELATIVE_DURATION_DIVISOR,
-    )
-
-    private companion object {
-        const val RELATIVE_DURATION_DIVISOR = 100L
-    }
-}
+)
 
 data class ScoredLyricsCandidate(
     val candidate: LyricsCandidate,
@@ -97,7 +89,7 @@ class LyricsCandidateScorer(
     private fun scoreOne(request: LyricsMatchRequest, candidate: LyricsCandidate): ScoredLyricsCandidate? {
         if (candidate.title.isBlank() || request.title.isBlank()) return null
         val durationDelta = knownDurationDelta(request.durationMs, candidate.durationMs)
-        if (durationDelta != null && durationDelta > policy.durationToleranceMs(request.durationMs)) return null
+        if (durationDelta != null && durationDelta > policy.maximumDurationDeltaMs) return null
         if (hasHardVersionConflict(request.title, candidate.title, candidate.instrumental)) return null
 
         val titleScore = titleScore(request.title, candidate.title)

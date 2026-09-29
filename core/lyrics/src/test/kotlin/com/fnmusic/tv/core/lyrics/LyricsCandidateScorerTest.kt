@@ -118,12 +118,15 @@ class LyricsCandidateScorerTest {
         assertEquals(75.0, scored.single().score, 0.001)
     }
 
-    @Test fun `long tracks get a relative duration tolerance`() {
-        // 20 分钟的长曲：±5 秒只占 0.4%，VBR/母带差异极易超过；容差按 1% 放宽到 12 秒
+    @Test fun `long tracks keep the same absolute duration tolerance`() {
+        // 相对容差（长曲按 1% 放宽）试过又撤回：长曲上几秒到几十秒的差几乎一定意味着不同版本，
+        // 20 分钟的曲子若接受 12 秒偏差，内部时间轴可能早就是另一场演出了。这里守住绝对值。
         val long = request.copy(durationMs = 1_200_000)
-        val remote = candidate(durationMs = 1_208_000)
+        val near = candidate(durationMs = 1_204_000)
+        val far = candidate(durationMs = 1_208_000)
 
-        assertEquals(1, scorer.score(long, listOf(remote)).size)
+        assertEquals(1, scorer.score(long, listOf(near)).size)
+        assertTrue(scorer.score(long, listOf(far)).isEmpty())
     }
 
     @Test fun `short tracks keep the absolute five second tolerance`() {
