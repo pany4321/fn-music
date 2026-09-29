@@ -12,10 +12,19 @@ data class LyricsMatchPolicy(
     val minimumTitleScore: Double = 50.0,
     val maximumDurationDeltaMs: Long = 5_000L,
     val maximumWordTimingDeltaMs: Long = 2_000L,
+    /** 兜底闸门：标题几乎一致时所需的标题分。 */
+    val highTitleScore: Double = 95.0,
+    /** 兜底闸门允许的时长差：比 [maximumDurationDeltaMs] 更严，避免不同版本被误放行。 */
+    val strictDurationDeltaMs: Long = 2_000L,
+    /**
+     * 同分结果的来源优先序。LRCLIB 排在最后：它的歌词多为繁体、没有翻译与逐字，
+     * 只有在中文平台都给不出结果时才由它兜底（它也是四家里唯一有公开文档的接口）。
+     */
     val sourceOrder: List<LyricsSourceId> = listOf(
         LyricsSourceId.Netease,
         LyricsSourceId.QqMusic,
         LyricsSourceId.Kugou,
+        LyricsSourceId.Lrclib,
     ),
 )
 
@@ -25,6 +34,7 @@ data class ScoredLyricsCandidate(
     val titleScore: Double,
     val consensusCount: Int,
     val metadataScore: Double = score,
+    val durationDeltaMs: Long? = null,
 )
 
 class LyricsCandidateScorer(
@@ -46,11 +56,26 @@ class LyricsCandidateScorer(
                 score = (scored.score + (consensus - 1).coerceAtMost(2) * 1.5).coerceAtMost(100.0),
                 consensusCount = consensus,
             )
-        }.filter { it.score >= policy.minimumScore && it.titleScore >= policy.minimumTitleScore }
+        }.filter { it.passesGate(policy) }
             .sortedWith(
                 compareByDescending<ScoredLyricsCandidate> { it.score }
                     .thenBy { policy.sourceOrder.indexOf(it.candidate.source).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE },
             )
+    }
+
+    /**
+     * 入选闸门。
+     *
+     * 常规路径要求「标题 + 歌手」加权分够高；但合辑、古典、民族器乐这类曲库里，本地歌手标签
+     * 常常与在线库对不上（群星 / 演奏者 vs 作曲家 / 中英文名混用），实测这是第二大漏配原因。
+     * 因此增加一条**更严格时长**的兜底：标题几乎完全一致（≥[LyricsMatchPolicy.highTitleScore]）
+     * 且时长差 ≤[LyricsMatchPolicy.strictDurationDeltaMs] 时放行 —— 标题与时长同时吻合已是很强的
+     * 证据，不因歌手串对不上而丢弃（版本冲突仍在 [scoreOne] 里提前挡掉）。
+     */
+    private fun ScoredLyricsCandidate.passesGate(policy: LyricsMatchPolicy): Boolean {
+        if (score >= policy.minimumScore && titleScore >= policy.minimumTitleScore) return true
+        val delta = durationDeltaMs ?: return false
+        return titleScore >= policy.highTitleScore && delta <= policy.strictDurationDeltaMs
     }
 
     private fun scoreOne(request: LyricsMatchRequest, candidate: LyricsCandidate): ScoredLyricsCandidate? {
@@ -73,7 +98,7 @@ class LyricsCandidateScorer(
             albumScore != null -> max(titleScore * 0.7 + albumScore * 0.3, titleScore * 0.8)
             else -> titleScore
         }
-        return ScoredLyricsCandidate(candidate, score, titleScore, consensusCount = 1)
+        return ScoredLyricsCandidate(candidate, score, titleScore, consensusCount = 1, durationDeltaMs = durationDelta)
     }
 
     private fun sameRecording(left: LyricsCandidate, right: LyricsCandidate): Boolean {
