@@ -22,7 +22,9 @@ data class LyricsMatchPolicy(
     val maximumWordTimingDeltaMs: Long = 2_000L,
     /** 兜底闸门：标题几乎一致时所需的标题分。 */
     val highTitleScore: Double = 95.0,
-    /** 兜底闸门允许的时长差：比 [maximumDurationDeltaMs] 更严，避免不同版本被误放行。 */
+    /**
+     * 兜底闸门允许的时长差：比 [maximumDurationDeltaMs] 更严，避免不同版本被误放行。
+     */
     val strictDurationDeltaMs: Long = 2_000L,
     /**
      * 同分结果的来源优先序。LRCLIB 排在最后：它的歌词多为繁体、没有翻译与逐字，
@@ -79,6 +81,10 @@ class LyricsCandidateScorer(
      * 因此增加一条**更严格时长**的兜底：标题几乎完全一致（≥[LyricsMatchPolicy.highTitleScore]）
      * 且时长差 ≤[LyricsMatchPolicy.strictDurationDeltaMs] 时放行 —— 标题与时长同时吻合已是很强的
      * 证据，不因歌手串对不上而丢弃（版本冲突仍在 [scoreOne] 里提前挡掉）。
+     *
+     * 试过把兜底再放宽成"时长吻合 + 综合分 ≥70 即可"：60 首真实曲库上**净增 0 首**（41/60 → 41/60），
+     * 没有任何原本被拒的候选因此进来 —— 这套曲库的漏配主因是"在线库里没有同一个录音"，不是门槛
+     * 太严。零收益却要承担误配风险，故撤回。
      */
     private fun ScoredLyricsCandidate.passesGate(policy: LyricsMatchPolicy): Boolean {
         if (score >= policy.minimumScore && titleScore >= policy.minimumTitleScore) return true
@@ -167,8 +173,15 @@ class LyricsCandidateScorer(
             if (remoteInstrumental) add(VersionFlag.Instrumental)
         }
         if (VersionFlag.Instrumental !in localFlags && VersionFlag.Instrumental in remoteFlags) return true
-        return listOf(VersionFlag.Live, VersionFlag.Remix, VersionFlag.Acoustic, VersionFlag.Cover, VersionFlag.Short)
-            .any { flag -> (flag in localFlags) != (flag in remoteFlags) }
+        return listOf(
+            VersionFlag.Live,
+            VersionFlag.Remix,
+            VersionFlag.Acoustic,
+            VersionFlag.Cover,
+            VersionFlag.Edit,
+            VersionFlag.Solo,
+            VersionFlag.Short,
+        ).any { flag -> (flag in localFlags) != (flag in remoteFlags) }
     }
 
     private fun versionFlags(value: String): Set<VersionFlag> {
@@ -185,10 +198,14 @@ class LyricsCandidateScorer(
     private enum class VersionFlag(val pattern: Regex) {
         Instrumental(Regex("(?:^|\\W)(?:inst(?:rumental)?|off\\s*vocal|伴奏|纯音乐)(?:$|\\W)")),
         Live(Regex("(?:^|\\W)(?:live|现场|演唱会)(?:$|\\W)")),
-        Remix(Regex("(?:^|\\W)(?:remix|mix|混音)(?:$|\\W)")),
+        // mix(?:ed)? 覆盖 "mixed"/"mixed ver"（LDDC 的标签归一化里有这一条，旧写法漏掉了）
+        Remix(Regex("(?:^|\\W)(?:remix|mix(?:ed)?|混音)(?:$|\\W)")),
         Acoustic(Regex("(?:^|\\W)(?:acoustic|unplugged|不插电)(?:$|\\W)")),
         Cover(Regex("(?:^|\\W)(?:cover|翻唱)(?:$|\\W)")),
-        Short(Regex("(?:^|\\W)(?:tv\\s*size|radio\\s*edit|short\\s*ver)(?:$|\\W)")),
+        // LDDC 的标签词表补进来的三类：编辑版 / 独唱版 / 电视与动画时长版
+        Edit(Regex("(?:^|\\W)(?:edit(?:ed)?|剪?辑版)(?:$|\\W)")),
+        Solo(Regex("(?:^|\\W)(?:solo|独唱版)(?:$|\\W)")),
+        Short(Regex("(?:^|\\W)(?:tv\\s*size|anime\\s*size|radio\\s*edit|short\\s*ver|サイズ)(?:$|\\W)")),
     }
 
     companion object {

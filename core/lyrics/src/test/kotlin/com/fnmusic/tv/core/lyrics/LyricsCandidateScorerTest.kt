@@ -53,6 +53,28 @@ class LyricsCandidateScorerTest {
         assertTrue(scorer.score(request, listOf(candidate(title = "晴天 Live"))).isEmpty())
     }
 
+    @Test fun `version tags from the LDDC vocabulary are recognized`() {
+        // mixed / edited / solo / tv size / anime size / サイズ 这些写法旧表漏掉了
+        listOf(
+            "晴天 (Mixed)",
+            "晴天 (Edited)",
+            "晴天 Solo Ver.",
+            "晴天 (Anime Size)",
+            "晴天 サイズ",
+        ).forEach { remote ->
+            assertTrue("应识别为版本冲突：$remote", scorer.score(request, listOf(candidate(title = remote))).isEmpty())
+        }
+    }
+
+    @Test fun `a moderate score alone is not enough even with a matching duration`() {
+        // 标题分 ≈89、歌手分 ≈67 → 综合分 ≈78，且时长只差 1 秒。试过放行这一档，实测零收益，
+        // 故保持"要么常规分够高、要么标题几乎完全一致"的双闸门。
+        val local = request.copy(title = "Song", artists = listOf("Alice"), album = null)
+        val remote = candidate(title = "Songx", artists = listOf("Alix"), album = null, durationMs = 268_000)
+
+        assertTrue(scorer.score(local, listOf(remote)).isEmpty())
+    }
+
     @Test fun `full width and artist separators normalize consistently`() {
         val local = request.copy(title = "ＡＢＣ", artists = listOf("A / B"), album = null)
         val remote = candidate(title = "ABC", artists = listOf("A、B"), album = null)

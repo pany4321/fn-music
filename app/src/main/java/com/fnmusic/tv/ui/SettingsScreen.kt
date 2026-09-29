@@ -413,7 +413,7 @@ internal fun SettingsScreen(
                     }
                     Spacer(Modifier.weight(1f))
                     SettingsActionButton(
-                        label = "清除图片和资料缓存",
+                        label = "清除图片、资料与歌词缓存",
                         onClick = {
                             scope.launch {
                                 container.authenticatedActions.clearAllEvictableCaches()
