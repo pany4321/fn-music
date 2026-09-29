@@ -34,8 +34,9 @@
   （飞牛用服务端漫游；Jellyfin 用客户端随机漫游补齐）。
 - **完整播放队列**：支持列表循环、随机播放、单曲循环与顺序播放。
 - **沉浸式播放器**：提供 CD 模式和大海报模式，可在设置中随时切换。
-- **歌词显示**：默认在线匹配高置信度的原文与译文，命中结果会缓存；匹配不到或在线源异常时自动
-  使用服务端歌词（飞牛与 Jellyfin 10.9+ 都支持），也可在设置中关闭在线匹配。
+- **歌词显示**：默认在线匹配高置信度的原文与译文（网易云、QQ 音乐、酷狗、LRCLIB 四源并发检索，
+  只取逐行同步歌词），命中结果会缓存；匹配不到或在线源异常时自动使用服务端歌词（飞牛与
+  Jellyfin 10.9+ 都支持），也可在设置中关闭在线匹配。
 - **灵活连接**：支持 HTTP、HTTPS、FNID 自动选路、访问码验证、断网恢复与多账号登录历史；
   Jellyfin 支持直连原文件与 HLS 转码播放（可拖动进度）。
 - **本地缓存**：缓存封面与音乐库资料，可设置图片缓存上限并手动清理。
@@ -222,6 +223,8 @@ baselineprofile/ 基准配置生成模块
 - [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) 提供 YRC、KRC 等同步歌词格式的解析与统一歌词模型。
 - [Accompanist Lyrics UI](https://github.com/6xingyv/Accompanist) 提供逐字高亮、双语展示与自动滚动歌词组件。
 - [LDDC](https://github.com/chenmozhijin/LDDC) 提供了多歌词源检索、匹配策略与歌词格式处理方面的实现参考。
+- [LRCLIB](https://lrclib.net/) 提供了免费的公开歌词接口（含逐行同步歌词），本项目按其
+  [API 文档](https://lrclib.net/docs) 接入并遵守其客户端标识与限流要求。
 - AndroidX、Compose for TV 与 Media3 等开源项目为本项目提供了基础能力。
 
 ## 开源许可

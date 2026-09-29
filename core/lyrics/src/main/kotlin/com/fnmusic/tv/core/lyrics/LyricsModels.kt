@@ -14,7 +14,7 @@ data class LyricsMatchRequest(
 )
 
 @Serializable
-enum class LyricsSourceId { QqMusic, Kugou, Netease }
+enum class LyricsSourceId { QqMusic, Kugou, Netease, Lrclib }
 
 @Serializable
 enum class LyricsContentQuality(internal val rank: Int) {
@@ -63,9 +63,15 @@ interface LyricsSource {
     suspend fun fetch(candidate: LyricsCandidate): SyncedLyrics
 }
 
+/**
+ * 传输层失败。[status] 是 HTTP 状态码（拿不到时为 null），[retryAfterMs] 来自 `Retry-After`
+ * 响应头 —— LRCLIB 要求客户端在 429 时读取并遵守它，否则可能被临时封禁。
+ */
 class LyricsTransportException(
     message: String,
     cause: Throwable? = null,
+    val status: Int? = null,
+    val retryAfterMs: Long? = null,
 ) : Exception(message, cause)
 
 class LyricsPayloadException(

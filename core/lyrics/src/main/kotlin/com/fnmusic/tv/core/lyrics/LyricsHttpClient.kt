@@ -67,7 +67,13 @@ class OkHttpLyricsHttpClient(
                     override fun onResponse(call: Call, response: Response) {
                         val result = runCatching {
                             response.use {
-                                if (!it.isSuccessful) throw LyricsTransportException("Lyrics HTTP ${it.code}")
+                                if (!it.isSuccessful) {
+                                    throw LyricsTransportException(
+                                        message = "Lyrics HTTP ${it.code}",
+                                        status = it.code,
+                                        retryAfterMs = it.retryAfterMs(),
+                                    )
+                                }
                                 it.body.string()
                             }
                         }
@@ -82,3 +88,12 @@ class OkHttpLyricsHttpClient(
         const val USER_AGENT = "MusicDock/1.0 (https://github.com/pany4321/fn-music)"
     }
 }
+
+/**
+ * `Retry-After` 的秒数形式（HTTP 日期形式不解析，按缺失处理 —— 调用方会用默认冷却兜底）。
+ */
+private fun Response.retryAfterMs(): Long? = header("Retry-After")
+    ?.trim()
+    ?.toLongOrNull()
+    ?.takeIf { it >= 0L }
+    ?.times(1_000L)

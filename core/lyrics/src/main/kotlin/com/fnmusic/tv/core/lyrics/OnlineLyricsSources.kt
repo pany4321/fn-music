@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Provider request, transport decoding, and fallback behavior is derived from LDDC.
+// LRCLIB (https://lrclib.net/docs) is implemented from its public API documentation.
 package com.fnmusic.tv.core.lyrics
 
 import com.mocharealm.accompanist.lyrics.core.model.SyncedLyrics
@@ -8,14 +9,18 @@ import java.util.Base64
 import java.util.zip.InflaterInputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
+import kotlin.math.roundToLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -26,12 +31,20 @@ object DefaultLyricsSources {
         val http = OkHttpLyricsHttpClient(client)
         return listOf(
             NeteaseLyricsSource(http),
-            QqMusicLyricsSource(http),
             KugouLyricsSource(http),
+            LrclibLyricsSource(http),
         )
     }
 }
 
+/**
+ * QQ 音乐：**当前未注册**（见 [DefaultLyricsSources]）。
+ *
+ * 保留实现是因为它本身可用（逐字 QRC 覆盖最好），但它的搜索接口
+ * `client_search_cp` 在真实网络上要 1.8–3.3 秒，已经顶到单源 1.8 秒预算：
+ * 匹配编排会 `awaitAll` 等齐所有源，一个慢源会把**每首歌**的歌词上屏都拖到上限，
+ * 而它自己往往还是超时被丢。若接入更快的查询通道，可以把它加回列表。
+ */
 class QqMusicLyricsSource(
     private val http: LyricsHttpClient,
 ) : LyricsSource {
@@ -294,6 +307,143 @@ class KugouLyricsSource(
     }
 }
 
+/**
+ * LRCLIB（https://lrclib.net）：四家里唯一有公开文档与使用条款的歌词源，需要 `User-Agent`
+ * 标明客户端，并且**必须**遵守 429 的 `Retry-After`（否则可能被临时封禁）。
+ *
+ * **只取逐行同步歌词**：检索响应里没有 `syncedLyrics` 的记录（只有纯文本歌词）直接不进候选，
+ * 纯文本即使漏进来也会在解析阶段得到空歌词被上层跳过 —— 播放器只展示能滚动的逐行歌词。
+ *
+ * 只发一次请求：官方检索接口把歌词**内联**在响应里，所以 [search] 顺手把逐行歌词按 id 记到
+ * 一个小缓存，[fetch] 直接取用，不再多发一次 `/api/get/{id}`（既省往返，也符合官方对客户端
+ * 节制的期望）。缓存未命中（例如跨进程/被淘汰）时才回落到按 id 取词。
+ *
+ * 为什么不用 `/api/get` 精确接口作为首选：实测 60 首真实曲库样本里，精确接口（歌手+标题+
+ * 专辑+时长±2s）单独只覆盖 5 首，而检索接口覆盖 10 首 —— 召回高一倍，体积在冷门曲目上也只有
+ * 13KB 左右。（热门曲目的检索响应可达 181KB / 1.8–2.6s，会超出编排层单源预算而被取消，但那些
+ * 曲子本来就有网易云/酷狗兜住。）
+ */
+class LrclibLyricsSource(
+    private val http: LyricsHttpClient,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val interRequestDelayMs: Long = INTER_REQUEST_DELAY_MS,
+) : LyricsSource {
+    override val id = LyricsSourceId.Lrclib
+
+    /** 命中 429 后的冷却截止时刻：冷却期内不再发请求，避免把临时限流升级成封禁。 */
+    @Volatile
+    private var cooldownUntilMs = 0L
+    private var lastRequestAtMs = 0L
+
+    /** 检索响应内联的逐行歌词，按 record id 暂存给 [fetch] 用（先进先出，有上限）。 */
+    private val inlineLyrics = LinkedHashMap<String, String>()
+    private val inlineLock = Any()
+
+    override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> {
+        val request = query.request
+        val title = request.title.trim().takeIf(String::isNotBlank) ?: return emptyList()
+        val keyword = query.keyword.trim().ifBlank { request.fallbackKeyword(title) }
+        val records = parseArray(requestText(SEARCH_ENDPOINT, mapOf("q" to keyword)))
+        val candidates = mutableListOf<LyricsCandidate>()
+        records.forEach { element ->
+            val record = element.asObject() ?: return@forEach
+            val candidate = toCandidate(record) ?: return@forEach
+            val synced = record.stringAt("syncedLyrics").orEmpty()
+            if (synced.isBlank()) return@forEach
+            candidates += candidate
+            rememberInline(candidate.remoteId, synced)
+        }
+        return candidates
+    }
+
+    override suspend fun fetch(candidate: LyricsCandidate): SyncedLyrics {
+        val synced = recallInline(candidate.remoteId) ?: parseObject(
+            requestText("$GET_ENDPOINT/${candidate.remoteId}"),
+        ).stringAt("syncedLyrics").orEmpty()
+        if (synced.isBlank()) throw LyricsPayloadException("Lrclib record has no synced lyrics")
+        return parseLyrics(synced).requireUsable("Lrclib")
+    }
+
+    private fun rememberInline(remoteId: String, syncedLyrics: String) = synchronized(inlineLock) {
+        if (inlineLyrics.size >= MAX_INLINE_ENTRIES) {
+            inlineLyrics.keys.firstOrNull()?.let(inlineLyrics::remove)
+        }
+        inlineLyrics[remoteId] = syncedLyrics
+    }
+
+    private fun recallInline(remoteId: String): String? = synchronized(inlineLock) {
+        inlineLyrics[remoteId]
+    }
+
+    private suspend fun requestText(url: String, query: Map<String, String> = emptyMap()): String {
+        if (now() < cooldownUntilMs) throw LyricsTransportException("Lrclib is cooling down after HTTP 429")
+        pace()
+        return try {
+            http.get(url, query)
+        } catch (cause: LyricsTransportException) {
+            if (cause.status == HTTP_TOO_MANY_REQUESTS) {
+                val waitMs = (cause.retryAfterMs ?: DEFAULT_COOLDOWN_MS).coerceIn(MIN_COOLDOWN_MS, MAX_COOLDOWN_MS)
+                cooldownUntilMs = now() + waitMs
+            }
+            throw cause
+        } finally {
+            lastRequestAtMs = now()
+        }
+    }
+
+    /** 官方要求客户端顺序发送、并在请求之间留出 200–500ms；这里只约束本源自己的相邻请求。 */
+    private suspend fun pace() {
+        if (interRequestDelayMs <= 0L || lastRequestAtMs <= 0L) return
+        val remaining = interRequestDelayMs - (now() - lastRequestAtMs)
+        if (remaining > 0L) delay(remaining)
+    }
+
+    private fun toCandidate(record: JsonObject): LyricsCandidate? {
+        val remoteId = record.longAt("id")?.toString() ?: return null
+        val title = record.stringAt("trackName").orEmpty().trim().takeIf(String::isNotBlank) ?: return null
+        val artist = record.stringAt("artistName").orEmpty().trim()
+        return LyricsCandidate(
+            source = id,
+            remoteId = remoteId,
+            title = title,
+            artists = listOf(artist).filter(String::isNotBlank),
+            album = record.stringAt("albumName")?.trim()?.takeIf(String::isNotBlank),
+            durationMs = record.doubleAt("duration")?.takeIf { it > 0 }?.let { (it * 1_000).roundToLong() },
+            instrumental = record.booleanAt("instrumental") ?: false,
+        )
+    }
+
+    private companion object {
+        const val SEARCH_ENDPOINT = "https://lrclib.net/api/search"
+        const val GET_ENDPOINT = "https://lrclib.net/api/get"
+        const val ARTIST_JOINER = " - "
+        const val INTER_REQUEST_DELAY_MS = 200L
+        const val DEFAULT_COOLDOWN_MS = 60_000L
+        const val MIN_COOLDOWN_MS = 1_000L
+        const val MAX_COOLDOWN_MS = 10 * 60 * 1_000L
+        const val MAX_INLINE_ENTRIES = 64
+        const val HTTP_TOO_MANY_REQUESTS = 429
+    }
+}
+
+/** 编排层没给关键词时（例如直接调用本源）的兜底检索词：「歌手 - 标题」。 */
+private fun LyricsMatchRequest.fallbackKeyword(title: String): String = artists
+    .map(String::trim)
+    .filter(String::isNotBlank)
+    .joinToString(" - ")
+    .takeIf(String::isNotBlank)
+    ?.let { "$it - $title" }
+    ?: title
+
+private fun parseArray(value: String): JsonArray = try {
+    providerJson.parseToJsonElement(value) as? JsonArray
+        ?: throw LyricsPayloadException("Provider JSON is not an array")
+} catch (cause: LyricsPayloadException) {
+    throw cause
+} catch (cause: Exception) {
+    throw LyricsPayloadException("Invalid provider JSON", cause)
+}
+
 private val providerJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 private fun parseObject(value: String): JsonObject = try {
@@ -307,6 +457,8 @@ private fun JsonObject.objectAt(name: String): JsonObject? = get(name) as? JsonO
 private fun JsonObject.arrayAt(name: String): JsonArray? = get(name) as? JsonArray
 private fun JsonObject.stringAt(name: String): String? = (get(name) as? JsonPrimitive)?.contentOrNull
 private fun JsonObject.longAt(name: String): Long? = (get(name) as? JsonPrimitive)?.longOrNull
+private fun JsonObject.doubleAt(name: String): Double? = (get(name) as? JsonPrimitive)?.doubleOrNull
+private fun JsonObject.booleanAt(name: String): Boolean? = (get(name) as? JsonPrimitive)?.booleanOrNull
 
 private fun SyncedLyrics.requireUsable(label: String): SyncedLyrics =
     takeIf(SyncedLyrics::hasUsableLines) ?: throw LyricsPayloadException("$label are empty")
