@@ -3,34 +3,67 @@
 package com.fnmusic.tv.core.lyrics
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeoutOrNull
 
+/**
+ * 歌词匹配编排：**两轮**取词。
+ *
+ * 第一轮只跑快源（各家搜索都在 1.8 秒内），命中就直接返回 —— 大多数歌的歌词上屏时间不受慢源影响。
+ * 只有第一轮**一首都没命中**时，才进入第二轮"深挖"：[deepSources] 用更宽松的预算跑，专收那些
+ * 召回好但慢的通道（例如 QQ 的 `client_search_cp`：离线召回最好，但实测中位 3.01 秒、20/20 超
+ * 1.8 秒预算）。这样既不为慢源牺牲普遍延迟，又不放弃它们的召回。
+ *
+ * 这个"两轮"设计来自 LDDC 的启发：它的自动匹配也是先按「歌手 - 标题」搜，没结果再用「标题」搜，
+ * 并且给了整个流程 30 秒的总预算 —— 对一个批量下载工具，召回远比延迟重要。
+ */
 class LyricsMatchCoordinator(
     sources: List<LyricsSource>,
     private val policy: LyricsMatchPolicy = LyricsMatchPolicy(),
     private val sourceTimeoutMs: Long = 1_800L,
+    deepSources: List<LyricsSource> = emptyList(),
+    private val deepSourceTimeoutMs: Long = 4_500L,
     private val scorer: LyricsCandidateScorer = LyricsCandidateScorer(policy),
 ) {
     private val sources = sources.distinctBy(LyricsSource::id)
+    private val deepSources = deepSources.distinctBy(LyricsSource::id)
 
     suspend fun match(request: LyricsMatchRequest): LyricsMatchResult {
-        if (request.title.isBlank() || sources.isEmpty()) return LyricsMatchResult.NotFound
+        if (request.title.isBlank() || (sources.isEmpty() && deepSources.isEmpty())) {
+            return LyricsMatchResult.NotFound
+        }
         return matchAllSources(request)
     }
 
     private suspend fun matchAllSources(request: LyricsMatchRequest): LyricsMatchResult = supervisorScope {
+        val fast = runRound(sources, sourceTimeoutMs, request)
+        fast.found?.let { return@supervisorScope it }
+        val deep = if (deepSources.isEmpty()) {
+            RoundOutcome()
+        } else {
+            runRound(deepSources, deepSourceTimeoutMs, request)
+        }
+        deep.found?.let { return@supervisorScope it }
+        classifyFailure(fast, deep)
+    }
+
+    private suspend fun CoroutineScope.runRound(
+        roundSources: List<LyricsSource>,
+        timeoutMs: Long,
+        request: LyricsMatchRequest,
+    ): RoundOutcome {
         val primaryKeyword = buildList {
             request.artists.filter(String::isNotBlank).joinToString(" / ").takeIf(String::isNotBlank)?.let(::add)
             add(request.title)
         }.joinToString(" - ")
-        val searchOutcomes = sources.map { source ->
-            async { searchSource(source, primaryKeyword, request) }
+        val searchOutcomes = roundSources.map { source ->
+            async { searchSource(source, primaryKeyword, request, timeoutMs) }
         }.awaitAll()
         val ranked = scorer.score(request, searchOutcomes.flatMap(SearchOutcome::candidates))
-        val fetchOutcomes = sources.map { source ->
+        val fetchOutcomes = roundSources.map { source ->
             val sourceCandidates = ranked.asSequence()
                 .filter { it.candidate.source == source.id }
                 .sortedWith(
@@ -40,37 +73,40 @@ class LyricsMatchCoordinator(
                 )
                 .take(MAX_FETCH_ATTEMPTS_PER_SOURCE)
                 .toList()
-            async { fetchSource(source, sourceCandidates, request) }
+            async { fetchSource(source, sourceCandidates, request, timeoutMs) }
         }.awaitAll()
 
         val matches = fetchOutcomes.flatMap(FetchOutcome::matches)
-        if (matches.isNotEmpty()) {
-            val selected = matches.sortedWith(contentComparator()).first()
-            return@supervisorScope LyricsMatchResult.Found(
-                MatchedLyrics(
-                    source = selected.scored.candidate.source,
-                    candidate = selected.scored.candidate,
-                    score = selected.scored.score,
-                    lyrics = selected.lyrics,
-                    quality = selected.content.quality,
-                ),
-            )
-        }
-
-        classifyFailure(searchOutcomes, fetchOutcomes)
+        return RoundOutcome(
+            searchOutcomes = searchOutcomes,
+            fetchOutcomes = fetchOutcomes,
+            found = matches.takeIf(List<*>::isNotEmpty)?.let { found ->
+                val selected = found.sortedWith(contentComparator()).first()
+                LyricsMatchResult.Found(
+                    MatchedLyrics(
+                        source = selected.scored.candidate.source,
+                        candidate = selected.scored.candidate,
+                        score = selected.scored.score,
+                        lyrics = selected.lyrics,
+                        quality = selected.content.quality,
+                    ),
+                )
+            },
+        )
     }
 
     private suspend fun searchSource(
         source: LyricsSource,
         primaryKeyword: String,
         request: LyricsMatchRequest,
+        timeoutMs: Long,
     ): SearchOutcome = try {
-        val primaryCandidates = search(source, primaryKeyword, request)
+        val primaryCandidates = search(source, primaryKeyword, request, timeoutMs)
         val candidates = if (
             primaryKeyword != request.title &&
             scorer.score(request, primaryCandidates).isEmpty()
         ) {
-            (primaryCandidates + search(source, request.title, request))
+            (primaryCandidates + search(source, request.title, request, timeoutMs))
                 .distinctBy { it.source to it.remoteId }
         } else {
             primaryCandidates
@@ -86,6 +122,7 @@ class LyricsMatchCoordinator(
         source: LyricsSource,
         candidates: List<ScoredLyricsCandidate>,
         request: LyricsMatchRequest,
+        timeoutMs: Long,
     ): FetchOutcome {
         if (candidates.isEmpty()) return FetchOutcome()
 
@@ -93,7 +130,7 @@ class LyricsMatchCoordinator(
         val matches = mutableListOf<ProviderMatch>()
         candidates.forEach { scored ->
             try {
-                val lyrics = withTimeoutOrNull(sourceTimeoutMs) { source.fetch(scored.candidate) }
+                val lyrics = withTimeoutOrNull(timeoutMs) { source.fetch(scored.candidate) }
                     ?: throw LyricsTransportException("${source.id} lyrics timed out")
                 if (!lyrics.hasUsableLines()) {
                     failure = FailureKind.InvalidResponse
@@ -139,12 +176,11 @@ class LyricsMatchCoordinator(
             null
         }
 
-    private fun classifyFailure(
-        searchOutcomes: List<SearchOutcome>,
-        fetchOutcomes: List<FetchOutcome>,
-    ): LyricsMatchResult {
-        val failures = searchOutcomes.mapNotNull(SearchOutcome::failure) +
-            fetchOutcomes.mapNotNull(FetchOutcome::failure)
+    private fun classifyFailure(vararg rounds: RoundOutcome): LyricsMatchResult {
+        val failures = rounds.flatMap { round ->
+            round.searchOutcomes.mapNotNull(SearchOutcome::failure) +
+                round.fetchOutcomes.mapNotNull(FetchOutcome::failure)
+        }
         return when {
             FailureKind.InvalidResponse in failures -> LyricsMatchResult.InvalidResponse
             FailureKind.NetworkFailure in failures -> LyricsMatchResult.NetworkFailure
@@ -159,7 +195,8 @@ class LyricsMatchCoordinator(
         source: LyricsSource,
         keyword: String,
         request: LyricsMatchRequest,
-    ): List<LyricsCandidate> = withTimeoutOrNull(sourceTimeoutMs) {
+        timeoutMs: Long,
+    ): List<LyricsCandidate> = withTimeoutOrNull(timeoutMs) {
         source.search(LyricsSearchQuery(keyword, request))
     } ?: throw LyricsTransportException("${source.id} search timed out")
 
@@ -170,6 +207,13 @@ class LyricsMatchCoordinator(
         this == FailureKind.InvalidResponse || other == FailureKind.InvalidResponse -> FailureKind.InvalidResponse
         else -> other
     }
+
+    /** 一轮（快源或深挖）的完整结果。 */
+    private class RoundOutcome(
+        val searchOutcomes: List<SearchOutcome> = emptyList(),
+        val fetchOutcomes: List<FetchOutcome> = emptyList(),
+        val found: LyricsMatchResult.Found? = null,
+    )
 
     private data class SearchOutcome(
         val source: LyricsSource,

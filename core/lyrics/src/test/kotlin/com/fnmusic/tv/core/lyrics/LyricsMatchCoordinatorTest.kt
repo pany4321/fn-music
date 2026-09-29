@@ -308,6 +308,65 @@ class LyricsMatchCoordinatorTest {
         assertTrue(cancelled.isCompleted)
     }
 
+    @Test fun `deep sources are skipped when the fast round already matched`() = runBlocking {
+        val fast = FakeSource(LyricsSourceId.Netease)
+        val deep = FakeSource(LyricsSourceId.QqMusic, searchDelayMs = 5_000)
+
+        val result = LyricsMatchCoordinator(
+            sources = listOf(fast),
+            deepSources = listOf(deep),
+            sourceTimeoutMs = 500,
+            deepSourceTimeoutMs = 5_000,
+        ).match(request)
+
+        assertTrue(result is LyricsMatchResult.Found)
+        assertEquals(0, deep.searchCalls)
+        assertEquals(0, deep.fetchCalls)
+    }
+
+    @Test fun `deep sources run only when the fast round finds nothing`() = runBlocking {
+        val fast = FakeSource(LyricsSourceId.Netease, candidates = { emptyList() })
+        val deep = FakeSource(LyricsSourceId.QqMusic)
+
+        val result = LyricsMatchCoordinator(
+            sources = listOf(fast),
+            deepSources = listOf(deep),
+            sourceTimeoutMs = 500,
+            deepSourceTimeoutMs = 500,
+        ).match(request)
+
+        assertTrue(result is LyricsMatchResult.Found)
+        assertEquals(1, deep.searchCalls)
+        assertTrue(deep.fetchCalls >= 1)
+    }
+
+    @Test fun `deep sources get the longer budget`() = runBlocking {
+        // 快源预算 100ms 装不下的搜索，在深挖轮（预算 2s）里能跑完 —— 这正是接回慢源的意义
+        val fast = FakeSource(LyricsSourceId.Netease, candidates = { emptyList() })
+        val slow = FakeSource(LyricsSourceId.QqMusic, searchDelayMs = 400)
+
+        val result = LyricsMatchCoordinator(
+            sources = listOf(fast),
+            deepSources = listOf(slow),
+            sourceTimeoutMs = 100,
+            deepSourceTimeoutMs = 2_000,
+        ).match(request)
+
+        assertTrue(result is LyricsMatchResult.Found)
+    }
+
+    @Test fun `a fast source cannot use the deep budget`() = runBlocking {
+        val slowFast = FakeSource(LyricsSourceId.Netease, searchDelayMs = 400)
+
+        val result = LyricsMatchCoordinator(
+            sources = listOf(slowFast),
+            deepSources = emptyList(),
+            sourceTimeoutMs = 100,
+        ).match(request)
+
+        assertTrue(result is LyricsMatchResult.NetworkFailure)
+    }
+
     private class FakeSource(
         override val id: LyricsSourceId,
         private val searchDelayMs: Long = 0,
@@ -319,8 +378,10 @@ class LyricsMatchCoordinatorTest {
         private val fetchResult: (LyricsCandidate) -> SyncedLyrics = { lineLyrics("line") },
     ) : LyricsSource {
         var fetchCalls = 0
+        var searchCalls = 0
 
         override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> {
+            searchCalls++
             delay(searchDelayMs)
             searchFailure?.let { throw it }
             return candidates(query)

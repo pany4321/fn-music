@@ -588,6 +588,56 @@ method `DoSearchForQQMusicDesktop`，param `{num_per_page:"20", page_num:"1", qu
 这是真缺陷修复（在线库列一串 featuring 时，主唱一致也只得 33 分），且**单调放宽**（数学上不可能
 让原本通过的候选被拒）。
 
+#### 两轮编排（深挖轮）：延迟让位于召回（已实现，本地提交未发布）
+
+用户明确"匹配率/召回率优先，延迟不是主要因素，可放宽延迟"。据此把编排改成**两轮**：
+
+| 轮次 | 源 | 预算 | 实测 |
+|---|---|---|---|
+| 第一轮（快源） | 网易云、QQ 桌面搜索、酷狗、LRCLIB | 1.8s | 命中即返回，普遍延迟不变 |
+| 第二轮（深挖，**仅当第一轮一首都没命中**） | QQ 老接口 `client_search_cp`（30 条候选）、LRCLIB | 4.5s | 只对未命中的曲目跑；实测中位 3.08s、最慢 4.09s |
+
+**实测收益（60 首真实曲库）**：快源 36/60 → 深挖轮额外救回 **6 首** → 合并 **42/60 = 70%**（此前三源 62%）。
+
+注意事项（都容易踩）：
+- **socket 超时必须一起放宽**：`defaultOnlineLyricsMatcher()` 的 OkHttp 若还是 `readTimeout(1800)`，
+  协程预算再宽也会被 socket 截断。现在是 connect 2s / read+write 5s，快源仍由各自的 1.8s 协程预算
+  收口（取消时 `invokeCall.cancel()`）。
+- `runRound` 要写成 `CoroutineScope` 的扩展函数，否则 `async` 找不到作用域（编译报 deprecation 错）。
+- 两轮各自独立做评分与共识统计；失败分类把两轮的 failure 合并。
+- `LyricsSourceId.QqMusic` 同时出现在快源（桌面接口）与深挖轮（老接口）两个实例里，靠
+  `distinctBy` 只在**各轮内部**去重来共存。
+
+#### 从 LDDC 得到的启发（https://github.com/chenmozhijin/LDDC，GPL-3.0，1804★）
+
+扒了它的 `core/algorithm.py`、`core/auto_fetch.py`、`core/api/lyrics/qm.py`：
+
+1. **旁证：它的 QQ 搜索也不用 `client_search_cp`**，而是同一个 `music.search.SearchCgiService`
+   （歌曲用 `DoSearchForQQMusicLite`、专辑用 `DoSearchForQQMusicDesktop`），并多带
+   `search_id`（随机数，疑似用于规避缓存/限流）与 `remoteplace: "search.android.keyboard"`。
+2. **它也是"先歌手-标题、无结果再用纯标题"**，且给整个自动匹配 **30 秒总预算** —— 与我们新加的
+   两轮设计同源，印证"召回优先"在批量场景是共识。
+3. **阈值比我们宽得多**：`min_score = 55/60`（我们 80），并且对低标题分不是硬拒而是
+   `title_score < 30 → score -= 35`。原因是它**交互式**（用户从候选列表里挑），我们是**自动选择**，
+   所以保持更严是合理的；若要继续追召回，可考虑降到 ~70 并配合"时长吻合"作旁证。
+4. **标签感知的标题评分**（`TITLE_TAG_PATTERN` + 同前缀分析 + 标签归一化
+   `ver/size/style/mix/edit/版/solo/inst/伴奏/纯音乐/tv size`）：它**比对**标签，我们**删除**标签后
+   比相似度。我们的做法配合 `hasHardVersionConflict` 硬拒，对自动选择更安全；但它的**标签词表**
+   值得补进我们的版本标记表（`tv size`、`anime size`、`style ver`、`solo ver`、`edited`、`mixed`）。
+5. **歌手分用 `max` 而非长度归一**：`list_max_difference` 取最大配对相似度（任一位歌手对上即满分，
+   再与"拼接后整体相似度"取 max）。比我们的"除以较短一方"更宽 —— 自动选择下偏危险（独唱 vs 合唱
+   会混），暂不采纳。
+6. 歌曲级最多额外尝试 2 个候选（我们 3 个）、歌词类型判定（逐字/逐行/纯文本）与我们"只取逐行"
+   的方向一致。
+
+#### 实测到的第三方接口风险：QQ 会**静默**返回空结果
+
+验证期间 QQ 的 `SearchCgiService`（桌面/Lite 搜索）对本机 IP 软限流：请求**成功码 2001**、
+`body` 里 `song/album/singer/mv/...` 全部空列表 —— **不报错、不返回 429**，只是没有结果。
+同期 `client_search_cp` 仍正常（2.94s/5 条）。含义：这类逆向接口的降级是**静默**的，客户端必须
+把"0 候选"当作正常情况（我们本来就是），不能据此判定歌曲没有歌词。也说明**深挖轮的存在有额外价值**：
+一条通道静默失效时，另一条还能兜。
+
 #### 已知问题（本轮未修，与改动无关）
 
 - `AppDatabaseMigrationTest` 的两条迁移测试会**间歇性失败**：`SupportSQLiteDriver` 报

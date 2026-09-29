@@ -27,12 +27,25 @@ import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
 object DefaultLyricsSources {
+    /** 第一轮（快源）：各家搜索都在 1.8 秒预算内。 */
     fun create(client: OkHttpClient): List<LyricsSource> {
         val http = OkHttpLyricsHttpClient(client)
         return listOf(
             NeteaseLyricsSource(http),
             QqMusicLyricsSource(http),
             KugouLyricsSource(http),
+            LrclibLyricsSource(http),
+        )
+    }
+
+    /**
+     * 第二轮（深挖）：只在快源**一首都没命中**时跑，所以可以给更宽的预算。
+     * QQ 的老搜索接口召回最好但实测中位 3.01 秒（20/20 超快源预算），正适合放在这里。
+     */
+    fun createDeep(client: OkHttpClient): List<LyricsSource> {
+        val http = OkHttpLyricsHttpClient(client)
+        return listOf(
+            QqMusicLyricsSource(http, deepSearch = true),
             LrclibLyricsSource(http),
         )
     }
@@ -55,10 +68,51 @@ object DefaultLyricsSources {
  */
 class QqMusicLyricsSource(
     private val http: LyricsHttpClient,
+    /**
+     * true = 用老搜索接口 `client_search_cp`（召回最好：20 条候选、离线 20 首里 16 首能过闸门，
+     * 但实测中位 3.01 秒），只应放在第二轮深挖里；false = 用桌面搜索接口（0.4–0.6 秒，15 条）。
+     */
+    private val deepSearch: Boolean = false,
 ) : LyricsSource {
     override val id = LyricsSourceId.QqMusic
 
-    override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> {
+    override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> =
+        if (deepSearch) deepSearchCandidates(query) else liteSearchCandidates(query)
+
+    /** 老接口：关键词用「歌手 - 标题」，与 LDDC 的策略一致（带歌手能显著提高这一路的排序质量）。 */
+    private suspend fun deepSearchCandidates(query: LyricsSearchQuery): List<LyricsCandidate> {
+        val keyword = query.keyword.trim().ifBlank { query.request.title.trim() }
+        if (keyword.isBlank()) return emptyList()
+        val root = parseObject(
+            http.get(
+                QQ_CLIENT_SEARCH_URL,
+                mapOf("w" to keyword, "format" to "json", "p" to "1", "n" to "30", "cr" to "1", "g_tk" to "5381"),
+                QQ_HEADERS,
+            ),
+        )
+        return root.objectAt("data")?.objectAt("song")?.arrayAt("list").orEmpty()
+            .mapNotNull { item -> item.asObject()?.let(::toDeepCandidate) }
+            .take(MAX_DEEP_CANDIDATES)
+    }
+
+    private fun toDeepCandidate(song: JsonObject): LyricsCandidate? {
+        val remoteId = song.stringAt("songid") ?: return null
+        val title = decodeHtml(song.stringAt("songname").orEmpty()).takeIf(String::isNotBlank)
+            ?: return null
+        return LyricsCandidate(
+            source = id,
+            remoteId = remoteId,
+            mediaId = song.stringAt("songmid"),
+            title = title,
+            artists = song.arrayAt("singer").orEmpty()
+                .mapNotNull { it.asObject()?.stringAt("name")?.let(::decodeHtml)?.takeIf(String::isNotBlank) },
+            album = song.stringAt("albumname")?.let(::decodeHtml)?.takeIf(String::isNotBlank),
+            durationMs = song.longAt("interval")?.takeIf { it > 0 }?.times(1_000L),
+            instrumental = song.longAt("pure") == 1L,
+        )
+    }
+
+    private suspend fun liteSearchCandidates(query: LyricsSearchQuery): List<LyricsCandidate> {
         val title = query.request.title.trim().takeIf(String::isNotBlank) ?: return emptyList()
         val body = buildJsonObject {
             put("comm", buildJsonObject {
@@ -170,6 +224,7 @@ class QqMusicLyricsSource(
 
     private companion object {
         const val QQ_MUSICU_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
+        const val QQ_CLIENT_SEARCH_URL = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
         val QQ_HEADERS = mapOf("Referer" to "https://y.qq.com/")
         val QQ_NATIVE_HEADERS = mapOf(
             "Cookie" to "tmeLoginType=-1;",
@@ -178,6 +233,9 @@ class QqMusicLyricsSource(
 
         /** 搜索一次最多收下多少条候选（实测接口返回 15 条），全部交给评分器。 */
         const val MAX_CANDIDATES = 20
+
+        /** 深挖接口一次给 30 条，多收一些（评分器会排序，编排层只取前 3 个去取词）。 */
+        const val MAX_DEEP_CANDIDATES = 30
     }
 }
 

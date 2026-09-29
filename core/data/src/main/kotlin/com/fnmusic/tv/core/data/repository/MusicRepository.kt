@@ -777,13 +777,18 @@ class MusicRepository internal constructor(
         const val RECENT_PAGE_SIZE = 50
 
         fun defaultOnlineLyricsMatcher(): suspend (LyricsMatchRequest) -> LyricsMatchResult {
+            // socket 超时要**大于**协调器深挖轮的预算（4.5s，实测 QQ 老接口最慢 4.09s），
+            // 否则慢源会被 socket 提前截断；快源仍由各自的 1.8s 协程预算收口（取消时会 cancel 掉请求）。
             val client = okhttp3.OkHttpClient.Builder()
                 .retryOnConnectionFailure(false)
-                .connectTimeout(1_200L, TimeUnit.MILLISECONDS)
-                .readTimeout(1_800L, TimeUnit.MILLISECONDS)
-                .writeTimeout(1_800L, TimeUnit.MILLISECONDS)
+                .connectTimeout(2_000L, TimeUnit.MILLISECONDS)
+                .readTimeout(5_000L, TimeUnit.MILLISECONDS)
+                .writeTimeout(5_000L, TimeUnit.MILLISECONDS)
                 .build()
-            val coordinator = LyricsMatchCoordinator(DefaultLyricsSources.create(client))
+            val coordinator = LyricsMatchCoordinator(
+                sources = DefaultLyricsSources.create(client),
+                deepSources = DefaultLyricsSources.createDeep(client),
+            )
             return coordinator::match
         }
     }
