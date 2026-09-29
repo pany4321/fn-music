@@ -2532,9 +2532,11 @@ private fun AddToPlaylistDialog(
             }
             // 内容区固定高度：加载中/空态/列表占同样空间，弹出不再跳变；
             // 底部消息行也预留固定一行，成功/失败提示出现时高度不变。
+            // 顶部留出 12dp：TV 按钮聚焦放大 1.1 倍 + 焦点描边，首个歌单行上溢会压到标题（真机反馈）。
             Box(
                 Modifier
                     .fillMaxWidth()
+                    .padding(top = 12.dp)
                     .height(360.dp),
             ) {
                 when {

@@ -377,7 +377,10 @@ internal fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         // FlowRow lets the four budget pills wrap onto extra lines
                         // on narrow car screens instead of clipping.
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
                             CacheBudget.entries.forEachIndexed { index, budget ->
                                 SettingsChoiceButton(
                                     label = "${budget.megabytes} MB",
@@ -422,6 +425,9 @@ internal fun SettingsScreen(
                         },
                         modifier = Modifier
                             .width(166.dp)
+                            // 与左侧第一行 MB 档位胶囊水平对齐（整行是 CenterVertically，
+                            // 左侧列带"当前占用"文字比按钮高，居中后按钮会沉到胶囊行下方）
+                            .align(Alignment.Top)
                             .focusProperties {
                                 up = onlineLyricsFocus
                                 // 下方是主题行。
@@ -434,7 +440,7 @@ internal fun SettingsScreen(
                 }
                 SettingsDivider()
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 116.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -444,7 +450,11 @@ internal fun SettingsScreen(
                         modifier = Modifier.width(144.dp),
                     )
                     // 六个主题：窄屏自动换行；左右键行内移动，行首/行尾取消，上下接缓存行与更新按钮。
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    // 垂直间距必须给：换行后两行胶囊贴死 + 聚焦放大互相压线（真机反馈）
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
                         AppTheme.entries.forEachIndexed { index, theme ->
                             SettingsChoiceButton(
                                 label = themeLabel(theme),

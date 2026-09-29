@@ -324,7 +324,9 @@ internal fun SourcePickerDialog(
                 }
                 Spacer(Modifier.height(2.dp))
                 // 底部按钮并排：横屏电视/车机的可视高度很矮，竖着放会把"关闭"挤到屏幕外。
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // 几何与上方 SourceRow 完全对齐（间距同为 8dp）：
+                //   添加音乐源 = 歌单行的主体列（weight 1f）；关闭 = 测试(112) + 间距(8) + 删除(76) = 196dp。
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (onAdd != null) {
                         LoginActionButton(
                             onClick = onAdd,
@@ -357,7 +359,7 @@ internal fun SourcePickerDialog(
                     LoginActionButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .width(150.dp)
+                            .width(196.dp)
                             .height(62.dp)
                             .semantics { contentDescription = "关闭" }
                             .focusProperties {
