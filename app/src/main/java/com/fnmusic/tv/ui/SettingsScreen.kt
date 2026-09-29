@@ -115,6 +115,8 @@ internal fun SettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val manageSourcesFocus = remember { FocusRequester() }
     val addSourceFocus = remember { FocusRequester() }
+    // 返回钮进入焦点链：从音乐源行 UP 可达（之前它可聚焦但没有任何路径能到它）。
+    val backFocus = remember { FocusRequester() }
     var sourcePickerVisible by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<LoginHistoryEntry>>(emptyList()) }
     var testingSourceId by remember { mutableStateOf<String?>(null) }
@@ -228,12 +230,14 @@ internal fun SettingsScreen(
                 DetailBackButton(
                     onClick = onBack,
                     // 之前返回按钮不可聚焦（遥控器够不到，只能按 BACK 退出）；
-                    // DOWN 接到页内第一个控件，把它接进焦点链。
-                    modifier = Modifier.focusProperties {
-                        down = manageSourcesFocus
-                        right = FocusRequester.Cancel
-                        up = FocusRequester.Cancel
-                    },
+                    // DOWN 接到页内第一个控件，音乐源行 UP 接回它，双向可达。
+                    modifier = Modifier
+                        .focusRequester(backFocus)
+                        .focusProperties {
+                            down = manageSourcesFocus
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                        },
                 )
                 Spacer(Modifier.width(16.dp))
                 Text("设置", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
@@ -258,7 +262,7 @@ internal fun SettingsScreen(
                             .focusProperties {
                                 left = FocusRequester.Cancel
                                 right = addSourceFocus
-                                up = FocusRequester.Cancel
+                                up = backFocus
                                 down = coverStyleFocus
                             }
                             .onFocusChanged { if (it.isFocused) focusedKey = "manage-sources" }
@@ -273,7 +277,7 @@ internal fun SettingsScreen(
                             .focusProperties {
                                 left = manageSourcesFocus
                                 right = FocusRequester.Cancel
-                                up = FocusRequester.Cancel
+                                up = backFocus
                                 down = coverStyleFocus
                             }
                             .onFocusChanged { if (it.isFocused) focusedKey = "add-source" }

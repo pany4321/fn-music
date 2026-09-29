@@ -402,10 +402,12 @@ internal fun LoginScreen(
                     },
                     label = "服务器地址或 FNID",
                     modifier = Modifier.weight(1f),
+                    // UP 必须走 upFocus 参数（TvTextField 的 preview 处理器在编辑态外接管方向键）；
+                    // 只写在 focusProperties 里会被字段的光标移动消费，类型行永远到不了（实测 P1）。
+                    upFocus = if (sourceKind == ServerKind.Jellyfin) jellyfinKindFocus else fnOsKindFocus,
                     downFocus = usernameFocus,
                     rightFocus = historyFocus.takeIf { loginHistory.isNotEmpty() || recentServers.isNotEmpty() },
                     inputModifier = Modifier.focusRequester(serverFocus).focusProperties {
-                        up = if (sourceKind == ServerKind.Jellyfin) jellyfinKindFocus else fnOsKindFocus
                         right = if (loginHistory.isNotEmpty() || recentServers.isNotEmpty()) {
                             historyFocus
                         } else {
@@ -441,7 +443,7 @@ internal fun LoginScreen(
                     modifier = Modifier.weight(1f),
                     upFocus = serverFocus,
                     downFocus = passwordFocus,
-                    rightFocus = accessCodeFocus,
+                    rightFocus = if (accessCodeVisible) accessCodeFocus else null,
                     inputModifier = Modifier.focusRequester(usernameFocus).focusProperties {
                         up = serverFocus
                         right = if (accessCodeVisible) accessCodeFocus else FocusRequester.Cancel

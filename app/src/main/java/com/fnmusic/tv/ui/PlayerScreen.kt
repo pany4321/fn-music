@@ -276,6 +276,11 @@ internal fun ImmersivePlayer(
     var consumeBackKeyUp by remember { mutableStateOf(false) }
     var consumeCenterKeyUp by remember { mutableStateOf(false) }
     var interactionEpoch by remember { mutableStateOf(0) }
+    // 最后聚焦的控制钮槽位：控制条自动隐藏后按方向键重新唤出时，
+    // 焦点直接落在"离开前控件"的相邻控件上（而不是每次都回到播放键），
+    // 消除"第一下只唤出、第二下才开始动"的体感。
+    var lastControlSlot by remember { mutableStateOf<PlayerControlSlot?>(null) }
+    var pendingDirectionalFocus by remember { mutableStateOf<AndroidKeyDirection?>(null) }
     val playerFocus = remember { FocusRequester() }
     val progressFocus = remember { FocusRequester() }
     val previousFocus = remember { FocusRequester() }
@@ -361,7 +366,14 @@ internal fun ImmersivePlayer(
         }
     }
     BackHandler(queueVisible || controlsVisible) {
-        dismissPlayerChrome()
+        if (queueVisible) {
+            // 规范层级：队列 → 控制条 → 沉浸。关队列时保留控制条，
+            // 焦点由下方 queueVisible 的 LaunchedEffect 还给队列钮。
+            queueVisible = false
+            controlsVisible = true
+        } else {
+            dismissPlayerChrome()
+        }
     }
     Box(
         Modifier.fillMaxSize()
@@ -379,6 +391,10 @@ internal fun ImmersivePlayer(
                 setConsumeCenterKeyUp = { consumeCenterKeyUp = it },
                 onCenter = container.playbackController::playPause,
                 onReveal = ::revealControls,
+                onDirectionalReveal = { direction ->
+                    revealControls()
+                    pendingDirectionalFocus = direction
+                },
             )
             .pointerInput(controlsVisible, queueVisible) {
                 if (!controlsVisible && !queueVisible) {
@@ -434,7 +450,8 @@ internal fun ImmersivePlayer(
                     positionMs = positionMs,
                     durationMs = durationMs,
                     isPlaying = playback.isPlaying,
-                    roaming = roaming,
+                    onFocusedSlot = { slot -> lastControlSlot = slot },
+                roaming = roaming,
                     previousEnabled = previousEnabled,
                     nextEnabled = nextEnabled,
                     progressFocus = progressFocus,
@@ -591,12 +608,20 @@ internal fun Modifier.dismissPlayerChromeOnBack(
     }
 }
 
+/** 控制行内"相邻控件"解析：自动隐藏后按方向键，焦点直接落到相邻钮而不是回到播放键。 */
+internal enum class AndroidKeyDirection { Left, Right }
+
+/** 控制行各钮的槽位：用于"隐藏后方向键直达相邻钮"的焦点定位。 */
+internal enum class PlayerControlSlot { Mode, Favorite, Add, Previous, Play, Next, Queue, ExitRoam }
+
 internal fun Modifier.revealPlayerChromeOnKey(
     chromeVisible: Boolean,
     shouldConsumeCenterKeyUp: () -> Boolean,
     setConsumeCenterKeyUp: (Boolean) -> Unit,
     onCenter: () -> Unit,
     onReveal: () -> Unit,
+    /** 隐藏态下按方向键唤出控制条时：把方向交给调用方，直接聚焦相邻控制钮。 */
+    onDirectionalReveal: (AndroidKeyDirection) -> Unit = {},
 ): Modifier = onPreviewKeyEvent { event ->
     val isCenter = event.key == Key.Enter || event.key == Key.DirectionCenter
     when {
@@ -611,10 +636,14 @@ internal fun Modifier.revealPlayerChromeOnKey(
             onReveal()
             true
         }
-        event.key == Key.DirectionLeft ||
-            event.key == Key.DirectionRight ||
-            event.key == Key.DirectionUp ||
-            event.key == Key.DirectionDown -> {
+        event.key == Key.DirectionLeft || event.key == Key.DirectionRight -> {
+            onReveal()
+            onDirectionalReveal(
+                if (event.key == Key.DirectionLeft) AndroidKeyDirection.Left else AndroidKeyDirection.Right,
+            )
+            true
+        }
+        event.key == Key.DirectionUp || event.key == Key.DirectionDown -> {
             onReveal()
             true
         }
@@ -1523,6 +1552,7 @@ internal fun PlayerControlOverlay(
     durationMs: Long,
     isPlaying: Boolean,
     roaming: Boolean,
+    onFocusedSlot: (PlayerControlSlot) -> Unit,
     previousEnabled: Boolean,
     nextEnabled: Boolean,
     progressFocus: FocusRequester,
@@ -1644,7 +1674,7 @@ internal fun PlayerControlOverlay(
                         upFocus = progressFocus,
                         leftFocus = null,
                         rightFocus = favoriteFocus,
-                        onFocus = onInteraction,
+                        onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Mode) },
                         onClick = {
                             onInteraction()
                             onCyclePlayMode()
@@ -1659,7 +1689,7 @@ internal fun PlayerControlOverlay(
                     leftFocus = if (!roaming) modeFocus else null,
                     rightFocus = addToPlaylistFocus,
                     selected = favorite,
-                    onFocus = onInteraction,
+                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Favorite) },
                     onClick = {
                         onInteraction()
                         if (favoriteEnabled) onToggleFavorite()
@@ -1672,7 +1702,7 @@ internal fun PlayerControlOverlay(
                     upFocus = progressFocus,
                     leftFocus = favoriteFocus,
                     rightFocus = if (previousEnabled) previousFocus else playFocus,
-                    onFocus = onInteraction,
+                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Add) },
                     onClick = {
                         onInteraction()
                         onAddToPlaylist()
@@ -1693,7 +1723,7 @@ internal fun PlayerControlOverlay(
                     // 左移次序：上一首 → 添加到歌单（漫游下同样存在）→ 收藏 → 播放模式
                     leftFocus = addToPlaylistFocus,
                     rightFocus = playFocus,
-                    onFocus = onInteraction,
+                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Previous) },
                     onClick = onPrevious,
                 )
                 PlayerTransportButton(
@@ -1712,7 +1742,7 @@ internal fun PlayerControlOverlay(
                         else -> queueFocus
                     },
                     emphasized = true,
-                    onFocus = onInteraction,
+                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Play) },
                     onClick = onPlayPause,
                 )
                 PlayerTransportButton(
@@ -1723,7 +1753,7 @@ internal fun PlayerControlOverlay(
                     upFocus = progressFocus,
                     leftFocus = playFocus,
                     rightFocus = if (roaming) exitRoamFocus else queueFocus,
-                    onFocus = onInteraction,
+                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Next) },
                     onClick = onNext,
                 )
             }
@@ -1734,7 +1764,7 @@ internal fun PlayerControlOverlay(
                 focusRequester = if (roaming) exitRoamFocus else queueFocus,
                 upFocus = progressFocus,
                 leftFocus = if (nextEnabled) nextFocus else playFocus,
-                onFocus = onInteraction,
+                onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Queue) },
                 onClick = {
                     onInteraction()
                     if (roaming) onExitRoam() else onOpenQueue()
