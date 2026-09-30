@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -300,7 +301,14 @@ class PlayerOverlayFocusTest {
 
         assertTrue(status.top >= pill.top && status.bottom <= pill.bottom)
         assertTrue(title.top >= pill.top && title.bottom <= pill.bottom)
-        assertTrue(pill.height in 84f..102f)
+        // 高度跟随 NowPlayingPill 的公式（54dp + 大字号增量），按测试设备密度换算（此前 42dp 时代的 84..102px 硬区间已过时）。
+        val expectedPillHeight = with(composeRule.density) {
+            (54f + (fontScale - 1f).coerceAtLeast(0f) * 28f).dp.toPx()
+        }
+        assertTrue(
+            "pillHeight=${pill.height}, expected≈$expectedPillHeight",
+            abs(pill.height - expectedPillHeight) <= 4f,
+        )
         assertTrue(pill.bottom - title.bottom >= 2f)
         composeRule.runOnIdle {
             val result = requireNotNull(titleLayout.get())
@@ -313,7 +321,7 @@ class PlayerOverlayFocusTest {
             )
         }
         val screenshot = saveDisplayEvidence("now-playing-pill", pill)
-        val lowestTitlePixel = lowestLightPixelY(screenshot, title)
+        val lowestTitlePixel = lowestTitlePixelY(screenshot, title)
         assertTrue(lowestTitlePixel != null)
         assertTrue(pill.bottom - requireNotNull(lowestTitlePixel) >= 6f)
     }
@@ -655,7 +663,12 @@ class PlayerOverlayFocusTest {
     }
 }
 
-private fun lowestLightPixelY(bitmap: Bitmap, bounds: androidx.compose.ui.geometry.Rect): Int? {
+/**
+ * 找标题区域最下方一个"文字像素"的 y 坐标。
+ * 标题是珊瑚色（FnColors.Coral = 0xFFFF7657），深色底上红蓝差极大——
+ * 旧的 RGB≥180 "浅色"判定是白字时代写的，1.9.4 pill 改珊瑚色后即失配。
+ */
+private fun lowestTitlePixelY(bitmap: Bitmap, bounds: androidx.compose.ui.geometry.Rect): Int? {
     val left = floor(bounds.left).toInt().coerceIn(0, bitmap.width - 1)
     val right = ceil(bounds.right).toInt().coerceIn(left + 1, bitmap.width)
     val top = floor(bounds.top).toInt().coerceIn(0, bitmap.height - 1)
@@ -663,11 +676,9 @@ private fun lowestLightPixelY(bitmap: Bitmap, bounds: androidx.compose.ui.geomet
     for (y in bottom - 1 downTo top) {
         for (x in left until right) {
             val pixel = bitmap.getPixel(x, y)
-            if (
-                android.graphics.Color.red(pixel) >= 180 &&
-                android.graphics.Color.green(pixel) >= 180 &&
-                android.graphics.Color.blue(pixel) >= 180
-            ) {
+            val red = android.graphics.Color.red(pixel)
+            val blue = android.graphics.Color.blue(pixel)
+            if (red >= 180 && red - blue >= 60) {
                 return y
             }
         }
@@ -798,6 +809,7 @@ private fun PlayerControlHarness(
             },
             onOpenQueue = {},
             onExitRoam = onExitRoam,
+            onFocusedSlot = {},
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -866,6 +878,7 @@ private fun PlayerRetryHarness(
             onCyclePlayMode = {},
             onOpenQueue = {},
             onExitRoam = {},
+            onFocusedSlot = {},
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }

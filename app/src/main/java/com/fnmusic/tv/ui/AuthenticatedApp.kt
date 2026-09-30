@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -176,6 +177,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -195,7 +197,7 @@ internal val LocalLibraryRetainedState = staticCompositionLocalOf<LibraryRetaine
 }
 
 private const val FULL_CATALOG_PAGE_SIZE = 12
-private const val SEARCH_TRACK_PAGE_SIZE = 20
+private const val SEARCH_TRACK_PAGE_SIZE = 30
 
 @Composable
 internal fun AuthenticatedApp(
@@ -675,7 +677,8 @@ internal fun NowPlayingPill(
     val shape = CircleShape
     val coverId = playback.coverId
     val fontScale = LocalDensity.current.fontScale
-    // 高度与右侧「首页/我的」胶囊（48dp）对齐；宽度放大 30%（186→242）给歌名留更多空间。
+    // 高度与右侧「首页/我的」胶囊容器（固定 54dp）在默认字号下对齐；大字号时本胶囊按公式额外增高。
+    // 宽度放大 30%（186→242）给歌名留更多空间。
     val pillHeight = (54f + (fontScale - 1f).coerceAtLeast(0f) * 28f).dp
     Button(
         onClick = onClick,
@@ -742,9 +745,17 @@ internal fun NowPlayingPill(
                             platformStyle = PlatformTextStyle(includeFontPadding = true),
                         ),
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        // 跑马灯按无限宽测量完整文本，Clip 才不会在滚动内容尾部出现省略号
+                        overflow = TextOverflow.Clip,
                         onTextLayout = onTitleTextLayout,
-                        modifier = Modifier.weight(1f),
+                        // 超宽时静止 3 秒后不间断循环滚动；不超宽则完全静止（内建行为）
+                        modifier = Modifier
+                            .weight(1f)
+                            .basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                repeatDelayMillis = 0,
+                                initialDelayMillis = 3000,
+                            ),
                     )
                     if (playback.artist.isNotBlank()) {
                         Spacer(Modifier.width(4.5.dp))
@@ -754,8 +765,14 @@ internal fun NowPlayingPill(
                             fontSize = 10.sp,
                             lineHeight = 11.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(0.62f, fill = false),
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier
+                                .weight(0.62f, fill = false)
+                                .basicMarquee(
+                                    iterations = Int.MAX_VALUE,
+                                    repeatDelayMillis = 0,
+                                    initialDelayMillis = 3000,
+                                ),
                         )
                     }
                 }
@@ -838,23 +855,53 @@ private fun BrowseHome(
         }
     }
     val favoriteCoverState = retainedStore.list<FeatureArtworkItem>("covers:favorites")
+    LaunchedEffect(Unit) {
+        if (favoriteCoverState.snapshot.entries.isEmpty()) {
+            // 先用上次启动存下的那组封面画出来（命中图片缓存，秒出）；
+            // 故意不用 retainLoadedList（会把 initialLoadCompleted 置真），
+            // 真实数据到位后下面的换组逻辑仍要执行。
+            val persisted = container.appPreferences.homeDeck(FAVORITES_DECK_KEY)
+            if (persisted.isNotEmpty()) {
+                favoriteCoverState.snapshot = favoriteCoverState.snapshot.copy(
+                    entries = persisted.map { FeatureArtworkItem("", it) },
+                )
+            }
+        }
+    }
     LaunchedEffect(favoriteTracks) {
         if (favoriteTracks.isNotEmpty() && !favoriteCoverState.snapshot.initialLoadCompleted) {
             val deck = featureArtworkSlots(
                 primary = favoriteTracks.shuffled().map { FeatureArtworkItem(it.title, it.coverId) },
             )
-            if (deck.isNotEmpty()) favoriteCoverState.snapshot = retainLoadedList(favoriteCoverState.snapshot, deck)
+            if (deck.isNotEmpty()) {
+                container.appPreferences.saveHomeDeck(FAVORITES_DECK_KEY, deck.mapNotNull { it.coverId })
+                favoriteCoverState.snapshot = retainLoadedList(favoriteCoverState.snapshot, deck)
+            }
         }
     }
     val favoriteArtwork = favoriteCoverState.snapshot.entries
     val recentTracksPreview = recentPreviewState.snapshot.entries
     val recentCoverState = retainedStore.list<FeatureArtworkItem>("covers:recent")
+    LaunchedEffect(Unit) {
+        if (recentCoverState.snapshot.entries.isEmpty()) {
+            // 同收藏卡：先画持久化的上一组，等待真实数据换组。
+            val persisted = container.appPreferences.homeDeck(RECENT_DECK_KEY)
+            if (persisted.isNotEmpty()) {
+                recentCoverState.snapshot = recentCoverState.snapshot.copy(
+                    entries = persisted.map { FeatureArtworkItem("", it) },
+                )
+            }
+        }
+    }
     LaunchedEffect(recentTracksPreview) {
         if (recentTracksPreview.isNotEmpty() && !recentCoverState.snapshot.initialLoadCompleted) {
             val deck = featureArtworkSlots(
                 primary = recentTracksPreview.shuffled().map { FeatureArtworkItem(it.title, it.coverId) },
             )
-            if (deck.isNotEmpty()) recentCoverState.snapshot = retainLoadedList(recentCoverState.snapshot, deck)
+            if (deck.isNotEmpty()) {
+                container.appPreferences.saveHomeDeck(RECENT_DECK_KEY, deck.mapNotNull { it.coverId })
+                recentCoverState.snapshot = retainLoadedList(recentCoverState.snapshot, deck)
+            }
         }
     }
     val recentArtwork = recentCoverState.snapshot.entries
@@ -960,8 +1007,10 @@ private fun BrowseHome(
             }
         }
     }
-    // 启动预热：首屏各行的数据一到位，就先把封面图取回缓存（并发由缓存自己限流），
-    // 卡片真正绘制时直接命中内存/磁盘缓存，不再等网络。顺序按“从上到下”的可见优先级排。
+    // 启动预热分两批：第一批只预热三张功能卡的封面（至多 9 张 Grid）——首屏最先看到的位置，
+    // 并等它们进内存后才放行第二批（歌单行 + 缩略图行），避免近百张预热请求挤占
+    // 缩略图 6 路 FIFO 并发队列、功能卡封面反而排队。以 deck/数据状态为 key：
+    // deck 晚到（如收藏数据后返回）时本效果重跑，已进内存的 prefetch 返回 null，不会重复下载。
     LaunchedEffect(
         roamArtwork,
         favoriteArtwork,
@@ -973,10 +1022,15 @@ private fun BrowseHome(
         randomSongs,
         recentlyAdded,
     ) {
-        val gridCovers = buildList {
+        val priorityCovers = buildList {
             addAll(roamArtwork.mapNotNull { it.coverId })
             addAll(favoriteArtwork.mapNotNull { it.coverId })
             addAll(recentArtwork.mapNotNull { it.coverId })
+        }.filter(String::isNotBlank).distinct()
+        priorityCovers.mapNotNull { coverId ->
+            container.artworkBitmapCache.prefetch(coverId, CoverVariant.Grid)
+        }.joinAll()
+        val gridCovers = buildList {
             addAll(allPlaylistsDeckCovers)
             playlists.take(12).forEach { playlist ->
                 playlist.coverId?.let(::add)
@@ -1650,10 +1704,12 @@ private suspend fun randomTrackDeck(fetch: suspend () -> List<Track>): List<Feat
 private const val RANDOM_DECK_ATTEMPTS = 2
 private const val RANDOM_DECK_RETRY_DELAY_MS = 700L
 
-/** 卡片叠层封面在偏好里的键：随机漫游 / 全部歌单各存一组，供下次启动秒出。 */
+/** 卡片叠层封面在偏好里的键：随机漫游 / 全部歌单 / 收藏 / 最近播放各存一组，供下次启动秒出。 */
 private const val HOME_PREFETCH_LIMIT = 48
 private const val ROAM_DECK_KEY = "roam"
 private const val ALL_PLAYLISTS_DECK_KEY = "all-playlists"
+private const val FAVORITES_DECK_KEY = "favorites"
+private const val RECENT_DECK_KEY = "recent"
 
 @Composable
 private fun HomePlaylistLockup(
@@ -3614,8 +3670,8 @@ private fun DetailTrackCollection(
     onTrack: (Int) -> Unit,
     /** 菜单「现在播放」成功后的跳转（与行点击播放共用）。 */
     onPlayer: (Track) -> Unit = {},
-    /** 单曲播放用的协程 scope（调用方持有）。 */
-    menuScope: kotlinx.coroutines.CoroutineScope? = null,
+    /** 单曲播放用的协程 scope（调用方持有）。必传：漏传会让菜单「现在播放」静默失效。 */
+    menuScope: kotlinx.coroutines.CoroutineScope,
     onLoadMore: () -> Unit,
     canRemoveTrack: Boolean = false,
     onRequestRemove: (Track) -> Unit = {},
@@ -3843,7 +3899,7 @@ private fun DetailTrackCollection(
                 onDismiss = { menuTrackIndex = null },
                 // 单曲语义：只把这一首加入队列（滑窗 play(index) 会带入整段上下文）
                 onPlayNow = {
-                    menuScope?.launch {
+                    menuScope.launch {
                         val prepared = runCatching {
                             container.musicRepository.prepareQueue(listOf(menuTrack))
                         }.getOrDefault(emptyList())
@@ -5260,7 +5316,7 @@ private fun SearchRoute(
         loading = true
         try {
             coroutineScope {
-                val t = async { runCatching { container.musicRepository.searchTracks(term) }.getOrNull() }
+                val t = async { runCatching { container.musicRepository.searchTracks(term, size = SEARCH_TRACK_PAGE_SIZE) }.getOrNull() }
                 val a = async { runCatching { container.musicRepository.searchArtists(term) }.getOrNull() }
                 val al = async { runCatching { container.musicRepository.searchAlbums(term) }.getOrNull() }
                 tracks = t.await()?.items ?: emptyList()
@@ -5736,7 +5792,7 @@ private fun TrackContextMenuDialog(
                     .padding(vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                TrackMenuItem(label = "信息", focusRequester = firstItemFocus) { infoVisible = true }
+                TrackMenuItem(label = "歌曲信息", focusRequester = firstItemFocus) { infoVisible = true }
                 TrackMenuItem(label = "现在播放") {
                     onDismiss()
                     onPlayNow()

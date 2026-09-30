@@ -2488,11 +2488,12 @@ internal fun AddToPlaylistDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        // 0.9/600 太宽（用户反馈）；列表滚动 + 顶部 24dp 间隙保留（首行聚焦放大 1.04 仍需防压标题）
+        // 0.9/600 太宽（用户反馈）；heightIn 防矮视口（手机横屏）弹窗整体溢出，内容区随之收缩
         val dialogWidth = minOf(maxWidth * 0.72f, 480.dp)
         Column(
             Modifier
                 .width(dialogWidth)
+                .heightIn(max = maxHeight * 0.9f)
                 .background(FnColors.Surface, RoundedCornerShape(8.dp))
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2538,14 +2539,13 @@ internal fun AddToPlaylistDialog(
                     Text("+", fontSize = 24.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            // 内容区固定高度：加载中/空态/列表占同样空间，弹出不再跳变；
+            // 内容区常规 360dp：加载中/空态/列表占同样空间，弹出不再跳变；
             // 底部消息行也预留固定一行，成功/失败提示出现时高度不变。
-            // 顶部留出 24dp：首个歌单行聚焦/点按会放大（已收敛到 1.04）+ 焦点描边，
-            // 上溢仍需足够间隙才不会压到标题（真机反馈；1.9.1 的 12dp 在手机上仍不够）。
+            // weight(fill=false) 让它在矮视口（手机横屏）随剩余空间收缩，弹窗整体不溢出。
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 24.dp)
+                    .weight(1f, fill = false)
                     .height(360.dp),
             ) {
                 when {
@@ -2570,9 +2570,10 @@ internal fun AddToPlaylistDialog(
                         Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            // 首行聚焦放大 1.04 + 描边会被滚动容器的裁剪切掉顶部
-                            // （用户截图：第一个歌单的顶部描边被遮挡）——给内容留出上边距
-                            .padding(top = 6.dp),
+                            // 聚焦放大 1.04 的渲染上溢（≈1.28dp）会被滚动容器沿主轴硬裁剪，
+                            // 安全边距必须加在裁剪点之内（滚动内容里）：上下各 4dp 首行/末行描边才完整；
+                            // 弹窗与标题之间的间距在裁剪点之外，对这个无效
+                            .padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         // TV：列表就绪后把初始焦点交给第一个歌单，避免遥控器“无响应”。

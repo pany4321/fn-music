@@ -510,7 +510,8 @@ interface AuthenticatedAppActions {
   avatar at both sizes; tracks, playlists, and albums use the shared centered first-character
   placeholder. Do not restore the retired generic record illustration on any library surface.
 - Home/My player re-entry is a compact music pill with fixed measured bounds, cover/fallback,
-  playing state, ellipsized title/artist, and a trailing cue. Focus may change border, surface, and
+  playing state, and a trailing cue. Overlong title/artist each scroll as a marquee inside its own
+  slot after a 3-second dwell (fully static when it fits). Focus may change border, surface, and
   scale without reflow. Its compact status row disables Android font padding, while the bold title
   enables it so fallback-script glyphs receive their full line box instead of being squeezed by
   invisible status-row font metrics.
@@ -519,7 +520,7 @@ interface AuthenticatedAppActions {
   its service, removes the task, and exits the process. It must not clear the saved queue, account
   data, preferences, or caches. After the window expires, the next Back is a new first press.
 - Use fixed `sp` sizes and explicit responsive breakpoints, never viewport-scaled text. The compact
-  now-playing pill is `186dp` wide and `42dp` high at the default font scale. For larger configured
+  now-playing pill is `242dp` wide and `54dp` high at the default font scale. For larger configured
   font scales, increase only its height by `28dp` per additional `1.0` scale so both font-padded rows
   remain visible; do not use unconstrained intrinsic height with a fill-sized child.
 - Landscape viewport adaptation flows through `AdaptiveWindow` (`ui/AdaptiveLayout.kt`), provided
@@ -538,7 +539,7 @@ interface AuthenticatedAppActions {
 - Every touch-actionable control outside the player's hand-built 48dp targets keeps at least 48dp
   minimum bounds in both dimensions: settings choice/action buttons and checkbox rows, the queue
   row delete button, catalog pager arrows, library tabs, and detail back/tab buttons. The
-  spec-pinned now-playing pill (186x42dp + fontScale growth) is exempt because its width already
+  spec-pinned now-playing pill (242x54dp + fontScale growth) is exempt because its width already
   exceeds the minimum.
 
 ## 4. Validation & Error Matrix
@@ -620,7 +621,7 @@ interface AuthenticatedAppActions {
 | First Back at Home | Show confirmation only; playback and task remain active |
 | Second Back within 2,000 ms | Save paused state, stop playback/service, remove the task, and exit without clearing account data |
 | Back after more than 2,000 ms | Show confirmation and begin a new window |
-| Long title/artist or compact viewport | Ellipsize independently; icons, controls, and queue rows do not overlap |
+| Long title/artist or compact viewport | Ellipsize independently (the now-playing pill marquees its title/artist instead); icons, controls, and queue rows do not overlap |
 | Current artwork is absent | Keep the same artwork bounds and render the restrained fallback |
 | Typed playback failure requires session verification | Invoke the authenticated action once for that failure value |
 | Switch account is activated | Delegate once to the authenticated action; the page does not sequence repositories |
@@ -834,7 +835,7 @@ interface AuthenticatedAppActions {
   icon/control bounds, readable focus state, current-row visibility, and a right-side queue that does
   not obscure required player controls incoherently.
 - Screenshot test at 1920x1080 also covers login base/error and the Home now-playing pill; assert the
-  complete Login button is visible, the pill remains `372` physical pixels wide with at least `74`
+  complete Login button is visible, the pill remains `484` physical pixels wide with at least `108`
   physical pixels of height at 320 dpi, and no lower title glyph is clipped at the configured font
   scale. Inspect rendered title pixels, not only semantic bounds.
 - Brand resource check: search user-facing sources for the retired product name, assert the merged
