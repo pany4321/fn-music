@@ -106,12 +106,14 @@ jobs:
           restore-keys: robolectric-
 
       # 单元测试门禁：所有模块的单测在出包前必须全绿。
+      # app 带 flavor，任务名是 testSideloadDebugUnitTest，须显式列出（unqualified
+      # testDebugUnitTest 只能匹配无 flavor 的 core 模块，此前 app 单测被静默跳过）。
       # AppDatabaseMigrationTest 在 Windows 本地会因 androidx.sqlite 的
       # SupportSQLiteDriver 只按 '/' 切 basename 而失败（上游未修），Linux 上天然通过。
       - name: Run unit tests
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon --stacktrace testDebugUnitTest
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest :app:testSideloadDebugUnitTest
 
       - name: Restore release signing identity
         id: signing
