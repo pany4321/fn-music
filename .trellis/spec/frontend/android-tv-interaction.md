@@ -109,8 +109,10 @@ PlayerControlOverlay(
     queueCount: Int,
     favorite: Boolean,
     favoriteFocus: FocusRequester,
+    addToPlaylistFocus: FocusRequester,
     modeFocus: FocusRequester,
     queueFocus: FocusRequester,
+    onFocusedSlot: (PlayerControlSlot) -> Unit,
     // transport/progress/retry requesters and callbacks omitted
 )
 
@@ -380,8 +382,9 @@ interface AuthenticatedAppActions {
   Material buttons retain their normal click handling. Tapping progress seeks to the proportional
   timeline position through the same bounded relative seek callback used by D-pad input.
 - Visible normal controls have an explicit left/right graph:
-  favorite -> mode -> previous -> play/pause -> next -> queue. The heart remains present during
-  roam, where it precedes the available transports. Disabled previous/next controls are skipped and
+  mode -> favorite -> add-to-playlist -> previous -> play/pause -> next -> queue (mode is the
+  leftmost side action). In roam the mode node is absent and the queue slot becomes 退出漫游, so the
+  graph is favorite -> add-to-playlist -> previous -> play/pause -> next -> exit-roam. The heart remains present during roam, where it precedes the available transports. Disabled previous/next controls are skipped and
   are not focus targets. Up routes to progress; progress Left/Right seeks exactly 10 seconds.
 - The heart is outline when the current server projection is not favorite and filled coral when it
   is favorite. Its semantics are exactly `收藏当前歌曲` / `取消收藏当前歌曲`. While a mutation is
@@ -404,7 +407,9 @@ interface AuthenticatedAppActions {
   `onRemove(item.queueIndex)`. Right moves row -> delete, Left moves delete -> row, and both outer
   horizontal edges cancel focus escape. Deletion is immediate and occurrence-index based.
 - Fixed-height text controls do not rely on TV Material's default content padding for Chinese font
-  centering. The roam exit label and queue retry label use a full-size centered `Box`. Queue rows use
+  centering. The queue retry label uses a full-size centered `Box`; the roam exit control is an
+  icon-only button (door + outward-arrow glyph) carrying only the `退出漫游` content description, with
+  no text label. Queue rows use
   zero button content padding plus a full-size vertically centered `Row`; the title/artist column has
   explicit line heights and `Arrangement.Center`. Keep outer bounds and focus modifiers unchanged.
 - Queue row keys are occurrence-safe (`"$mediaId:$occurrence"`). Each `LazyColumn` row creates
@@ -594,7 +599,7 @@ interface AuthenticatedAppActions {
 | Queue row is selected | Play `queueIndex`, update current marker, keep overlay focus valid |
 | Queue row delete is activated | Delete that exact occurrence and relocate focus after recomposition |
 | Final queue row is deleted | Close the empty overlay, restore queue-action focus, and stop playback |
-| Roam label or queue text is measured | Its content group is vertically centered inside the fixed button/row bounds |
+| Queue/roam bounds measured | Queue row text group is vertically centered inside its fixed row bounds; the roam exit control is icon-only (content description present, no text node) |
 | Back with queue / controls visible | Close queue first; otherwise hide controls; do not leave player early |
 | Async route first load completes | Focus its first actionable content item exactly once |
 | Return to a retained route | Restore prior focus, scroll, pages, and continuation metadata |

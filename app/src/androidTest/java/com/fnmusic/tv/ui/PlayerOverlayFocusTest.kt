@@ -16,8 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.click
@@ -208,15 +208,21 @@ class PlayerOverlayFocusTest {
         val queue = composeRule.onNodeWithContentDescription("播放队列，共 5 首")
         val listRepeat = composeRule.onNodeWithContentDescription("播放模式：列表循环")
         val favorite = composeRule.onNodeWithContentDescription("收藏当前歌曲")
+        val addToPlaylist = composeRule.onNodeWithContentDescription("添加到歌单")
 
         PlayMode.entries.forEach { mode ->
             composeRule.onNodeWithText(playModeLabel(mode)).assertDoesNotExist()
         }
         composeRule.onNodeWithText("队列 5").assertDoesNotExist()
 
+        // 现行左/右焦点链（PlayerControlOverlay）：模式 ↔ 收藏 ↔ 添加到歌单 ↔ 上一首 ↔ 播放 ↔ 下一首 ↔ 队列。
         play.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         previous.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
+        addToPlaylist.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
+        favorite.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         listRepeat.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
+        favorite.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
+        addToPlaylist.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
         previous.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
         play.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
         next.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
@@ -224,8 +230,8 @@ class PlayerOverlayFocusTest {
         next.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         play.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         previous.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
-        listRepeat.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
-        favorite.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
+        addToPlaylist.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
+        favorite.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         listRepeat.assertIsFocused()
 
         assertModeCycle("列表循环", "随机播放")
@@ -251,9 +257,13 @@ class PlayerOverlayFocusTest {
         val favorite = composeRule.onNodeWithContentDescription("收藏当前歌曲")
         val next = composeRule.onNodeWithContentDescription("下一首")
         val exit = composeRule.onNodeWithContentDescription("退出漫游")
+        val addToPlaylist = composeRule.onNodeWithContentDescription("添加到歌单")
+        // 漫游链（无模式键，最右为退出漫游）：收藏 ↔ 添加到歌单 ↔ 上一首 ↔ 播放 ↔ 下一首 ↔ 退出漫游。
         play.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         previous.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
+        addToPlaylist.assertIsFocused().performKeyInput { pressKey(Key.DirectionLeft) }
         favorite.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
+        addToPlaylist.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
         previous.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
         play.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
         next.assertIsFocused().performKeyInput { pressKey(Key.DirectionRight) }
@@ -263,14 +273,12 @@ class PlayerOverlayFocusTest {
         exit.assertIsFocused()
     }
 
-    @Test fun exitRoamLabelIsCenteredInsideItsButton() {
+    @Test fun exitRoamButtonUsesIconOnlyContract() {
         renderControls(roaming = true)
 
-        val button = composeRule.onNodeWithContentDescription("退出漫游").fetchSemanticsNode().boundsInRoot
-        val label = composeRule.onNodeWithText("退出漫游", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-
-        assertTrue(abs(button.center.x - label.center.x) <= 1.5f)
-        assertTrue(abs(button.center.y - label.center.y) <= 1.5f)
+        // 1.9.4 起「退出漫游」是“门 + 外指箭头”图标按钮：只保留 contentDescription，不渲染文字标签。
+        composeRule.onNodeWithContentDescription("退出漫游").assertExists()
+        composeRule.onNodeWithText("退出漫游", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun nowPlayingPillKeepsCjkTitleInsideItsBounds() {
@@ -345,13 +353,18 @@ class PlayerOverlayFocusTest {
             }
         }
 
-        val row = composeRule.onNodeWithContentDescription("1. 队列歌曲 队列歌手，正在播放")
-            .fetchSemanticsNode().boundsInRoot
+        val rowNode = composeRule.onNodeWithContentDescription("1. 队列歌曲 队列歌手，正在播放")
+            .fetchSemanticsNode()
+        val row = rowNode.boundsInRoot
         val title = composeRule.onNodeWithText("队列歌曲", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val artist = composeRule.onNodeWithText("队列歌手", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val textGroupCenterY = (title.top + artist.bottom) / 2f
 
-        assertTrue(abs(row.center.y - textGroupCenterY) <= 2f)
+        assertTrue(
+            "rowCenter=${row.center.y}, textGroupCenter=$textGroupCenterY, row=${row.top}..${row.bottom}, " +
+                "titleBounds=$title, artistBounds=$artist",
+            abs(row.center.y - textGroupCenterY) <= 2f,
+        )
     }
 
     @Test fun retryIsReachableFromTransportAndReturnsToIt() {

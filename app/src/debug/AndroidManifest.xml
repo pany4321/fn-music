@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 仪器化测试（compose 测试规则）启动的 androidx.activity.ComponentActivity 来自
+     test-manifest 库，合并进 debug 包的清单，默认跟随设备方向。
+     应用本体锁横屏，队列行/播放胶囊等几何断言按横屏设计——竖屏窗口下面板过窄，
+     weight 文本列塌缩成零宽（bounds 全 0），几何断言必然失真。
+     这里仅在 debug 构建中把该测试宿主 Activity 锁横屏，与应用真实使用方向一致。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:screenOrientation="landscape"
+            tools:replace="android:screenOrientation" />
+    </application>
+
+</manifest>
