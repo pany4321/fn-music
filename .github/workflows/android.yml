@@ -96,6 +96,23 @@ jobs:
         with:
           cache-disabled: true
 
+      # Robolectric 的 android-all 插桩包按需从 Maven Central 下载（~/.m2），
+      # 缓存住避免每次运行多花几分钟下载；toml 变化（含 robolectric 版本）时自然失效重建。
+      - name: Cache Robolectric android-all jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: robolectric-
+
+      # 单元测试门禁：所有模块的单测在出包前必须全绿。
+      # AppDatabaseMigrationTest 在 Windows 本地会因 androidx.sqlite 的
+      # SupportSQLiteDriver 只按 '/' 切 basename 而失败（上游未修），Linux 上天然通过。
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest
+
       - name: Restore release signing identity
         id: signing
         shell: bash
