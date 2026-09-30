@@ -2488,7 +2488,8 @@ internal fun AddToPlaylistDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val dialogWidth = minOf(maxWidth * 0.9f, 600.dp)
+        // 0.9/600 太宽（用户反馈）；列表滚动 + 顶部 24dp 间隙保留（首行聚焦放大 1.04 仍需防压标题）
+        val dialogWidth = minOf(maxWidth * 0.72f, 480.dp)
         Column(
             Modifier
                 .width(dialogWidth)

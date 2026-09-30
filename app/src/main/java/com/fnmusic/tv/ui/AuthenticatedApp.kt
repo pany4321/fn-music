@@ -675,11 +675,12 @@ internal fun NowPlayingPill(
     val shape = CircleShape
     val coverId = playback.coverId
     val fontScale = LocalDensity.current.fontScale
-    val pillHeight = (42f + (fontScale - 1f).coerceAtLeast(0f) * 28f).dp
+    // 高度与右侧「首页/我的」胶囊（48dp）对齐；宽度放大 30%（186→242）给歌名留更多空间。
+    val pillHeight = (48f + (fontScale - 1f).coerceAtLeast(0f) * 28f).dp
     Button(
         onClick = onClick,
         modifier = modifier
-            .size(width = 186.dp, height = pillHeight)
+            .size(width = 242.dp, height = pillHeight)
             .semantics { contentDescription = "当前播放：${playback.title}" },
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
         scale = ButtonDefaults.scale(focusedScale = 1.04f),
@@ -706,7 +707,7 @@ internal fun NowPlayingPill(
                     container = LocalAuthenticatedDependencies.current,
                     coverId = coverId,
                     variant = CoverVariant.Compact,
-                    modifier = Modifier.size(27.dp),
+                    modifier = Modifier.size(34.dp),
                     shape = CircleShape,
                     contentScale = ContentScale.Crop,
                     placeholderContent = { NowPlayingArtworkFallback(playback.title) },
@@ -3417,6 +3418,8 @@ private fun TrackCollection(
             if (hasNext && index >= tracks.size - 15) load(page + 1)
         },
         onTrack = ::play,
+        onPlayer = onPlayer,
+        menuScope = actionScope,
         onLoadMore = { load(page + 1) },
         alternateContent = alternateContent,
         emptyMessage = emptyMessage,
@@ -3608,6 +3611,10 @@ private fun DetailTrackCollection(
     onPrimaryAction: () -> Unit,
     onTrackFocused: (Int, String) -> Unit,
     onTrack: (Int) -> Unit,
+    /** 菜单「现在播放」成功后的跳转（与行点击播放共用）。 */
+    onPlayer: (Track) -> Unit = {},
+    /** 单曲播放用的协程 scope（调用方持有）。 */
+    menuScope: kotlinx.coroutines.CoroutineScope? = null,
     onLoadMore: () -> Unit,
     canRemoveTrack: Boolean = false,
     onRequestRemove: (Track) -> Unit = {},
@@ -3833,7 +3840,22 @@ private fun DetailTrackCollection(
                 container = container,
                 track = menuTrack,
                 onDismiss = { menuTrackIndex = null },
-                onPlayNow = { onTrack(index) },
+                // 单曲语义：只把这一首加入队列（滑窗 play(index) 会带入整段上下文）
+                onPlayNow = {
+                    menuScope?.launch {
+                        val prepared = runCatching {
+                            container.musicRepository.prepareQueue(listOf(menuTrack))
+                        }.getOrDefault(emptyList())
+                        if (prepared.isEmpty()) return@launch
+                        runCatching {
+                            container.playbackController.playQueue(
+                                tracks = prepared,
+                                startIndex = 0,
+                                source = null,
+                            )
+                        }.onSuccess { onPlayer(menuTrack) }
+                    }
+                },
                 onAddToPlaylist = {
                     playlistTrackGuid = menuTrack.guid.value
                     menuTrackIndex = null
@@ -5704,7 +5726,8 @@ private fun TrackContextMenuDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            val dialogWidth = minOf(maxWidth * 0.9f, 420.dp)
+            // 宽度只求放下菜单项文字（用户反馈 0.9/420 太宽）；不显示歌名标题。
+            val dialogWidth = minOf(maxWidth * 0.62f, 300.dp)
             Column(
                 Modifier
                     .width(dialogWidth)
@@ -5712,14 +5735,6 @@ private fun TrackContextMenuDialog(
                     .padding(vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    track.title,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
                 TrackMenuItem(label = "信息", focusRequester = firstItemFocus) { infoVisible = true }
                 TrackMenuItem(label = "现在播放") {
                     onDismiss()
