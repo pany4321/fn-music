@@ -374,8 +374,11 @@ class MusicRepository internal constructor(
         cachedPage(CatalogPageSource.GenreTracks(guid), page, PAGE_SIZE)
             .also(::observeFavoriteTracks)
 
-    suspend fun searchTracks(query: String, page: Int = 1, size: Int = 20): Page<Track> =
-        backend.searchTracks(query, page, size).toDomainPage(page, size)
+    suspend fun searchTracks(query: String, page: Int = 1, size: Int = 20): Page<Track> {
+        val result = backend.searchTracks(query, page, size).toDomainPage(page, size)
+        // fn 服务端不按 size 截断（真机观测整页返回 85 条），客户端统一截断，保证两源上限一致
+        return if (result.items.size > size) result.copy(items = result.items.take(size)) else result
+    }
 
     suspend fun searchArtists(query: String, page: Int = 1, size: Int = 20): Page<Artist> =
         backend.searchArtists(query, page, size).toDomainPage(page, size)
@@ -566,8 +569,8 @@ class MusicRepository internal constructor(
         onlineMatchingEnabled: Boolean = preferences.state.value.onlineLyricsMatchingEnabled,
     ): CurrentResourceResult<CurrentLyrics> = resolveLyricsWithFallback(
         onlineMatchingEnabled = onlineMatchingEnabled,
+        server = { firstPartyCurrentLyrics(track.guid.value) },
         online = { onlineLyricsResolver.resolve(track) },
-        firstParty = { firstPartyCurrentLyrics(track.guid.value) },
     )
 
     suspend fun startRoam(): RoamWindow? {
@@ -884,18 +887,23 @@ internal fun <T> DecodedPage<T>.toDomainPage(page: Int, pageSize: Int): Page<T> 
     return Page(items, page, pageSize, total, sort)
 }
 
+/**
+ * 服务器歌词第一优先（jellyfin 的歌词接口即从音频文件内嵌提取），
+ * 在线匹配仅在服务器缺失/失败时兜底。在线抛错不吞取消。
+ */
 internal suspend fun resolveLyricsWithFallback(
     onlineMatchingEnabled: Boolean,
+    server: suspend () -> CurrentResourceResult<CurrentLyrics>,
     online: suspend () -> CurrentLyrics?,
-    firstParty: suspend () -> CurrentResourceResult<CurrentLyrics>,
 ): CurrentResourceResult<CurrentLyrics> {
-    if (!onlineMatchingEnabled) return firstParty()
+    val serverResult = server()
+    if (serverResult is CurrentResourceResult.Ready || !onlineMatchingEnabled) return serverResult
     return try {
-        online()?.let { CurrentResourceResult.Ready(it) } ?: firstParty()
+        online()?.let { CurrentResourceResult.Ready(it) } ?: serverResult
     } catch (cause: CancellationException) {
         throw cause
     } catch (_: Exception) {
-        firstParty()
+        serverResult
     }
 }
 

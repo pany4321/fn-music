@@ -3,6 +3,7 @@ package com.fnmusic.tv.core.data.repository
 import com.fnmusic.tv.core.data.api.LyricDto
 import com.fnmusic.tv.core.data.api.LyricListDto
 import com.fnmusic.tv.core.data.backend.selectLyricDocument
+import com.fnmusic.tv.core.model.AppError
 import com.fnmusic.tv.core.model.LyricDocument
 import com.fnmusic.tv.core.lyrics.hasUsableLines
 import com.fnmusic.tv.core.lyrics.lyricText
@@ -40,24 +41,36 @@ class MusicRepositoryLyricsTest {
         assertEquals("あな", syncedLyrics.lines.single().lyricText())
     }
 
-    @Test fun `online lyrics win while misses and failures fall back to first party`() = runBlocking {
-        val firstPartyCalls = AtomicInteger()
-        val firstParty = {
-            firstPartyCalls.incrementAndGet()
-            CurrentResourceResult.Ready(currentLyrics("first party"))
+    @Test fun `server lyrics win while misses and failures fall back to online`() = runBlocking {
+        val onlineCalls = AtomicInteger()
+        val online = {
+            onlineCalls.incrementAndGet()
+            currentLyrics("online")
         }
 
-        val online = resolveLyricsWithFallback(true, { currentLyrics("online") }, firstParty)
-        assertEquals("online", (online as CurrentResourceResult.Ready).value.document.content)
-        assertEquals(0, firstPartyCalls.get())
+        val ready = resolveLyricsWithFallback(
+            true,
+            { CurrentResourceResult.Ready(currentLyrics("server")) },
+            online,
+        )
+        assertEquals("server", (ready as CurrentResourceResult.Ready).value.document.content)
+        assertEquals(0, onlineCalls.get())
 
-        val missing = resolveLyricsWithFallback(true, { null }, firstParty)
-        assertEquals("first party", (missing as CurrentResourceResult.Ready).value.document.content)
-        val failed = resolveLyricsWithFallback(true, { error("provider failed") }, firstParty)
-        assertEquals("first party", (failed as CurrentResourceResult.Ready).value.document.content)
-        val disabled = resolveLyricsWithFallback(false, { error("must not search") }, firstParty)
-        assertEquals("first party", (disabled as CurrentResourceResult.Ready).value.document.content)
-        assertEquals(3, firstPartyCalls.get())
+        val absent = resolveLyricsWithFallback(true, { CurrentResourceResult.Absent }, online)
+        assertEquals("online", (absent as CurrentResourceResult.Ready).value.document.content)
+        val failed = resolveLyricsWithFallback(
+            true,
+            { CurrentResourceResult.Failure(AppError.NotFound, retryable = true) },
+            online,
+        )
+        assertEquals("online", (failed as CurrentResourceResult.Ready).value.document.content)
+        val disabled = resolveLyricsWithFallback(
+            false,
+            { CurrentResourceResult.Absent },
+            { error("must not search") },
+        )
+        assertEquals(CurrentResourceResult.Absent, disabled)
+        assertEquals(2, onlineCalls.get())
     }
 
     @Test fun `lyrics fallback never swallows caller cancellation`() {
@@ -65,8 +78,17 @@ class MusicRepositoryLyricsTest {
             runBlocking {
                 resolveLyricsWithFallback(
                     onlineMatchingEnabled = true,
+                    server = { CurrentResourceResult.Absent },
                     online = { throw CancellationException("track changed") },
-                    firstParty = { error("must not fall back") },
+                )
+            }
+        }
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                resolveLyricsWithFallback(
+                    onlineMatchingEnabled = false,
+                    server = { throw CancellationException("track changed") },
+                    online = { error("must not be reached") },
                 )
             }
         }
