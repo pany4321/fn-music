@@ -744,25 +744,28 @@ private fun PlayerMainContent(
     val placeholder = title.take(1).ifBlank { "音" }
     if (poster) {
         Box(Modifier.fillMaxSize()) {
+            // 封面绘制区与右侧歌词面板的边界（50%）严丝合缝：此前画到 58%，右侧 8% 被
+            // 面板色完全盖死、34%→50% 又被羽化带渐隐，观感即"封面右侧被藏、整体不居中"。
+            // 羽化带收窄到 0.40→0.50（10%），正方形封面在 50% 宽的矩形里居中裁剪（左右各约 6%）。
             if (artworkBitmap != null) {
                 Image(
                     artworkBitmap.asImageBitmap(),
                     null,
-                    Modifier.fillMaxWidth(0.58f).fillMaxHeight(),
+                    Modifier.fillMaxWidth(0.50f).fillMaxHeight(),
                     contentScale = ContentScale.Crop,
                 )
             } else {
                 PlayerArtworkPlaceholder(
                     placeholder,
                     placeholderAccent,
-                    Modifier.fillMaxWidth(0.58f).fillMaxHeight(),
+                    Modifier.fillMaxWidth(0.50f).fillMaxHeight(),
                     RectangleShape,
                 )
             }
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.horizontalGradient(
-                        0.34f to Color.Transparent,
+                        0.40f to Color.Transparent,
                         0.50f to posterPanelColor,
                     ),
                 ),
