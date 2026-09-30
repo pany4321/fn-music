@@ -5429,10 +5429,11 @@ private fun SearchRoute(
                                         },
                                     onClick = {
                                         scope.launch {
+                                            // "整表入队"：分页取完全部歌曲（只取第 1 页会截断大歌手）
                                             val page = runCatching {
-                                                container.musicRepository.artistTracks(artist.guid.value, 1)
+                                                container.musicRepository.artistTracksAll(artist.guid.value)
                                             }.getOrNull() ?: return@launch
-                                            val prepared = container.musicRepository.prepareQueue(page.items)
+                                            val prepared = container.musicRepository.prepareQueue(page)
                                             if (prepared.isEmpty()) return@launch
                                             runCatching {
                                                 container.playbackController.playQueue(
@@ -5482,10 +5483,11 @@ private fun SearchRoute(
                                         },
                                     onClick = {
                                         scope.launch {
+                                            // "整表入队"：分页取完全部歌曲（只取第 1 页会截断大专辑）
                                             val page = runCatching {
-                                                container.musicRepository.albumTracks(album.guid.value, 1)
+                                                container.musicRepository.albumTracksAll(album.guid.value)
                                             }.getOrNull() ?: return@launch
-                                            val prepared = container.musicRepository.prepareQueue(page.items)
+                                            val prepared = container.musicRepository.prepareQueue(page)
                                             if (prepared.isEmpty()) return@launch
                                             runCatching {
                                                 container.playbackController.playQueue(
@@ -5524,14 +5526,15 @@ private fun SearchRoute(
                                 },
                                 onClick = {
                                     scope.launch {
-                                        val prepared = runCatching { container.musicRepository.prepareQueue(tracks) }
+                                        // 只把被点中的这首加入队列（歌手/专辑行的"整表入队"语义不适用于单曲；
+                                        // 此前把整个搜索结果列表都入了队）
+                                        val prepared = runCatching { container.musicRepository.prepareQueue(listOf(track)) }
                                             .getOrDefault(emptyList())
-                                        val start = prepared.indexOfFirst { it.track.guid == track.guid }
-                                        if (start >= 0) {
+                                        if (prepared.isNotEmpty()) {
                                             runCatching {
                                                 container.playbackController.playQueue(
                                                     tracks = prepared,
-                                                    startIndex = start,
+                                                    startIndex = 0,
                                                     source = null,
                                                 )
                                             }.onSuccess {

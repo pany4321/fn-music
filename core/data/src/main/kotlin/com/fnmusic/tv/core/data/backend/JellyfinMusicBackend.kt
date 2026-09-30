@@ -167,14 +167,18 @@ internal class JellyfinMusicBackend(
 
     // ---- 搜索 / 收藏 / 最近播放（不缓存） ----
 
-    override suspend fun searchTracks(query: String, page: Int, size: Int): DecodedPage<Track> =
-        search(query, page, size, AUDIO) { it.toTrack() }
+    override suspend fun searchTracks(query: String, page: Int, size: Int): DecodedPage<Track> {
+        val merged = searchMergedItems(query, page, size)
+        return DecodedPage(merged.Items.map { it.toTrack() }, merged.TotalRecordCount, SEARCH_SORT)
+    }
 
     override suspend fun searchArtists(query: String, page: Int, size: Int): DecodedPage<Artist> =
         search(query, page, size, MUSIC_ARTIST) { it.toArtist() }
 
-    override suspend fun searchAlbums(query: String, page: Int, size: Int): DecodedPage<Album> =
-        search(query, page, size, MUSIC_ALBUM) { it.toAlbum() }
+    override suspend fun searchAlbums(query: String, page: Int, size: Int): DecodedPage<Album> {
+        val merged = searchAlbumsMergedItems(query, page, size)
+        return DecodedPage(merged.Items.map { it.toAlbum() }, merged.TotalRecordCount, SEARCH_SORT)
+    }
 
     override suspend fun favoriteTracks(page: Int, size: Int): DecodedPage<Track> {
         val response = call {
@@ -418,6 +422,110 @@ internal class JellyfinMusicBackend(
         return response.decoded(SEARCH_SORT, map)
     }
 
+    /**
+     * 音轨区搜索：对齐飞牛 `search/track` 的**全字段匹配**语义（实测：歌手名/专辑名都能命中音轨）。
+     *
+     * Jellyfin 的 `SearchTerm` 只匹配条目自身的 Name——搜歌手名或专辑名时音轨区恒为空（实测 0 条）。
+     * 因此并上两条补充查询：
+     * - 专辑名命中的专辑（`MusicAlbum` + SearchTerm）→ `AlbumIds` 过滤音轨（实测 25 条/张）；
+     * - 歌手名命中的歌手（`MusicArtist` + SearchTerm）→ `ArtistIds`/`AlbumArtistIds` 过滤音轨
+     *   （元数据齐全的库生效；实测本库音轨缺歌手元数据时为 0，保留以不亏）。
+     * 三源按 guid 去重、本地按名称排序后切窗——搜索 UI 只取第一页，无跨页漂移问题。
+     */
+    private suspend fun searchMergedItems(query: String, page: Int, size: Int): JellyfinItemsDto {
+        val direct = runSearchItems(query, page, size, AUDIO)
+        val albumItems = runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ALBUM)
+        val albumIds = albumItems.Items.take(RELATED_SEARCH_LIMIT).map { it.Id }
+        val artistItems = runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ARTIST)
+        val artistIds = artistItems.Items.take(RELATED_SEARCH_LIMIT).map { it.Id }
+
+        val extras = buildList {
+            if (albumIds.isNotEmpty()) {
+                add(
+                    call {
+                        api.items(
+                            userId = userId,
+                            includeItemTypes = AUDIO,
+                            albumIds = albumIds.joinToString(","),
+                            sortBy = SORT_NAME,
+                            startIndex = 0,
+                            limit = offsetOf(page, size) + size,
+                        )
+                    },
+                )
+            }
+            if (artistIds.isNotEmpty()) {
+                add(
+                    call {
+                        api.items(
+                            userId = userId,
+                            includeItemTypes = AUDIO,
+                            artistIds = artistIds.joinToString(","),
+                            sortBy = SORT_NAME,
+                            startIndex = 0,
+                            limit = offsetOf(page, size) + size,
+                        )
+                    },
+                )
+                add(
+                    call {
+                        api.items(
+                            userId = userId,
+                            includeItemTypes = AUDIO,
+                            albumArtistIds = artistIds.joinToString(","),
+                            sortBy = SORT_NAME,
+                            startIndex = 0,
+                            limit = offsetOf(page, size) + size,
+                        )
+                    },
+                )
+            }
+        }
+        return mergePages(listOf(direct) + extras, page, size)
+    }
+
+    /**
+     * 专辑区搜索：对齐飞牛 `search/album` 的匹配面（实测歌手名也能命中专辑）。
+     * `SearchTerm`（专辑名）并上「歌手名命中的歌手的专辑」。
+     */
+    private suspend fun searchAlbumsMergedItems(query: String, page: Int, size: Int): JellyfinItemsDto {
+        val direct = runSearchItems(query, page, size, MUSIC_ALBUM)
+        val artistItems = runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ARTIST)
+        val artistIds = artistItems.Items.take(RELATED_SEARCH_LIMIT).map { it.Id }
+        val extras = if (artistIds.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(
+                call {
+                    api.items(
+                        userId = userId,
+                        includeItemTypes = MUSIC_ALBUM,
+                        albumArtistIds = artistIds.joinToString(","),
+                        sortBy = SORT_NAME,
+                        startIndex = 0,
+                        limit = offsetOf(page, size) + size,
+                    )
+                },
+            )
+        }
+        return mergePages(listOf(direct) + extras, page, size)
+    }
+
+    private suspend fun runSearchItems(query: String, page: Int, size: Int, types: String): JellyfinItemsDto =
+        call {
+            api.items(
+                userId = userId,
+                includeItemTypes = types,
+                searchTerm = query,
+                sortBy = SORT_NAME,
+                startIndex = offsetOf(page, size),
+                limit = size,
+            )
+        }
+
+    private fun mergePages(pages: List<JellyfinItemsDto>, page: Int, size: Int): JellyfinItemsDto =
+        mergeSearchPages(pages, page, size)
+
     private suspend fun requireItem(guid: String): JellyfinItemDto =
         api.item(guid, userId) ?: throw AppException(AppError.NotFound)
 
@@ -460,6 +568,9 @@ internal class JellyfinMusicBackend(
         const val FILTER_FAVORITE = "IsFavorite"
         const val FILTER_PLAYED = "IsPlayed"
         const val SEARCH_SORT = "relevance"
+
+        /** 合并查询时，专辑/歌手名命中条目的收集上限（控制 URL 长度与请求数）。 */
+        const val RELATED_SEARCH_LIMIT = 30
         const val FAVORITE_SORT = "dateCreated,desc"
         const val RECENT_SORT = "datePlayed,desc"
         const val ROAM_SEED_SIZE = 30
@@ -503,6 +614,19 @@ internal class JellyfinMusicBackend(
 /** 音频歌单（`MediaType` 缺省时按音频处理，宁可多留也不要漏）。 */
 private fun JellyfinItemDto.isAudioPlaylist(): Boolean =
     MediaType == null || MediaType.equals("Audio", ignoreCase = true)
+
+/** 搜索多源合并：按条目 id 去重、名称排序，切出当前页窗口；total = 去重后的总条数。 */
+internal fun mergeSearchPages(pages: List<JellyfinItemsDto>, page: Int, size: Int): JellyfinItemsDto {
+    val seen = mutableSetOf<String>()
+    val merged = pages.asSequence()
+        .flatMap { it.Items.asSequence() }
+        .filter { seen.add(it.Id) }
+        .sortedBy { it.Name?.lowercase().orEmpty() }
+        .toList()
+    val offset = ((page.coerceAtLeast(1) - 1) * size)
+    val window = merged.drop(offset).take(size)
+    return JellyfinItemsDto(Items = window, TotalRecordCount = merged.size)
+}
 
 private fun <Domain> JellyfinItemsDto.decoded(
     sort: String,

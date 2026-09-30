@@ -282,6 +282,23 @@ class MusicRepository internal constructor(
         cachedPage(CatalogPageSource.ArtistAlbums(guid), page, PAGE_SIZE)
 
     /**
+     * 搜索结果点歌手/专辑时的"整表入队"用：分页取完全部歌曲。
+     * 详情页有翻页 UI，搜索的入队没有——只取第 1 页会让 50 首以上的专辑被静默截断。
+     * 上限 [ALL_TRACKS_PAGE_CAP] 页是防御值：家用 NAS 逐页顺序取，不并发轰炸。
+     */
+    suspend fun artistTracksAll(guid: String): List<Track> = fetchAllPages { artistTracks(guid, it) }
+
+    suspend fun albumTracksAll(guid: String): List<Track> = fetchAllPages { albumTracks(guid, it) }
+
+    private suspend fun fetchAllPages(fetch: suspend (Int) -> Page<Track>): List<Track> = buildList {
+        for (page in 1..ALL_TRACKS_PAGE_CAP) {
+            val result = fetch(page)
+            addAll(result.items)
+            if (!result.hasNext) return@buildList
+        }
+    }
+
+    /**
      * Up to [count] albums sampled across the whole library: one probe call reads
      * the total, then each album comes from a randomly picked server page so the
      * set changes on every call.
@@ -866,6 +883,9 @@ private const val RANDOM_SAMPLE_PAGES = 3
 
 /** 无封面（下载失败/404）负缓存的时长：期间直接返回 null，不再打网络。 */
 private const val NEGATIVE_ARTWORK_TTL_MS = 5 * 60 * 1_000L
+
+/** "整表入队"的分页上限（50 首/页 × 40 = 2000 首，超出即视为元数据异常）。 */
+private const val ALL_TRACKS_PAGE_CAP = 40
 
 /** 清空收藏的结果：成功删除数与失败数（失败的可以再点一次继续清）。 */
 data class FavoritesClearOutcome(val removed: Int, val failed: Int)

@@ -2532,11 +2532,12 @@ private fun AddToPlaylistDialog(
             }
             // 内容区固定高度：加载中/空态/列表占同样空间，弹出不再跳变；
             // 底部消息行也预留固定一行，成功/失败提示出现时高度不变。
-            // 顶部留出 12dp：TV 按钮聚焦放大 1.1 倍 + 焦点描边，首个歌单行上溢会压到标题（真机反馈）。
+            // 顶部留出 24dp：首个歌单行聚焦/点按会放大（已收敛到 1.04）+ 焦点描边，
+            // 上溢仍需足够间隙才不会压到标题（真机反馈；1.9.1 的 12dp 在手机上仍不够）。
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp)
+                    .padding(top = 24.dp)
                     .height(360.dp),
             ) {
                 when {
@@ -2606,6 +2607,7 @@ private fun AddToPlaylistDialog(
                                 .then(
                                     rowFocuses.getOrNull(index)?.let { Modifier.focusRequester(it) } ?: Modifier
                                 ),
+                            scale = ButtonDefaults.scale(focusedScale = 1.04f),
                             colors = ButtonDefaults.colors(
                                 containerColor = FnColors.Card,
                                 contentColor = FnColors.Text,
