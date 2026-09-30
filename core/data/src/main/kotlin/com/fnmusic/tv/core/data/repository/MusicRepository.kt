@@ -94,6 +94,21 @@ internal fun FavoriteLibraryState.beginMutation(
     ) to mutation
 }
 
+/** 方向性收藏（上下文菜单「加入收藏」）：把目标状态定为 [desired]，不翻转既有状态。 */
+internal fun FavoriteLibraryState.beginSetMutation(
+    trackGuid: String,
+    desired: Boolean,
+): Pair<FavoriteLibraryState, FavoriteMutation> {
+    val boundNamespace = checkNotNull(namespace)
+    val confirmed = statuses[trackGuid] ?: desired
+    val mutation = FavoriteMutation(boundNamespace, trackGuid, confirmed, desired)
+    return copy(
+        statuses = statuses + (trackGuid to desired),
+        pending = pending + trackGuid,
+        error = null,
+    ) to mutation
+}
+
 internal fun FavoriteLibraryState.complete(mutation: FavoriteMutation): FavoriteLibraryState =
     if (namespace != mutation.namespace) this else copy(
         statuses = statuses + (mutation.trackGuid to mutation.desired),
@@ -442,6 +457,30 @@ class MusicRepository internal constructor(
             val namespace = session.cacheNamespace()
             bindFavoriteNamespace(namespace)
             val (optimisticState, mutation) = _favoriteState.value.beginMutation(trackGuid, fallbackFavorite)
+            _favoriteState.value = optimisticState
+            try {
+                backend.setFavorite(trackGuid, mutation.desired)
+                _favoriteState.update { it.complete(mutation) }
+                Result.success(mutation.desired)
+            } catch (cause: CancellationException) {
+                _favoriteState.update { it.rollback(mutation) }
+                throw cause
+            } catch (cause: Exception) {
+                val error = (cause as? AppException)?.error ?: AppError.Unknown(cause.message)
+                _favoriteState.update { it.rollback(mutation, error) }
+                Result.failure(cause)
+            }
+        }
+
+    /**
+     * 方向性收藏（上下文菜单「加入收藏」）：与 [toggleFavorite] 的差别是不翻转——
+     * 已收藏的曲目重复"加入收藏"只是幂等地再设一次 true。
+     */
+    suspend fun setFavorite(trackGuid: String, favorite: Boolean): Result<Boolean> =
+        favoriteMutationMutex.withLock {
+            val namespace = session.cacheNamespace()
+            bindFavoriteNamespace(namespace)
+            val (optimisticState, mutation) = _favoriteState.value.beginSetMutation(trackGuid, favorite)
             _favoriteState.value = optimisticState
             try {
                 backend.setFavorite(trackGuid, mutation.desired)

@@ -153,13 +153,14 @@ internal class JellyfinApi(
         ).get(),
     )
 
-    /** 歌手列表走专门的端点（Jellyfin 的"专辑艺术家"）。 */
-    suspend fun albumArtists(userId: String, startIndex: Int, limit: Int): JellyfinItemsDto = items(
+    /** 歌手列表走专门的端点（Jellyfin 的"专辑艺术家"）。[searchTerm] 供全局搜索使用。 */
+    suspend fun albumArtists(userId: String, startIndex: Int, limit: Int, searchTerm: String? = null): JellyfinItemsDto = items(
         Request.Builder().url(
             url("Artists/AlbumArtists").newBuilder()
                 .addQueryParameter("userId", uid(userId))
                 .addQueryParameter("Recursive", "true")
                 .addQueryParameter("SortBy", "SortName")
+                .apply { searchTerm?.let { addQueryParameter("searchTerm", it) } }
                 .addQueryParameter("StartIndex", startIndex.toString())
                 .addQueryParameter("Limit", limit.toString())
                 .addQueryParameter("Fields", LIST_ITEM_FIELDS)

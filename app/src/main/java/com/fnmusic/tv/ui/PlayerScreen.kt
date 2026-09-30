@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -2396,7 +2397,7 @@ internal fun playerProgressFraction(positionMs: Long, durationMs: Long): Float =
     if (durationMs <= 0L) 0f else (positionMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
 
 @Composable
-private fun AddToPlaylistDialog(
+internal fun AddToPlaylistDialog(
     container: AuthenticatedAppDependencies,
     trackGuid: String,
     onDismiss: () -> Unit,
@@ -2480,11 +2481,17 @@ private fun AddToPlaylistDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        // 平台对话框窗口默认会限制宽度（真机上只有屏宽的四成左右），
+        // 27sp 标题被挤成多行、弹窗变细长条——关掉它自己定宽。
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val dialogWidth = minOf(maxWidth * 0.9f, 600.dp)
         Column(
             Modifier
-                .widthIn(max = 600.dp)
-                .fillMaxWidth(0.9f)
+                .width(dialogWidth)
                 .background(FnColors.Surface, RoundedCornerShape(8.dp))
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2668,6 +2675,7 @@ private fun AddToPlaylistDialog(
                 )
             }
         }
+        }
     }
 }
 
@@ -2692,11 +2700,15 @@ private fun CreatePlaylistDialog(
     }
     val dialogShape = RoundedCornerShape(24.dp)
     val dialogScale = ButtonDefaults.scale(focusedScale = 1.05f)
-    Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
+    Dialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val dialogWidth = minOf(maxWidth * 0.9f, 520.dp)
         Column(
             Modifier
-                .widthIn(max = 520.dp)
-                .fillMaxWidth(0.9f)
+                .width(dialogWidth)
                 .background(FnColors.Surface, RoundedCornerShape(8.dp))
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -2763,6 +2775,7 @@ private fun CreatePlaylistDialog(
                     }
                 }
             }
+        }
         }
     }
 }

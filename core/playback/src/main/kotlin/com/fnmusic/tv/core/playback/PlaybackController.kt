@@ -584,6 +584,31 @@ class PlaybackController(
         return structuralSnapshot(player)
     }
 
+    /**
+     * 把若干曲目插到当前播放曲目之后（上下文菜单的「添加为下一首」）。
+     * 与移除同属结构变更：放弃滑窗分页续载（queueSource/window 置空），按需重排随机序列并写回快照。
+     * 队列容量受 [MAX_QUEUE_ITEMS] 保护，放不下整批时直接拒绝（返回 null，调用方提示）。
+     */
+    fun insertNext(tracks: List<PlaybackTrack>): PlaybackTransition? {
+        val player = controller ?: return null
+        if (queueKind != QueueKind.Normal) return null
+        if (tracks.isEmpty()) return null
+        if (player.mediaItemCount + tracks.size > MAX_QUEUE_ITEMS) return null
+        beginStructuralTransition()
+        queueSource = null
+        queueWindow = null
+        failedDirection = null
+        queueError = null
+        val restoreShuffle = playMode == PlayMode.Shuffle
+        player.addMediaItems(player.currentMediaItemIndex + 1, tracks.map(::mediaItem))
+        queueProjector.clear()
+        project(player)
+        if (restoreShuffle && player.mediaItemCount > 0) {
+            return reapplyShuffleAfterQueueMutation(player)
+        }
+        return structuralSnapshot(player)
+    }
+
     fun cyclePlayMode() = setPlayMode(playMode.next())
 
     fun setPlayMode(mode: PlayMode) {

@@ -26,13 +26,17 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,6 +46,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -134,6 +139,7 @@ import androidx.tv.material3.Border
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.fnmusic.tv.AuthenticatedAppDependencies
 import com.fnmusic.tv.BuildConfig
 import com.fnmusic.tv.NowPlayingPresentation
@@ -920,6 +926,9 @@ private fun BrowseHome(
     fun openRandomSong(track: Track) {
         openSampledTrack(randomSongs, track)
     }
+    // 首页歌曲行的上下文菜单：play = 点位既有的「现在播放」逻辑；restore = 弹窗关闭后的焦点还原。
+    var homeTrackMenu by remember { mutableStateOf<TrackMenuRequest?>(null) }
+    var homePlaylistTrack by remember { mutableStateOf<Track?>(null) }
     LaunchedEffect(Unit) {
         retainedStore.scope.launch {
             runCatching { container.musicRepository.recentTracks(1) }.onSuccess { page ->
@@ -1311,7 +1320,13 @@ private fun BrowseHome(
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == randomSongs.lastIndex) right = FocusRequester.Cancel
                         },
-                    onClick = { openSampledTrack(randomSongs, track) },
+                    onClick = {
+                        homeTrackMenu = TrackMenuRequest(
+                            track = track,
+                            play = { openSampledTrack(randomSongs, track) },
+                            restore = { runCatching { randomSongsRowFocus.requestFocus() } },
+                        )
+                    },
                 )
             }
         }
@@ -1340,12 +1355,41 @@ private fun BrowseHome(
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == recentlyAdded.lastIndex) right = FocusRequester.Cancel
                         },
-                    onClick = { openSampledTrack(recentlyAdded, track) },
+                    onClick = {
+                        homeTrackMenu = TrackMenuRequest(
+                            track = track,
+                            play = { openSampledTrack(recentlyAdded, track) },
+                            restore = { runCatching { recentlyAddedRowFocus.requestFocus() } },
+                        )
+                    },
                 )
             }
         }
         (actionError ?: playlistSnapshot.error)?.let { InlineError(it) }
         }
+        }
+
+        homeTrackMenu?.let { menu ->
+            TrackContextMenuDialog(
+                container = container,
+                track = menu.track,
+                onDismiss = {
+                    homeTrackMenu = null
+                    menu.restore()
+                },
+                onPlayNow = { menu.play() },
+                onAddToPlaylist = {
+                    homePlaylistTrack = menu.track
+                    homeTrackMenu = null
+                },
+            )
+        }
+        homePlaylistTrack?.let { playlistTrack ->
+            AddToPlaylistDialog(
+                container = container,
+                trackGuid = playlistTrack.guid.value,
+                onDismiss = { homePlaylistTrack = null },
+            )
         }
     }
 }
@@ -3538,6 +3582,7 @@ private fun TrackCollection(
                 }
             }
         }
+
     }
 }
 
@@ -3573,6 +3618,9 @@ private fun DetailTrackCollection(
     alternateContent: @Composable () -> Unit = {},
     emptyMessage: String,
 ) {
+    // 曲目行的上下文菜单：单击弹菜单（信息/现在播放/添加为下一首/加入收藏/加入歌单）。
+    var menuTrackIndex by remember { mutableStateOf<Int?>(null) }
+    var playlistTrackGuid by remember { mutableStateOf<String?>(null) }
     val window = LocalAdaptiveWindow.current
     Column(
         Modifier.fillMaxSize().padding(
@@ -3752,7 +3800,7 @@ private fun DetailTrackCollection(
                             // 左右键只在本行内移动：行首按左不逃逸到返回/播放全部按钮。
                             .focusProperties { left = FocusRequester.Cancel }
                             .onFocusChanged { if (it.isFocused) onTrackFocused(index, track.guid.value) },
-                        onClick = { onTrack(index) },
+                        onClick = { menuTrackIndex = index },
                     )
                 }
                 if (hasNext) {
@@ -3777,6 +3825,28 @@ private fun DetailTrackCollection(
         } else {
             Box(Modifier.weight(1f).fillMaxWidth()) { alternateContent() }
         }
+    }
+
+    menuTrackIndex?.let { index ->
+        tracks.getOrNull(index)?.let { menuTrack ->
+            TrackContextMenuDialog(
+                container = container,
+                track = menuTrack,
+                onDismiss = { menuTrackIndex = null },
+                onPlayNow = { onTrack(index) },
+                onAddToPlaylist = {
+                    playlistTrackGuid = menuTrack.guid.value
+                    menuTrackIndex = null
+                },
+            )
+        }
+    }
+    playlistTrackGuid?.let { trackGuid ->
+        AddToPlaylistDialog(
+            container = container,
+            trackGuid = trackGuid,
+            onDismiss = { playlistTrackGuid = null },
+        )
     }
 }
 
@@ -5126,6 +5196,7 @@ private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchRoute(
     container: AuthenticatedAppDependencies,
@@ -5136,7 +5207,11 @@ private fun SearchRoute(
     onPlayer: (Track) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var query by rememberSaveable { mutableStateOf("") }
+    // TextFieldValue：焦点回到搜索框时要把光标拨到文本末尾（遥控器删字重搜的必要前提）。
+    // rememberSaveable 必须配 TextFieldValue.Saver，否则进程重建时类型不匹配会崩。
+    var query by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     var loading by remember { mutableStateOf(false) }
     var searched by rememberSaveable { mutableStateOf("") }
     // 历史胶囊：直接搜索的请求（立即执行，不等防抖、不写回输入框）。
@@ -5147,6 +5222,9 @@ private fun SearchRoute(
     val fieldFocus = remember { FocusRequester() }
     val resultsFocus = remember { FocusRequester() }
     val backFocus = remember { FocusRequester() }
+    // 搜索结果歌曲行的上下文菜单。
+    var searchTrackMenu by remember { mutableStateOf<TrackMenuRequest?>(null) }
+    var searchPlaylistTrack by remember { mutableStateOf<Track?>(null) }
 
     suspend fun performSearch(term: String) {
         if (term.isEmpty()) {
@@ -5174,7 +5252,7 @@ private fun SearchRoute(
         }
     }
     val clearHistoryFocus = remember { FocusRequester() }
-    val historyChipFocuses = remember { List(5) { FocusRequester() } }
+    val historyChipFocuses = remember { List(6) { FocusRequester() } }
     // 最近搜索：设备级持久化、按账号隔离；点击搜索结果时记录（避免存入半截关键词）。
     var history by remember(historyNamespace) {
         mutableStateOf(container.appPreferences.searchHistory(historyNamespace))
@@ -5190,10 +5268,10 @@ private fun SearchRoute(
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     // 输入防抖：只在有关键词时搜索；清空输入框不抹掉已有结果
     // （历史胶囊直搜时输入框保持为空，若因此触发空搜索会立刻清掉结果）。
-    LaunchedEffect(query) {
-        if (query.isBlank()) return@LaunchedEffect
+    LaunchedEffect(query.text) {
+        if (query.text.isBlank()) return@LaunchedEffect
         kotlinx.coroutines.delay(500)
-        performSearch(query.trim())
+        performSearch(query.text.trim())
     }
     // 历史胶囊：立即搜索（独立 effect，避免把自己的 key 重置成 null 而自我取消）。
     LaunchedEffect(searchRequest) {
@@ -5226,26 +5304,10 @@ private fun SearchRoute(
         var fieldFocused by remember { mutableStateOf(false) }
         // 无结果时向下不指向任何目标，显式取消，避免焦点搜索落到未挂载的 FocusRequester。
         val hasResults = artists.isNotEmpty() || albums.isNotEmpty() || tracks.isNotEmpty()
-        // 历史条目最多 5 条 + “清空”一格，固定两行三列等宽（ellipsis）——永不溢出。
-        val historySlots = remember(history) { history.take(5) }
-        val historyRows = remember(historySlots) { historySlots.chunked(3) }
+        // 历史条目最多 6 条 + “清空”胶囊，FlowRow 动态宽度（单行 ellipsis 防极端长词）；
+        // “清空”不另起一行，作为最后一颗胶囊跟随排列（描边/文字用 Coral 区分）。
+        val historySlots = remember(history) { history.take(6) }
         val hasHistory = historySlots.isNotEmpty()
-        fun slotIndex(row: Int, column: Int) = row * 3 + column
-        fun chipDown(row: Int, column: Int): FocusRequester {
-            val nextRow = historyRows.getOrNull(row + 1)
-            if (nextRow != null) {
-                return historyChipFocuses.getOrNull(slotIndex(row + 1, column.coerceAtMost(nextRow.lastIndex)))
-                    ?: FocusRequester.Cancel
-            }
-            // 最后一行胶囊之下是“清空”，再往下才是结果区（不跳站）。
-            return clearHistoryFocus
-        }
-        fun chipUp(row: Int, column: Int): FocusRequester {
-            if (row == 0) return fieldFocus
-            val prevRow = historyRows.getOrNull(row - 1) ?: return fieldFocus
-            return historyChipFocuses.getOrNull(slotIndex(row - 1, column.coerceAtMost(prevRow.lastIndex)))
-                ?: fieldFocus
-        }
         BasicTextField(
             value = query,
             onValueChange = { query = it },
@@ -5283,7 +5345,14 @@ private fun SearchRoute(
                         else -> false
                     }
                 }
-                .onFocusChanged { state -> fieldFocused = state.isFocused }
+                .onFocusChanged { state ->
+                    fieldFocused = state.isFocused
+                    // 焦点回到搜索框（进页/返回钮/历史胶囊上键/清空后共用此钩子）：
+                    // 光标拨到文本末尾，遥控器才能直接删字重搜。
+                    if (state.isFocused && query.text.isNotEmpty() && query.selection.collapsed) {
+                        query = query.copy(selection = TextRange(query.text.length))
+                    }
+                }
                 .background(FnColors.Card, fieldShape)
                 .border(
                     if (fieldFocused) 1.5.dp else 0.5.dp,
@@ -5296,7 +5365,7 @@ private fun SearchRoute(
                     Text("🔍", fontSize = 18.sp)
                     Spacer(Modifier.width(10.dp))
                     Box(Modifier.weight(1f)) {
-                        if (query.isEmpty()) {
+                        if (query.text.isEmpty()) {
                             Text("搜索歌手、专辑、歌曲", color = FnColors.Muted, fontSize = 20.sp)
                         }
                         inner()
@@ -5308,49 +5377,34 @@ private fun SearchRoute(
             Spacer(Modifier.height(14.dp))
             Text("最近搜索", color = FnColors.Muted, fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
-            historyRows.forEachIndexed { rowIndex, rowItems ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    rowItems.forEachIndexed { column, item ->
-                        SearchHistoryChip(
-                            label = item,
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(historyChipFocuses[slotIndex(rowIndex, column)])
-                                .focusProperties {
-                                    // 左右键只在本行内移动；上下键跨行（第二行末格是“清空”）。
-                                    if (column == 0) left = FocusRequester.Cancel
-                                    if (column == rowItems.lastIndex) right = FocusRequester.Cancel
-                                    up = chipUp(rowIndex, column)
-                                    down = chipDown(rowIndex, column)
-                                },
-                            onClick = {
-                                // 直接按历史项搜索：不填入输入框、不把焦点移回输入框
-                                // （否则会弹出输入法），焦点保持在当前胶囊上。
-                                searchRequest = item
-                                recordSearch(item)
+            // FlowRow 动态宽度：胶囊换行位置由文字决定，焦点链照设置页 FlowRow 既有模式
+            // ——左右键按线性序移动（首尾 Cancel），上键回搜索框，下键接结果区。
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                historySlots.forEachIndexed { index, item ->
+                    SearchHistoryChip(
+                        label = item,
+                        modifier = Modifier
+                            .focusRequester(historyChipFocuses[index])
+                            .focusProperties {
+                                if (index == 0) left = FocusRequester.Cancel
+                                if (index == historySlots.lastIndex) right = clearHistoryFocus
+                                up = fieldFocus
+                                down = if (hasResults) resultsFocus else FocusRequester.Cancel
                             },
-                        )
-                    }
-                    // 补齐空槽，保证同一行的胶囊等宽对齐。
-                    repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                        onClick = {
+                            // 直接按历史项搜索：不填入输入框、不把焦点移回输入框
+                            // （否则会弹出输入法），焦点保持在当前胶囊上。
+                            searchRequest = item
+                            recordSearch(item)
+                        },
+                    )
                 }
-                Spacer(Modifier.height(8.dp))
-            }
-            // “清空”：与历史胶囊同一套左右/上下接线，位于第二行最后一格。
-            Box(Modifier.fillMaxWidth().height(44.dp)) {
                 SearchHistoryClearButton(
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
                         .focusRequester(clearHistoryFocus)
                         .focusProperties {
-                            // “清空”独占一行：左右取消，向上回到最后一行胶囊，向下进结果区。
-                            left = FocusRequester.Cancel
                             right = FocusRequester.Cancel
-                            up = historyRows.lastOrNull()?.let { lastRow ->
-                                historyChipFocuses.getOrNull(
-                                    slotIndex(historyRows.lastIndex, 2.coerceAtMost(lastRow.lastIndex)),
-                                )
-                            } ?: fieldFocus
+                            up = fieldFocus
                             down = if (hasResults) resultsFocus else FocusRequester.Cancel
                         },
                     onClick = {
@@ -5525,24 +5579,29 @@ private fun SearchRoute(
                                     Modifier
                                 },
                                 onClick = {
-                                    scope.launch {
-                                        // 只把被点中的这首加入队列（歌手/专辑行的"整表入队"语义不适用于单曲；
-                                        // 此前把整个搜索结果列表都入了队）
-                                        val prepared = runCatching { container.musicRepository.prepareQueue(listOf(track)) }
-                                            .getOrDefault(emptyList())
-                                        if (prepared.isNotEmpty()) {
-                                            runCatching {
-                                                container.playbackController.playQueue(
-                                                    tracks = prepared,
-                                                    startIndex = 0,
-                                                    source = null,
-                                                )
-                                            }.onSuccess {
-                                                recordSearch(searched)
-                                                onPlayer(track)
+                                    searchTrackMenu = TrackMenuRequest(
+                                        track = track,
+                                        play = {
+                                            scope.launch {
+                                                // 只把被点中的这首加入队列
+                                                val prepared = runCatching { container.musicRepository.prepareQueue(listOf(track)) }
+                                                    .getOrDefault(emptyList())
+                                                if (prepared.isNotEmpty()) {
+                                                    runCatching {
+                                                        container.playbackController.playQueue(
+                                                            tracks = prepared,
+                                                            startIndex = 0,
+                                                            source = null,
+                                                        )
+                                                    }.onSuccess {
+                                                        recordSearch(searched)
+                                                        onPlayer(track)
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
+                                        },
+                                        restore = { runCatching { resultsFocus.requestFocus() } },
+                                    )
                                 },
                             )
                         }
@@ -5559,6 +5618,28 @@ private fun SearchRoute(
                 }
             }
         }
+    }
+    searchTrackMenu?.let { menu ->
+        TrackContextMenuDialog(
+            container = container,
+            track = menu.track,
+            onDismiss = {
+                searchTrackMenu = null
+                menu.restore()
+            },
+            onPlayNow = { menu.play() },
+            onAddToPlaylist = {
+                searchPlaylistTrack = menu.track
+                searchTrackMenu = null
+            },
+        )
+    }
+    searchPlaylistTrack?.let { playlistTrack ->
+        AddToPlaylistDialog(
+            container = container,
+            trackGuid = playlistTrack.guid.value,
+            onDismiss = { searchPlaylistTrack = null },
+        )
     }
 }
 
@@ -5594,6 +5675,214 @@ private fun SearchHistoryChip(
         )
     }
 }
+
+/**
+ * 歌曲上下文菜单（首页随机歌曲/最近添加行、搜索结果行、详情页曲目行共用）。
+ * 「现在播放」由调用点注入（复用点位既有播放逻辑）；「加入歌单」通过回调由调用点打开歌单选择弹窗。
+ */
+@Composable
+private fun TrackContextMenuDialog(
+    container: AuthenticatedAppDependencies,
+    track: Track,
+    onDismiss: () -> Unit,
+    onPlayNow: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val favoriteState by container.musicRepository.favoriteState.collectAsStateWithLifecycle()
+    val favorited = favoriteState.statuses[track.guid.value] ?: track.isFavorite
+    var infoVisible by remember { mutableStateOf(false) }
+    val firstItemFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        yield()
+        runCatching { firstItemFocus.requestFocus() }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            val dialogWidth = minOf(maxWidth * 0.9f, 420.dp)
+            Column(
+                Modifier
+                    .width(dialogWidth)
+                    .background(FnColors.Surface, RoundedCornerShape(12.dp))
+                    .padding(vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    track.title,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+                TrackMenuItem(label = "信息", focusRequester = firstItemFocus) { infoVisible = true }
+                TrackMenuItem(label = "现在播放") {
+                    onDismiss()
+                    onPlayNow()
+                }
+                TrackMenuItem(label = "添加为下一首") {
+                    scope.launch {
+                        val prepared = runCatching { container.musicRepository.prepareQueue(listOf(track)) }
+                            .getOrDefault(emptyList())
+                        val transition = prepared.firstOrNull()?.let {
+                            container.playbackController.insertNext(listOf(it))
+                        }
+                        val message = when {
+                            prepared.isEmpty() -> "该曲目不支持播放"
+                            transition == null -> "当前队列不支持插入"
+                            else -> "已添加为下一首"
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        if (transition != null) onDismiss()
+                    }
+                }
+                TrackMenuItem(label = if (favorited) "已收藏" else "加入收藏", enabled = !favorited) {
+                    scope.launch {
+                        container.musicRepository.setFavorite(track.guid.value, true)
+                            .onSuccess {
+                                Toast.makeText(context, "已加入收藏", Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                            }
+                            .onFailure {
+                                Toast.makeText(context, "收藏失败，请重试", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                }
+                TrackMenuItem(label = "加入歌单") {
+                    onDismiss()
+                    onAddToPlaylist()
+                }
+            }
+        }
+        if (infoVisible) {
+            TrackInfoDialog(track = track, onDismiss = { infoVisible = false })
+        }
+    }
+}
+
+/** 歌曲信息：全部来自本地 Track 模型，无网络请求。 */
+@Composable
+private fun TrackInfoDialog(track: Track, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            val dialogWidth = minOf(maxWidth * 0.9f, 460.dp)
+            Column(
+                Modifier
+                    .width(dialogWidth)
+                    .background(FnColors.Surface, RoundedCornerShape(12.dp))
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("歌曲信息", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Column(
+                    Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOfNotNull(
+                        InfoLine("标题", track.title),
+                        InfoLine("歌手", track.artistName),
+                        InfoLine("专辑", track.albumName),
+                        InfoLine("时长", formatDuration(track.durationMs ?: 0L)),
+                        InfoLine("格式", track.audioFormat),
+                        InfoLine("状态", track.unplayableReason),
+                        if (track.isCue) InfoLine("状态", "需兼容播放") else null,
+                        if (track.isFavorite) InfoLine("收藏", "已收藏") else null,
+                    ).forEach { row -> row() }
+                }
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .focusRequester(remember { FocusRequester() })
+                        .focusProperties {
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                        },
+                    colors = ButtonDefaults.colors(
+                        containerColor = FnColors.Control,
+                        contentColor = FnColors.Text,
+                        focusedContainerColor = FnColors.Coral,
+                        focusedContentColor = FnColors.Background,
+                    ),
+                ) {
+                    Text("关闭", fontSize = 14.sp)
+                }
+            }
+        }
+        LaunchedEffect(Unit) {
+            yield()
+        }
+    }
+}
+
+private fun InfoLine(label: String, value: String?): (@Composable () -> Unit)? {
+    if (value.isNullOrBlank()) return null
+    return {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = FnColors.Muted, fontSize = 12.sp, modifier = Modifier.width(64.dp))
+        Text(
+            value,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+    }
+}
+
+/** 菜单项行：全宽、聚焦底色，无独立描边（弹窗自身已是焦点窗口）。 */
+@Composable
+private fun TrackMenuItem(
+    label: String,
+    focusRequester: FocusRequester? = null,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .background(if (focused) FnColors.CardFocused else FnColors.Surface)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            label,
+            color = if (enabled) FnColors.Text else FnColors.Muted,
+            fontSize = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 首页/搜索行触发的歌曲菜单请求：play = 点位既有的「现在播放」逻辑，restore = 关闭后的焦点还原。 */
+private class TrackMenuRequest(
+    val track: Track,
+    val play: () -> Unit,
+    val restore: () -> Unit,
+)
 
 @Composable
 private fun SearchHistoryClearButton(modifier: Modifier = Modifier, onClick: () -> Unit) {

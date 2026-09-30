@@ -172,8 +172,15 @@ internal class JellyfinMusicBackend(
         return DecodedPage(merged.Items.map { it.toTrack() }, merged.TotalRecordCount, SEARCH_SORT)
     }
 
-    override suspend fun searchArtists(query: String, page: Int, size: Int): DecodedPage<Artist> =
-        search(query, page, size, MUSIC_ARTIST) { it.toArtist() }
+    override suspend fun searchArtists(query: String, page: Int, size: Int): DecodedPage<Artist> {
+        // /Items?MusicArtist 集合基本无产出（实测 74 个文件夹派生条目，搜真歌手名为 0）；
+        // 歌手主力查询是目录歌手页同源的 /Artists/AlbumArtists?searchTerm=（实测命中真条目、
+        // 带封面，其 guid 过滤音轨有效）。两源合并去重。
+        val direct = runSearchItems(query, page, size, MUSIC_ARTIST)
+        val facet = call { api.albumArtists(userId, startIndex = offsetOf(page, size), limit = size, searchTerm = query) }
+        return mergePages(listOf(direct, facet), page, size)
+            .let { DecodedPage(it.Items.map(JellyfinItemDto::toArtist), it.TotalRecordCount, SEARCH_SORT) }
+    }
 
     override suspend fun searchAlbums(query: String, page: Int, size: Int): DecodedPage<Album> {
         val merged = searchAlbumsMergedItems(query, page, size)
