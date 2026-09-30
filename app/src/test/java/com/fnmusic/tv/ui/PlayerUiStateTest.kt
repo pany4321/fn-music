@@ -354,37 +354,30 @@ class PlayerUiStateTest {
         assertTrue(textContrast(surface) >= 4.8f)
     }
 
-    @Test fun `small hot pink edge accent stays close to the global cool cover`() {
-        val global = listOf(
-            ArtworkPaletteSwatch(0xFFE3DDE8.toInt(), population = 520),
+    @Test fun `panel hue follows the dominant colorful swatch`() {
+        val swatches = listOf(
             ArtworkPaletteSwatch(0xFF6DB9D8.toInt(), population = 220),
             ArtworkPaletteSwatch(0xFF7C5BA7.toInt(), population = 170),
             ArtworkPaletteSwatch(0xFFE53483.toInt(), population = 90),
+            ArtworkPaletteSwatch(0xFFE3DDE8.toInt(), population = 520),
         )
-        val surface = artworkPosterSurfaceColor(
-            globalSwatches = global,
-            edgeSwatches = listOf(
-                ArtworkPaletteSwatch(0xFFD9D6E0.toInt(), population = 320),
-                ArtworkPaletteSwatch(0xFFE53483.toInt(), population = 80),
-            ),
-        )
-        val globalSurface = artworkPosterSurfaceColor(global, global)
+        val surface = artworkPosterSurfaceColor(swatches)
 
-        assertTrue(perceptualColorDistance(surface, globalSurface) < 0.05f)
+        // 打分最高的主导色块是蓝色（population 与饱和度兼得）：
+        // 色相经调色映射保持通道序 b>g>r；若被粉色点缀带跑则会变成 r 主导
+        assertTrue(surface.blue > surface.green)
+        assertTrue(surface.green > surface.red)
         assertTrue(perceptualChroma(surface) <= 0.091f)
         assertTrue(textContrast(surface) >= 4.8f)
     }
 
-    @Test fun `small red edge accent cannot turn a dark neutral cover vivid red`() {
+    @Test fun `sub-share accent swatch cannot hijack the panel hue`() {
+        // 深灰封面 + 小面积红点缀（占比 10% < 15%）：面板退回全图平均，保持中性偏冷，不被带红
         val surface = artworkPosterSurfaceColor(
-            globalSwatches = listOf(
+            listOf(
                 ArtworkPaletteSwatch(0xFF3B3B3D.toInt(), population = 620),
                 ArtworkPaletteSwatch(0xFF858184.toInt(), population = 280),
                 ArtworkPaletteSwatch(0xFFD31943.toInt(), population = 100),
-            ),
-            edgeSwatches = listOf(
-                ArtworkPaletteSwatch(0xFF343436.toInt(), population = 320),
-                ArtworkPaletteSwatch(0xFFD31943.toInt(), population = 80),
             ),
         )
 
@@ -398,46 +391,18 @@ class PlayerUiStateTest {
             ArtworkPaletteSwatch(0xFFCACACA.toInt(), population = 560),
             ArtworkPaletteSwatch(0xFF545454.toInt(), population = 440),
         )
-        val surface = artworkPosterSurfaceColor(neutral, neutral)
+        val surface = artworkPosterSurfaceColor(neutral)
 
         assertTrue(maxOf(surface.red, surface.green, surface.blue) - minOf(surface.red, surface.green, surface.blue) < 0.01f)
         assertTrue(perceptualChroma(surface) < 0.005f)
         assertTrue(textContrast(surface) >= 4.8f)
     }
 
-    @Test fun `divergent edge color receives less influence than a related edge color`() {
-        val global = listOf(
-            ArtworkPaletteSwatch(0xFF66749A.toInt(), population = 700),
-            ArtworkPaletteSwatch(0xFF272B36.toInt(), population = 300),
-        )
-        val globalSurface = artworkPosterSurfaceColor(global, global)
-        val relatedEdgeSurface = artworkPosterSurfaceColor(
-            global,
-            listOf(
-                ArtworkPaletteSwatch(0xFF7787B2.toInt(), population = 800),
-                ArtworkPaletteSwatch(0xFF303744.toInt(), population = 200),
-            ),
-        )
-        val divergentEdgeSurface = artworkPosterSurfaceColor(
-            global,
-            listOf(ArtworkPaletteSwatch(0xFFE91E63.toInt(), population = 1_000)),
-        )
-
-        assertTrue(
-            perceptualColorDistance(divergentEdgeSurface, globalSurface) <=
-                perceptualColorDistance(relatedEdgeSurface, globalSurface),
-        )
-    }
-
     @Test fun `globally warm cover remains warm but restrained`() {
         val surface = artworkPosterSurfaceColor(
-            globalSwatches = listOf(
+            listOf(
                 ArtworkPaletteSwatch(0xFFCF202E.toInt(), population = 640),
                 ArtworkPaletteSwatch(0xFF25181A.toInt(), population = 360),
-            ),
-            edgeSwatches = listOf(
-                ArtworkPaletteSwatch(0xFFB62D38.toInt(), population = 720),
-                ArtworkPaletteSwatch(0xFF2E2021.toInt(), population = 280),
             ),
         )
 

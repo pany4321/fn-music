@@ -2096,16 +2096,10 @@ private fun extractArtworkColors(bitmap: Bitmap): ExtractedArtworkColors = runCa
     val globalPalette = Palette.from(bitmap)
         .maximumColorCount(24)
         .generate()
-    val edgeLeft = (bitmap.width * 0.62f).toInt().coerceIn(0, bitmap.width - 1)
-    val edgePalette = Palette.from(bitmap)
-        .maximumColorCount(16)
-        .setRegion(edgeLeft, 0, bitmap.width, bitmap.height)
-        .generate()
     val globalSwatches = globalPalette.swatches.map { ArtworkPaletteSwatch(it.rgb, it.population) }
-    val edgeSwatches = edgePalette.swatches.map { ArtworkPaletteSwatch(it.rgb, it.population) }
     ExtractedArtworkColors(
         ambience = artworkAmbienceColor(globalSwatches),
-        posterSurface = artworkPosterSurfaceColor(globalSwatches, edgeSwatches),
+        posterSurface = artworkPosterSurfaceColor(globalSwatches),
     )
 }.getOrDefault(fallbackArtworkColors())
 
@@ -2125,20 +2119,7 @@ internal fun artworkAmbienceColor(swatches: List<ArtworkPaletteSwatch>): Color {
         val red = (swatch.rgb ushr 16 and 0xFF) / 255f
         val green = (swatch.rgb ushr 8 and 0xFF) / 255f
         val blue = (swatch.rgb and 0xFF) / 255f
-        val peak = maxOf(red, green, blue)
-        val floor = minOf(red, green, blue)
-        val saturation = if (peak == 0f) 0f else (peak - floor) / peak
-        val lightness = (peak + floor) / 2f
-        val usefulLightness = (1f - kotlin.math.abs(lightness - 0.52f) / 0.52f).coerceIn(0f, 1f)
-        val extremeWeight = when {
-            peak < 0.08f -> 0.05f
-            floor > 0.94f -> 0.12f
-            else -> 1f
-        }
-        val weight = swatch.population *
-            (0.12f + saturation * 0.88f) *
-            (0.35f + usefulLightness * 0.65f) *
-            extremeWeight
+        val weight = artworkSwatchWeight(swatch)
         weightedRed += red * weight
         weightedGreen += green * weight
         weightedBlue += blue * weight
@@ -2152,10 +2133,34 @@ internal fun artworkAmbienceColor(swatches: List<ArtworkPaletteSwatch>): Color {
     )
 }
 
+/**
+ * 色块打分：population 打底，饱和度与有效明度（贴近中灰的明度加分）加分，近黑/近白抑制。
+ * 氛围色用它的加权平均，海报面板用它挑“主导色块”——同一把尺子，保证两处观感一致。
+ */
+internal fun artworkSwatchWeight(swatch: ArtworkPaletteSwatch): Float {
+    val red = (swatch.rgb ushr 16 and 0xFF) / 255f
+    val green = (swatch.rgb ushr 8 and 0xFF) / 255f
+    val blue = (swatch.rgb and 0xFF) / 255f
+    val peak = maxOf(red, green, blue)
+    val floor = minOf(red, green, blue)
+    val saturation = if (peak == 0f) 0f else (peak - floor) / peak
+    val lightness = (peak + floor) / 2f
+    val usefulLightness = (1f - kotlin.math.abs(lightness - 0.52f) / 0.52f).coerceIn(0f, 1f)
+    val extremeWeight = when {
+        peak < 0.08f -> 0.05f
+        floor > 0.94f -> 0.12f
+        else -> 1f
+    }
+    return swatch.population *
+        (0.12f + saturation * 0.88f) *
+        (0.35f + usefulLightness * 0.65f) *
+        extremeWeight
+}
+
 internal fun fallbackAmbienceColor(): Color = lerp(FnColors.Background, FnColors.Teal, 0.18f)
 
-private const val POSTER_EDGE_MAX_INFLUENCE = 0.35f
-private const val POSTER_EDGE_DISTANCE_LIMIT = 0.18f
+private const val POSTER_DOMINANT_MIN_SHARE = 0.15f
+private const val POSTER_DOMINANT_MIN_CHROMA = 0.02f
 private const val POSTER_MAX_CHROMA = 0.09f
 private const val POSTER_MIN_LIGHTNESS = 0.32f
 private const val POSTER_MAX_LIGHTNESS = 0.50f
@@ -2167,15 +2172,25 @@ private data class OklabColor(
     val b: Float,
 )
 
-internal fun artworkPosterSurfaceColor(
-    globalSwatches: List<ArtworkPaletteSwatch>,
-    edgeSwatches: List<ArtworkPaletteSwatch>,
-): Color {
-    val global = weightedOklabColor(globalSwatches)
+/**
+ * 海报面板色：取打分最高（population × 饱和度 × 有效明度）的“主导色块”的色相与明度做种子，
+ * 再经调色映射钳制——面板贴合封面最突出的颜色，而不是全图平均。
+ * 两道护栏防跑偏：主导色块 population 占比不足 15%（小面积点缀）或本身接近无彩（灰白黑）
+ * 时，退回全图平均，保证小点缀劫持不了面板、中性封面保持中性。
+ */
+internal fun artworkPosterSurfaceColor(swatches: List<ArtworkPaletteSwatch>): Color {
+    val averaged = weightedOklabColor(swatches)
         ?: return posterSurfaceColor(fallbackAmbienceColor())
-    val edge = weightedOklabColor(edgeSwatches) ?: global
-    val edgeInfluence = posterEdgeInfluence(global, edge)
-    return toneMapPosterColor(lerpOklab(global, edge, edgeInfluence))
+    val totalPopulation = swatches.sumOf { it.population }.coerceAtLeast(1)
+    val dominant = swatches
+        .filter { it.population > 0 }
+        .maxByOrNull(::artworkSwatchWeight)
+        ?.takeIf { it.population.toFloat() / totalPopulation >= POSTER_DOMINANT_MIN_SHARE }
+        ?.let { rgbIntToOklab(it.rgb) }
+        ?.takeIf { oklab ->
+            sqrt(oklab.a * oklab.a + oklab.b * oklab.b) >= POSTER_DOMINANT_MIN_CHROMA
+        }
+    return toneMapPosterColor(dominant ?: averaged)
 }
 
 private fun weightedOklabColor(swatches: List<ArtworkPaletteSwatch>): OklabColor? {
@@ -2201,28 +2216,6 @@ private fun weightedOklabColor(swatches: List<ArtworkPaletteSwatch>): OklabColor
         lightness = weightedLightness / totalWeight,
         a = weightedA / totalWeight,
         b = weightedB / totalWeight,
-    )
-}
-
-private fun posterEdgeInfluence(global: OklabColor, edge: OklabColor): Float {
-    val lightnessDistance = (global.lightness - edge.lightness) * 0.35f
-    val aDistance = global.a - edge.a
-    val bDistance = global.b - edge.b
-    val distance = sqrt(
-        lightnessDistance * lightnessDistance +
-            aDistance * aDistance +
-            bDistance * bDistance,
-    )
-    val agreement = (1f - distance / POSTER_EDGE_DISTANCE_LIMIT).coerceIn(0f, 1f)
-    return POSTER_EDGE_MAX_INFLUENCE * agreement * agreement
-}
-
-private fun lerpOklab(start: OklabColor, stop: OklabColor, fraction: Float): OklabColor {
-    val safeFraction = fraction.coerceIn(0f, 1f)
-    return OklabColor(
-        lightness = start.lightness + (stop.lightness - start.lightness) * safeFraction,
-        a = start.a + (stop.a - start.a) * safeFraction,
-        b = start.b + (stop.b - start.b) * safeFraction,
     )
 }
 

@@ -337,12 +337,15 @@ interface AuthenticatedAppActions {
   score that combines population, saturation, and useful lightness. A large neutral field must not
   automatically defeat a smaller representative color. Map the result to a bounded dark surface;
   missing artwork uses one fixed brand-neutral fallback, never a title/artist hash color.
-- Poster mode generates one panel color from separate complete-artwork and right-edge palettes. The
-  complete artwork is the anchor; the edge may contribute at most 35 percent and contributes less
-  as its OKLab distance from the global anchor increases. Use population-linear perceptual
-  averaging with no saturation reward or minimum saturation, cap OKLab chroma at 0.09, constrain
-  lightness and preserve at least 4.8:1 primary-text contrast. Fade the artwork into that single
-  panel hue; the far edge may only mix in a small amount of the app background.
+- Poster mode generates one panel color from the complete-artwork palette: the dominant swatch
+  (highest score of population × saturation × useful-lightness — the same scoring shape as the
+  ambience seed) seeds the panel hue and lightness, and the tone map caps OKLab chroma at 0.09,
+  constrains lightness into 0.32–0.50 and preserves at least 4.8:1 primary-text contrast. Two
+  guards keep the panel honest: a swatch holding less than 15 percent of the total population, or
+  a near-neutral winner (OKLab chroma below 0.02), falls back to the population-linear perceptual
+  average — small accents cannot hijack the hue and neutral artwork stays neutral. Fade the
+  artwork into that single panel hue; the far edge may only mix in a small amount of the app
+  background.
 - Poster and cover modes render one Accompanist `KaraokeLyricsView` backed by `SyncedLyrics`.
   It keeps multiple nearby lines in a compact vertically scrolling list, progressively highlights
   eligible karaoke syllables, shows translation directly below its source line, and hides phonetic
@@ -792,9 +795,10 @@ interface AuthenticatedAppActions {
 - Artwork ambience tests: a colorful minority swatch beats a large neutral backdrop, black margins
   do not defeat a valid color, every mapped surface stays dark, and missing artwork returns the one
   fixed brand neutral.
-- Poster panel color tests: a divergent right-edge accent stays closer to the complete-artwork
-  result than a related edge correction, neutral artwork stays neutral, a warm cover remains warm,
-  OKLab chroma is at most 0.09, and primary-text contrast is at least 4.8:1.
+- Poster panel color tests: the panel hue follows the dominant colorful swatch, a sub-share accent
+  or a near-neutral winner falls back to the perceptual average (small accents cannot hijack the
+  hue; neutral artwork stays neutral), a warm cover remains warm, OKLab chroma is at most 0.09, and
+  primary-text contrast is at least 4.8:1.
 - Player visual transition tests: artwork `Loading` may retain prior same-namespace `Ready`/`Absent`;
   lyric `Loading` retains only the same namespace plus media ID across revisions. A media-ID change
   rejects prior lyrics, a namespace change retains nothing, and current terminal states replace immediately.
