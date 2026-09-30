@@ -2569,7 +2569,10 @@ internal fun AddToPlaylistDialog(
                     else -> Column(
                         Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(rememberScrollState())
+                            // 首行聚焦放大 1.04 + 描边会被滚动容器的裁剪切掉顶部
+                            // （用户截图：第一个歌单的顶部描边被遮挡）——给内容留出上边距
+                            .padding(top = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         // TV：列表就绪后把初始焦点交给第一个歌单，避免遥控器“无响应”。

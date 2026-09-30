@@ -676,10 +676,11 @@ internal fun NowPlayingPill(
     val coverId = playback.coverId
     val fontScale = LocalDensity.current.fontScale
     // 高度与右侧「首页/我的」胶囊（48dp）对齐；宽度放大 30%（186→242）给歌名留更多空间。
-    val pillHeight = (48f + (fontScale - 1f).coerceAtLeast(0f) * 28f).dp
+    val pillHeight = (54f + (fontScale - 1f).coerceAtLeast(0f) * 28f).dp
     Button(
         onClick = onClick,
         modifier = modifier
+            // MainActivity 锁定横屏（manifest），242+170 的顶栏组合无竖屏溢出风险
             .size(width = 242.dp, height = pillHeight)
             .semantics { contentDescription = "当前播放：${playback.title}" },
         shape = ButtonDefaults.shape(shape, shape, shape, shape, shape),
@@ -5371,7 +5372,7 @@ private fun SearchRoute(
                     fieldFocused = state.isFocused
                     // 焦点回到搜索框（进页/返回钮/历史胶囊上键/清空后共用此钩子）：
                     // 光标拨到文本末尾，遥控器才能直接删字重搜。
-                    if (state.isFocused && query.text.isNotEmpty() && query.selection.collapsed) {
+                    if (state.isFocused && query.text.isNotEmpty()) {
                         query = query.copy(selection = TextRange(query.text.length))
                     }
                 }
@@ -5902,15 +5903,17 @@ private class TrackMenuRequest(
 @Composable
 private fun SearchHistoryClearButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(22.dp)
     Box(
         modifier
             .height(44.dp)
             .onFocusChanged { focused = it.isFocused }
-            .background(if (focused) FnColors.CardFocused else FnColors.Card, RoundedCornerShape(22.dp))
+            // 与历史胶囊明确区分：透明底 + Coral 描边/文字（1.9.3 声称了但没实现，补上）
+            .background(if (focused) FnColors.Coral else Color.Transparent, shape)
             .border(
-                if (focused) 1.5.dp else 0.5.dp,
-                if (focused) FnColors.Coral else FnColors.Hairline,
-                RoundedCornerShape(22.dp),
+                if (focused) 1.5.dp else 1.dp,
+                FnColors.Coral,
+                shape,
             )
             .clickable(onClick = onClick)
             .semantics { contentDescription = "清空搜索历史" },
@@ -5918,7 +5921,7 @@ private fun SearchHistoryClearButton(modifier: Modifier = Modifier, onClick: () 
     ) {
         Text(
             "清空",
-            color = FnColors.Muted,
+            color = if (focused) FnColors.Background else FnColors.Coral,
             fontSize = 14.sp,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 16.dp),
