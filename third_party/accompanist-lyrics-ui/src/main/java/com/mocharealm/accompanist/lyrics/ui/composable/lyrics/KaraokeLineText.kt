@@ -53,7 +53,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeAlignment
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine
 import com.mocharealm.accompanist.lyrics.ui.utils.LayerPaint
@@ -676,14 +675,6 @@ fun KaraokeLineText(
                     )
                 }
             }
-            // TEMP-DEBUG: 定向诊断——首音节坐标/对齐/宽度
-            Text(
-                text = "P0=${finalLineLayouts.firstOrNull()?.firstOrNull()?.position?.x} " +
-                    "RA=$isRightAligned W=${singleRowWidth.roundToInt()} " +
-                    "AW=${availableWidthPx.roundToInt()} TX=${lineScrollX.roundToInt()}",
-                color = Color.Red,
-                fontSize = 9.sp,
-            )
         }
 
         if (showTranslation) {

@@ -3,7 +3,6 @@ package com.mocharealm.accompanist.lyrics.ui.composable.lyrics
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,8 +31,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import kotlin.math.roundToInt
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
 
 @Composable
@@ -75,7 +72,10 @@ fun SyncedLineText(
             }
             val contentWidthPx = measuredText.size.width.toFloat()
             var containerWidthPx by remember { mutableIntStateOf(0) }
-            val overflowPx = (contentWidthPx - containerWidthPx).coerceAtLeast(0f)
+            // 首帧防护：容器尚未完成布局时 containerWidthPx==0，若直接按
+            // content-0 计算溢出，seek 进歌曲中段的行会以"整行滚出"的姿态闪现一帧。
+            val overflowPx = if (containerWidthPx <= 0) 0f
+            else (contentWidthPx - containerWidthPx).coerceAtLeast(0f)
             val progress = remember(line, currentPositionMs) {
                 derivedStateOf {
                     val t = currentPositionMs.invoke()
