@@ -226,7 +226,13 @@ private fun rememberCurrentArtwork(
         }
         val currentArtwork = withContext(Dispatchers.Default) {
             val bitmap = decodeArtwork(currentRequest.bytes, currentRequest.targetLongEdge)
-            val colors = bitmap?.let(::extractArtworkColors) ?: fallbackArtworkColors()
+            // CD（Cover）模式的唱片只在中央圆心贴图（labelSize ≈ 44%）,黑胶盘面占其余 56%——
+            // 全图取色会被黑色盘面压制,背景永远灰黑。取色只扫中央圆区(半径 27%,略大于
+            // 可见圆心以覆盖边缘);Poster 模式无圆心,保持全图取色。
+            val colorSource = bitmap?.let { src ->
+                if (playerStyle == PlayerStyle.Cover) centralCrop(src, fraction = 0.54f) else src
+            }
+            val colors = colorSource?.let(::extractArtworkColors) ?: fallbackArtworkColors()
             DecodedPlayerArtwork(
                 key = currentRequest.key,
                 sourceBytes = currentRequest.bytes,
@@ -2111,6 +2117,16 @@ internal data class ArtworkPaletteSwatch(
     val rgb: Int,
     val population: Int,
 )
+
+/** 裁出以中心为圆心的正方形区域（边长 = 边长 × fraction），覆盖 CD 模式可见的圆心贴图。 */
+private fun centralCrop(src: Bitmap, fraction: Float): Bitmap {
+    val w = (src.width * fraction).toInt().coerceIn(1, src.width)
+    val h = (src.height * fraction).toInt().coerceIn(1, src.height)
+    val x = (src.width - w) / 2
+    val y = (src.height - h) / 2
+    return if (w == src.width && h == src.height) src
+    else runCatching { Bitmap.createBitmap(src, x, y, w, h) }.getOrDefault(src)
+}
 
 private fun extractArtworkColors(bitmap: Bitmap): ExtractedArtworkColors = runCatching {
     val globalPalette = Palette.from(bitmap)
