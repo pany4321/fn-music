@@ -1432,13 +1432,13 @@ private fun HomeFeatureCard(
             )
             FeatureGlyph(
                 kind = kind,
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 18.dp).size(48.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp).size(40.dp),
             )
             Text(
                 title,
-                modifier = Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 18.dp),
-                fontSize = 20.sp,
-                lineHeight = 22.sp,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 16.dp),
+                fontSize = 22.sp,
+                lineHeight = 25.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -1458,19 +1458,27 @@ private fun FeatureCoverDeck(
         placements.forEach { placement ->
             val item = artwork.getOrNull(placement.itemIndex)
             val artworkShape = RoundedCornerShape(7.dp)
+            // 固定单插画时（三张功能卡）：插画铺满整卡、上下裁切（Crop 语义）——
+            // 画面利用率最高，窄屏卡片不再留大块渐变底；
+            // 动态拼排（全部歌单卡）保持原 112dp 贴片布局。
+            val featureMode = item == null
             Box(
                 Modifier
-                    .align(Alignment.CenterEnd)
-                    .size(112.dp)
+                    .align(Alignment.Center)
+                    .fillMaxSize()
                     .graphicsLayer {
-                        translationX = with(density) { placement.translationXDp.dp.toPx() }
-                        translationY = with(density) { placement.translationYDp.dp.toPx() }
-                        rotationZ = placement.rotation
-                        shadowElevation = with(density) { 7.dp.toPx() }
+                        translationX = with(density) {
+                            if (featureMode) 0f else placement.translationXDp.dp.toPx()
+                        }
+                        translationY = with(density) {
+                            if (featureMode) 0f else placement.translationYDp.dp.toPx()
+                        }
+                        rotationZ = if (featureMode) 0f else placement.rotation
+                        shadowElevation = with(density) { if (featureMode) 0.dp.toPx() else 7.dp.toPx() }
                         shape = artworkShape
                         clip = true
                     }
-                    .border(0.5.dp, FnColors.FrameBorder, artworkShape),
+                    .then(if (featureMode) Modifier else Modifier.border(0.5.dp, FnColors.FrameBorder, artworkShape)),
             ) {
                 when {
                     // 兜底插画与卡片主题一致：收藏是心形、最近播放是时钟、随机漫游是黑胶。

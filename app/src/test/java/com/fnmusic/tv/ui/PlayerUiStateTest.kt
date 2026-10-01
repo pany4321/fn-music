@@ -223,7 +223,7 @@ class PlayerUiStateTest {
 
         assertTrue(color.blue > color.green)
         assertTrue(color.red > color.green)
-        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.35f)
+        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.42f)
     }
 
     @Test fun `cool violet subject is not replaced by a pale yellow green backdrop`() {
@@ -234,9 +234,10 @@ class PlayerUiStateTest {
             ),
         )
 
+        // 紫色块占 24%（≥15% 主导线）且是唯一彩色：2.0.0 起直接选它做背景色相
         assertTrue(color.blue > color.red)
         assertTrue(color.blue > color.green)
-        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.35f)
+        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.42f)
     }
 
     @Test fun `small hot pink accent cannot overpower a mixed cool cover`() {
@@ -249,9 +250,11 @@ class PlayerUiStateTest {
             ),
         )
 
+        // 2.0.0 起主导块需色度显著高于全图平均（1.5×）才被采用：淡蓝紫主导不足，
+        // 退回加权平均——色彩表现仍受控（小幅放宽仅来自饱和系数 0.52→0.62）
         assertTrue(color.blue > color.red)
         assertTrue(color.red > color.green)
-        assertTrue(maxOf(color.red, color.green, color.blue) - minOf(color.red, color.green, color.blue) <= 0.12f)
+        assertTrue(maxOf(color.red, color.green, color.blue) - minOf(color.red, color.green, color.blue) <= 0.14f)
     }
 
     @Test fun `missing artwork ambience uses one stable brand neutral`() {

@@ -665,8 +665,10 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
     }
     val animatedColor = androidx.compose.ui.graphics.lerp(fromColor, toColor, progress.value)
     Canvas(modifier) {
-        val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.58f)
-        val rightColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.65f)
+        // 渲染端稀释减轻：保留层次感的同时让取到的颜色更多到达屏幕
+        // （此前 0.58/0.65 + 25% 黑遮罩，到达屏幕的只剩源色三成，是"背景灰黑"的第二道闸）。
+        val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.45f)
+        val rightColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.55f)
         drawRect(
             brush = Brush.horizontalGradient(
                 0f to animatedColor,
@@ -674,7 +676,7 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
                 1f to rightColor,
             ),
         )
-        drawRect(Color.Black.copy(alpha = 0.25f))
+        drawRect(Color.Black.copy(alpha = 0.18f))
         drawRect(Color.White.copy(alpha = 0.025f))
         drawRect(
             brush = Brush.verticalGradient(
@@ -2129,6 +2131,36 @@ private fun fallbackArtworkColors(): ExtractedArtworkColors {
 internal fun artworkAmbienceColor(swatches: List<ArtworkPaletteSwatch>): Color {
     val candidates = swatches.filter { it.population > 0 }
     if (candidates.isEmpty()) return fallbackAmbienceColor()
+    // 主导色块策略（与海报面板同族）：彩色封面 → 背景呈同色系深色调，
+    // 不再因全图加权平均的互补中和而灰黑化。
+    // 双护栏退回加权平均：① 主导块 population 占比不足 15%（小面积点缀）；
+    // ② 主导块色度不够突出——低于全图加权平均色度的 1.5 倍或绝对值 < 0.03
+    //   （淡色块/多个相近色块的场景，"主导"并不比平均更有代表性）。
+    val totalPopulation = swatches.sumOf { it.population }.coerceAtLeast(1)
+    val averageChroma = run {
+        var wa = 0f; var wb = 0f; var tw = 0f
+        candidates.forEach { swatch ->
+            val oklab = colorToOklab(Color(swatch.rgb))
+            val w = artworkSwatchWeight(swatch)
+            wa += oklab.a * w; wb += oklab.b * w; tw += w
+        }
+        if (tw <= 0f) 0f else sqrt(wa * wa + wb * wb) / tw
+    }
+    val dominant = candidates
+        .maxByOrNull(::artworkSwatchWeight)
+        ?.takeIf { it.population.toFloat() / totalPopulation >= POSTER_DOMINANT_MIN_SHARE }
+        ?.takeIf { swatch ->
+            val oklab = colorToOklab(Color(swatch.rgb))
+            val chroma = sqrt(oklab.a * oklab.a + oklab.b * oklab.b)
+            chroma >= POSTER_DOMINANT_MIN_CHROMA && chroma >= averageChroma * 1.5f
+        }
+    if (dominant != null) {
+        return normalizedAmbienceColor(
+            red = (dominant.rgb ushr 16 and 0xFF) / 255f,
+            green = (dominant.rgb ushr 8 and 0xFF) / 255f,
+            blue = (dominant.rgb and 0xFF) / 255f,
+        )
+    }
     var weightedRed = 0f
     var weightedGreen = 0f
     var weightedBlue = 0f
@@ -2291,8 +2323,10 @@ private fun normalizedAmbienceColor(red: Float, green: Float, blue: Float): Colo
             blue = (value + (blue - average) * 0.08f).coerceIn(0f, 1f),
         )
     }
-    val saturation = (sourceSaturation * 0.52f).coerceIn(0.1f, 0.32f)
-    return hsvColor(hue, saturation, value = 0.34f)
+    // 背景氛围色放宽：饱和度上限 0.32→0.45、系数 0.52→0.62，明度 0.34→0.38——
+    // 彩色封面能呈现可辨识的同色系深色调，而非灰黑（渲染端仍有稀释，此处是源头）。
+    val saturation = (sourceSaturation * 0.62f).coerceIn(0.1f, 0.45f)
+    return hsvColor(hue, saturation, value = 0.38f)
 }
 
 private fun rgbHue(red: Float, green: Float, blue: Float): Float {
