@@ -546,6 +546,12 @@ class PlaybackController(
         player.seekTo((player.currentPosition + offsetMs).coerceIn(0L, upperBound))
     }
 
+    /** 绝对定位（毫秒）：歌词行点击跳转用，钳制在 [0, duration]。 */
+    fun seekTo(positionMs: Long) = controller?.let { player ->
+        val upperBound = player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        player.seekTo(positionMs.coerceIn(0L, upperBound))
+    }
+
     fun selectQueueItem(queueIndex: Int): PlaybackTransition? {
         val player = controller ?: return null
         if (queueKind != QueueKind.Normal || queueIndex !in 0 until player.mediaItemCount) return null

@@ -446,6 +446,8 @@ internal fun ImmersivePlayer(
                     container.authenticatedActions.retryPlaybackConnection()
                 }
             },
+            onSeekTo = container.playbackController::seekTo,
+            onLyricInteraction = ::revealControls,
             statusRetryFocus = statusRetryFocus,
             statusRetryReturnFocus = progressFocus,
             onStatusInteraction = ::revealControls,
@@ -673,8 +675,8 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         // 渲染端稀释减轻：保留层次感的同时让取到的颜色更多到达屏幕
         // （此前 0.58/0.65 + 25% 黑遮罩，到达屏幕的只剩源色三成，是"背景灰黑"的第二道闸）。
-        val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.30f)
-        val rightColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.42f)
+        val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.18f)
+        val rightColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.30f)
         drawRect(
             brush = Brush.horizontalGradient(
                 0f to animatedColor,
@@ -682,7 +684,7 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
                 1f to rightColor,
             ),
         )
-        drawRect(Color.Black.copy(alpha = 0.12f))
+        drawRect(Color.Black.copy(alpha = 0.08f))
         drawRect(Color.White.copy(alpha = 0.025f))
         drawRect(
             brush = Brush.verticalGradient(
@@ -748,6 +750,8 @@ private fun PlayerMainContent(
     statusRetryFocus: FocusRequester,
     statusRetryReturnFocus: FocusRequester,
     onStatusInteraction: () -> Unit,
+    onSeekTo: (Long) -> Unit = {},
+    onLyricInteraction: () -> Unit = {},
 ) {
     val placeholder = title.take(1).ifBlank { "音" }
     if (poster) {
@@ -834,6 +838,8 @@ private fun PlayerMainContent(
                 statusRetryFocus = statusRetryFocus,
                 statusRetryReturnFocus = statusRetryReturnFocus,
                 onStatusInteraction = onStatusInteraction,
+                onSeekTo = onSeekTo,
+                onLyricInteraction = onLyricInteraction,
                 poster = true,
                 lyricsActiveColor = lyricsActiveColor,
                 modifier = Modifier.fillMaxWidth(0.46f).fillMaxHeight().align(Alignment.CenterEnd)
@@ -880,6 +886,8 @@ private fun PlayerMainContent(
                 statusRetryFocus = statusRetryFocus,
                 statusRetryReturnFocus = statusRetryReturnFocus,
                 onStatusInteraction = onStatusInteraction,
+                onSeekTo = onSeekTo,
+                onLyricInteraction = onLyricInteraction,
                 poster = false,
                 lyricsActiveColor = lyricsActiveColor,
                 modifier = Modifier.weight(0.51f).fillMaxHeight()
@@ -921,6 +929,8 @@ private fun PlayerDetails(
     statusRetryFocus: FocusRequester,
     statusRetryReturnFocus: FocusRequester,
     onStatusInteraction: () -> Unit,
+    onSeekTo: (Long) -> Unit = {},
+    onLyricInteraction: () -> Unit = {},
     poster: Boolean,
     lyricsActiveColor: Color,
     controlsVisible: Boolean,
@@ -966,6 +976,8 @@ private fun PlayerDetails(
                     poster = poster,
                     activeTextColor = lyricsActiveColor,
                     controlsVisible = controlsVisible,
+                    onSeekTo = onSeekTo,
+                    onLyricInteraction = onLyricInteraction,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -1171,7 +1183,10 @@ internal fun TvLyrics(
     modifier: Modifier = Modifier,
     controlsVisible: Boolean = false,
     activeTextColor: Color = Color.Unspecified,
+    onSeekTo: (Long) -> Unit = {},
+    onLyricInteraction: () -> Unit = {},
 ) {
+    val resumeAutoScrollCallback = remember { mutableStateOf<(() -> Unit)?>(null) }
     Box(
         modifier
             .fillMaxWidth()
@@ -1199,7 +1214,16 @@ internal fun TvLyrics(
                         listState = listState,
                         lyrics = lyrics,
                         currentPosition = currentPosition,
-                        onLineClicked = {},
+                        // 点击歌词行 → seek 到该行起点并立即恢复自动跟随
+                        // （点击是明确的跳播意图，不等滑动暂停窗口）；同时唤出控制条给出反馈。
+                        onLineClicked = { line ->
+                            onSeekTo(line.start.toLong())
+                            resumeAutoScrollCallback.value?.invoke()
+                            onLyricInteraction()
+                        },
+                        // 滑动停稳 → 播放进度定位到中央停留行（不唤控制条，滑动是浏览式跳播）
+                        onLineFocusedByScroll = { line -> onSeekTo(line.start.toLong()) },
+                        onResumeAutoScroll = { resume -> resumeAutoScrollCallback.value = resume },
                         onLinePressed = {},
                         modifier = Modifier.fillMaxSize().focusProperties { canFocus = false },
                         normalLineTextStyle = TextStyle(

@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -136,6 +137,12 @@ fun KaraokeLyricsView(
     blurDelta: Float = 3f,
     /** 超长逐字行不换行，随演唱进度向左平滑滚动露出完整内容。 */
     horizontalScrollWhenActive: Boolean = false,
+    /** 滑动停稳（含惯性结束）后的过渡暂停：等待 seek 生效，避免自动跟随与跳播抢滚动。 */
+    autoScrollResumeDelayMs: Long = 800L,
+    /** 滑动停稳后，视口中央停留行与当前播放行不同时回调（宿主据此 seek 到该行）。 */
+    onLineFocusedByScroll: ((ISyncedLine) -> Unit)? = null,
+    /** 外部请求立即恢复自动跟随（如用户点击歌词行 seek 后）时回调注册。 */
+    onResumeAutoScroll: ((() -> Unit) -> Unit)? = null,
     showDebugRectangles: Boolean = false
 ) {
     val density = LocalDensity.current
@@ -303,13 +310,50 @@ fun KaraokeLyricsView(
         }
     }
 
+    // 滑动停稳 → 把播放进度定位到视口中央停留行（用户习惯：滑到哪播到哪）。
+    // 三道护栏：惯性/拖动必须完全结束（isScrollInProgress 结束沿）；
+    // 停留行==当前播放行则不 seek（微滑/误触自动过滤）；末尾空白占位区不触发。
+    // 停稳后短暂暂停自动跟随（autoScrollResumeDelayMs），等 seek 生效后两者自然重合。
+    // 用 uptimeMillis（单调时钟），不受系统时间跳变影响。
+    var manualScrollPausedUntilMs by remember { mutableStateOf(0L) }
+    var wasManualScrolling by remember { mutableStateOf(false) }
+    LaunchedEffect(isManualScrolling) {
+        if (isManualScrolling) {
+            wasManualScrolling = true
+            manualScrollPausedUntilMs = android.os.SystemClock.uptimeMillis() + autoScrollResumeDelayMs
+        } else if (wasManualScrolling) {
+            wasManualScrolling = false
+            val layoutInfo = listState.layoutInfo
+            val viewportCenter =
+                (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+            val centered = layoutInfo.visibleItemsInfo
+                .minByOrNull {
+                    kotlin.math.abs((it.offset + it.size / 2) - viewportCenter)
+                }
+                ?.index
+            if (centered != null && centered < lyrics.lines.size) {
+                val line = lyrics.lines[centered]
+                if (centered != lyricsFocusState.firstIndex) {
+                    manualScrollPausedUntilMs =
+                        android.os.SystemClock.uptimeMillis() + autoScrollResumeDelayMs
+                    onLineFocusedByScroll?.invoke(line)
+                }
+            }
+        }
+    }
+    onResumeAutoScroll?.invoke {
+        manualScrollPausedUntilMs = 0L
+    }
+
     LaunchedEffect(
         layoutCache,
         stableOffsetPx,
     ) {
         androidx.compose.runtime.snapshotFlow { lyricsFocusState.firstIndex }
             .collect { firstIndex ->
-                if (!scrollInCode.value && !isManualScrolling) {
+                if (!scrollInCode.value && !isManualScrolling &&
+                    android.os.SystemClock.uptimeMillis() >= manualScrollPausedUntilMs
+                ) {
                     scrollInCode.value = true
                     try {
                         val layoutInfo = listState.layoutInfo
