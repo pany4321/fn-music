@@ -62,11 +62,19 @@ fun SyncedLineText(
                     val t = currentPositionMs.invoke()
                     val span = (line.end - line.start).coerceAtLeast(1)
                     val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
-                    // 左移窗口：行的 20% 处开始向左，80% 处滚到行尾 ——
-                    // 与逐字行（KaraokeLineText）保持一致；行尾不压下一行的切换点。
-                    val scrollStart = 0.2f
-                    val scrollEnd = 0.8f
-                    ((elapsed - scrollStart) / (scrollEnd - scrollStart)).coerceIn(0f, 1f)
+                    // 往返滚动（左右滚动）：行首驻留 → 左移露出行尾 → 行尾驻留 → 右移回到行首。
+                    // 单向左移会把首字在行开始后不久就牺牲掉（真机反馈：首字显示不全、
+                    // 中段两端同时被裁看似居中）——往返让首字在行开始与结尾都完整可见。
+                    val dwellStart = 0.20f
+                    val reachEnd = 0.55f
+                    val dwellEnd = 0.70f
+                    when {
+                        elapsed < dwellStart -> 0f
+                        elapsed < reachEnd ->
+                            ((elapsed - dwellStart) / (reachEnd - dwellStart)).coerceIn(0f, 1f)
+                        elapsed < dwellEnd -> 1f
+                        else -> 1f - ((elapsed - dwellEnd) / (1f - dwellEnd)).coerceIn(0f, 1f)
+                    }
                 }
             }
             val lineScrollX by animateFloatAsState(
