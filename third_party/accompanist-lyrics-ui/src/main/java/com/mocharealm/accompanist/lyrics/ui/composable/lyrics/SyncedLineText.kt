@@ -62,18 +62,15 @@ fun SyncedLineText(
                     val t = currentPositionMs.invoke()
                     val span = (line.end - line.start).coerceAtLeast(1)
                     val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
-                    // 往返滚动（左右滚动）：行首驻留 → 左移露出行尾 → 行尾驻留 → 右移回到行首。
-                    // 单向左移会把首字在行开始后不久就牺牲掉（真机反馈：首字显示不全、
-                    // 中段两端同时被裁看似居中）——往返让首字在行开始与结尾都完整可见。
-                    val dwellStart = 0.20f
+                    // 单次左移：行首驻留（首字完整可读）→ 左移到行尾完整显示 → 停留到本行结束，
+                    // 不回弹。行首驻留过短会让首字刚出现就被裁（真机反馈），驻留期给足 30%。
+                    val dwellStart = 0.30f
                     val reachEnd = 0.55f
-                    val dwellEnd = 0.70f
                     when {
                         elapsed < dwellStart -> 0f
                         elapsed < reachEnd ->
                             ((elapsed - dwellStart) / (reachEnd - dwellStart)).coerceIn(0f, 1f)
-                        elapsed < dwellEnd -> 1f
-                        else -> 1f - ((elapsed - dwellEnd) / (1f - dwellEnd)).coerceIn(0f, 1f)
+                        else -> 1f
                     }
                 }
             }
