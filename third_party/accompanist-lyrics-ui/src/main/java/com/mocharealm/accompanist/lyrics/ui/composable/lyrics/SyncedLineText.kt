@@ -3,11 +3,12 @@ package com.mocharealm.accompanist.lyrics.ui.composable.lyrics
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,14 +20,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
 
 @Composable
@@ -53,10 +60,22 @@ fun SyncedLineText(
         horizontalAlignment = if (isLineRtl) Alignment.End else Alignment.Start
     ) {
         if (isActive && currentPositionMs != null) {
-            // 活动行：单行不换行，随演唱进度平滑向左滚动露出完整内容
-            var contentWidthPx by remember { mutableIntStateOf(0) }
+            // 活动行：单行不换行，随演唱进度平滑向左滚动露出完整内容。
+            // 绘制采用与逐字行（KaraokeLineText）相同的自绘 Canvas 方案：
+            // TextMeasurer 无约束测量出完整内容宽，drawText 显式从 (0,0) 起绘——
+            // 不经过 Text 的任何对齐/测量默认值，超长行首字从第一帧起必然完整可见。
+            val textMeasurer = rememberTextMeasurer()
+            val measuredText = remember(line.content, mainStyle) {
+                textMeasurer.measure(
+                    text = line.content,
+                    style = mainStyle,
+                    softWrap = false,
+                    maxLines = 1,
+                )
+            }
+            val contentWidthPx = measuredText.size.width.toFloat()
             var containerWidthPx by remember { mutableIntStateOf(0) }
-            val overflowPx = (contentWidthPx - containerWidthPx).coerceAtLeast(0)
+            val overflowPx = (contentWidthPx - containerWidthPx).coerceAtLeast(0f)
             val progress = remember(line, currentPositionMs) {
                 derivedStateOf {
                     val t = currentPositionMs.invoke()
@@ -80,26 +99,20 @@ fun SyncedLineText(
                 Modifier
                     .fillMaxWidth()
                     .clipToBounds()
-                    // 容器宽必须量在外层 Box 上：此前挂在 Text 修饰链上，量到的是文本自身宽度——
-                    // 而 requiredWidth 已把该节点强制成完整内容宽，两者相等导致 overflow 恒为 0，
-                    // 左移从未生效（表现为超长行静止居中、两端被裁）。
                     .onSizeChanged { containerWidthPx = it.width }
             ) {
-                Text(
-                    text = line.content,
-                    style = mainStyle,
-                    color = mainColor,
-                    textAlign = TextAlign.Start,
-                    maxLines = 1,
-                    softWrap = false,
-                    onTextLayout = { result -> contentWidthPx = result.size.width },
-                    modifier = Modifier
-                        // requiredWidth(IntrinsicSize.Max)：文本按"完整内容宽"测量，
-                        // 突破父容器的 max 约束——超长行的溢出量才量得出来
-                        // （逐字行是自绘 Canvas 主动放宽画布，所以没这个问题）。
-                        .requiredWidth(IntrinsicSize.Max)
-                        .graphicsLayer { translationX = lineScrollX },
-                )
+                Canvas(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(with(LocalDensity.current) { measuredText.size.height.toDp() })
+                        .graphicsLayer { translationX = lineScrollX }
+                ) {
+                    drawText(
+                        textLayoutResult = measuredText,
+                        color = mainColor,
+                        topLeft = Offset.Zero,
+                    )
+                }
             }
         } else {
             // 非活动行：单行省略

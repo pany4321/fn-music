@@ -347,6 +347,12 @@ interface AuthenticatedAppActions {
   artwork into that single panel hue; the far edge may only mix in a small amount of the app
   background.
 - Poster and cover modes render one Accompanist `KaraokeLyricsView` backed by `SyncedLyrics`.
+- An overlong line-synced (LRC) lyric line draws through a canvas `drawText` anchored at the
+  container's left origin (never through a `Text` composable's alignment defaults): it holds fully
+  left-aligned for 3 seconds, scrolls once (≈2 s, compressed if the line's remaining time is
+  shorter) to fully reveal its tail, and stays there until the line ends. It never wraps,
+  ellipsizes, or centers. The word-timed path uses the same fixed 3-second dwell before its
+  progress-driven leftward scroll.
   It keeps multiple nearby lines in a compact vertically scrolling list, progressively highlights
   eligible karaoke syllables, shows translation directly below its source line, and hides phonetic
   rows. The lyric surface is display-only and must not enter the D-pad focus graph.
@@ -583,6 +589,7 @@ interface AuthenticatedAppActions {
 | Current lyrics is Loading during a track switch | Clear the prior song's lyric visual; retain only when namespace and media ID still match |
 | Timed lyrics has an active line | Auto-scroll the SDK list to that line, keep nearby context visible, show translation, and omit phonetic rows |
 | Playback is running between 250 ms progress snapshots | Extrapolate lyric position from the latest uptime anchor on display frames, clamped to duration |
+| Overlong LRC line plays | Hold left-aligned with the first glyph fully visible for 3 s, scroll once to fully reveal the tail, and hold there until the line ends |
 | Playback is paused or seeking publishes a new snapshot | Stop extrapolation and render/re-anchor from the exact snapshot position |
 | Metadata/artwork/lyrics is validly absent | Publish fallback/`Absent`; do not show retry |
 | One or more current resources exhaust retryable failure | Show one retry action bound to the current revision |
@@ -804,6 +811,9 @@ interface AuthenticatedAppActions {
   rejects prior lyrics, a namespace change retains nothing, and current terminal states replace immediately.
 - Player lyric position tests assert playing extrapolation, paused stability, backward-time
   clamping, negative-position clamping, and duration clamping.
+- Lyric overlong-line device check: at activation the first glyph renders fully at the container's
+  left origin; during the single scroll both edges may clip transiently; at the hold the last
+  glyph is fully visible.
 - Player lyric device test: inspect poster and cover modes at 1920x1080 and 1280x720; assert only
   the SDK scrolling surface is present, nearby lines move when playback advances, original and
   translation remain tightly grouped and readable, phonetic text is absent, and lyrics cannot take

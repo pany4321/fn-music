@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeAlignment
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine
 import com.mocharealm.accompanist.lyrics.ui.utils.LayerPaint
@@ -632,14 +633,15 @@ fun KaraokeLineText(
                 if (overflowPx <= 0f) 0f
                 else {
                     val t = currentTimeProvider()
+                    // 设计意图（真机定稿）：起始居左**固定停 3 秒**（首字完整可读）→ 单次左移
+                    // （约 2 秒；本行剩余不足 2 秒时按剩余时长压缩，保证行尾一定滚到）→
+                    // 行尾完整显示并停留到本行结束。此前按"行时长的 20%→80%"计算，
+                    // 短句的驻留被压到 1 秒左右，首字刚显示就被左移裁掉。
+                    val elapsed = (t - line.start).coerceAtLeast(0).toFloat()
                     val span = (line.end - line.start).coerceAtLeast(1)
-                    val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
-                    // 左移窗口：行的 20% 处开始向左，80% 处滚到行尾 ——
-                    // 长行"开头卡住不动"的时间缩短到五分之一，行尾也不会压着
-                    // 下一行的切换点（之前要等到 100% 才滚完）。
-                    val scrollStart = 0.2f
-                    val scrollEnd = 0.8f
-                    ((elapsed - scrollStart) / (scrollEnd - scrollStart)).coerceIn(0f, 1f)
+                    val scrollStart = 3_000f
+                    val scrollDuration = (span - scrollStart).coerceIn(1_000f, 2_000f)
+                    ((elapsed - scrollStart) / scrollDuration).coerceIn(0f, 1f)
                 }
             }
             val lineScrollX by animateFloatAsState(
@@ -674,6 +676,14 @@ fun KaraokeLineText(
                     )
                 }
             }
+            // TEMP-DEBUG: 定向诊断——首音节坐标/对齐/宽度
+            Text(
+                text = "P0=${finalLineLayouts.firstOrNull()?.firstOrNull()?.position?.x} " +
+                    "RA=$isRightAligned W=${singleRowWidth.roundToInt()} " +
+                    "AW=${availableWidthPx.roundToInt()} TX=${lineScrollX.roundToInt()}",
+                color = Color.Red,
+                fontSize = 9.sp,
+            )
         }
 
         if (showTranslation) {
