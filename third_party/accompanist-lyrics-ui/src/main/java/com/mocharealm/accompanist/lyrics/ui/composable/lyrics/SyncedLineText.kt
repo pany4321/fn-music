@@ -78,6 +78,10 @@ fun SyncedLineText(
                 Modifier
                     .fillMaxWidth()
                     .clipToBounds()
+                    // 容器宽必须量在外层 Box 上：此前挂在 Text 修饰链上，量到的是文本自身宽度——
+                    // 而 requiredWidth 已把该节点强制成完整内容宽，两者相等导致 overflow 恒为 0，
+                    // 左移从未生效（表现为超长行静止居中、两端被裁）。
+                    .onSizeChanged { containerWidthPx = it.width }
             ) {
                 Text(
                     text = line.content,
@@ -88,12 +92,10 @@ fun SyncedLineText(
                     softWrap = false,
                     onTextLayout = { result -> contentWidthPx = result.size.width },
                     modifier = Modifier
-                        // 关键修复：requiredWidth(IntrinsicSize.Max) 让文本按"完整内容宽"测量，
-                        // 突破父容器的 max 约束 —— 否则超长行被父约束截断测量，
-                        // onTextLayout 返回的宽度 == 容器宽，overflowPx 恒为 0，左移从未生效
+                        // requiredWidth(IntrinsicSize.Max)：文本按"完整内容宽"测量，
+                        // 突破父容器的 max 约束——超长行的溢出量才量得出来
                         // （逐字行是自绘 Canvas 主动放宽画布，所以没这个问题）。
                         .requiredWidth(IntrinsicSize.Max)
-                        .onSizeChanged { containerWidthPx = it.width }
                         .graphicsLayer { translationX = lineScrollX },
                 )
             }
