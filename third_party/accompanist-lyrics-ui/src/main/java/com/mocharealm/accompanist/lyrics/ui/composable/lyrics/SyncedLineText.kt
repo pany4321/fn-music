@@ -60,18 +60,15 @@ fun SyncedLineText(
             val progress = remember(line, currentPositionMs) {
                 derivedStateOf {
                     val t = currentPositionMs.invoke()
+                    // 设计意图（真机定稿）：起始居左**固定停 3 秒** → 单次左移（约 2 秒；本行
+                    // 剩余不足 2 秒时按剩余时长压缩，保证行尾一定滚到）→ 行尾完整显示并
+                    // 停留到本行结束。此前按"行时长的百分比"算驻留期，短句驻留被压到
+                    // 约 1 秒，首字刚显示就被左移裁掉、滚动中段看似居中。
+                    val elapsed = (t - line.start).coerceAtLeast(0)
                     val span = (line.end - line.start).coerceAtLeast(1)
-                    val elapsed = ((t - line.start).toFloat() / span).coerceIn(0f, 1f)
-                    // 单次左移：行首驻留（首字完整可读）→ 左移到行尾完整显示 → 停留到本行结束，
-                    // 不回弹。行首驻留过短会让首字刚出现就被裁（真机反馈），驻留期给足 30%。
-                    val dwellStart = 0.30f
-                    val reachEnd = 0.55f
-                    when {
-                        elapsed < dwellStart -> 0f
-                        elapsed < reachEnd ->
-                            ((elapsed - dwellStart) / (reachEnd - dwellStart)).coerceIn(0f, 1f)
-                        else -> 1f
-                    }
+                    val scrollStart = 3_000f
+                    val scrollDuration = (span - scrollStart).coerceIn(1_000f, 2_000f)
+                    ((elapsed - scrollStart) / scrollDuration).coerceIn(0f, 1f)
                 }
             }
             val lineScrollX by animateFloatAsState(
