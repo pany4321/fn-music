@@ -673,8 +673,8 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         // 渲染端稀释减轻：保留层次感的同时让取到的颜色更多到达屏幕
         // （此前 0.58/0.65 + 25% 黑遮罩，到达屏幕的只剩源色三成，是"背景灰黑"的第二道闸）。
-        val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.45f)
-        val rightColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.55f)
+        val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.30f)
+        val rightColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.42f)
         drawRect(
             brush = Brush.horizontalGradient(
                 0f to animatedColor,
@@ -682,7 +682,7 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
                 1f to rightColor,
             ),
         )
-        drawRect(Color.Black.copy(alpha = 0.18f))
+        drawRect(Color.Black.copy(alpha = 0.12f))
         drawRect(Color.White.copy(alpha = 0.025f))
         drawRect(
             brush = Brush.verticalGradient(
@@ -2339,10 +2339,10 @@ private fun normalizedAmbienceColor(red: Float, green: Float, blue: Float): Colo
             blue = (value + (blue - average) * 0.08f).coerceIn(0f, 1f),
         )
     }
-    // 背景氛围色放宽：饱和度上限 0.32→0.45、系数 0.52→0.62，明度 0.34→0.38——
-    // 彩色封面能呈现可辨识的同色系深色调，而非灰黑（渲染端仍有稀释，此处是源头）。
-    val saturation = (sourceSaturation * 0.62f).coerceIn(0.1f, 0.45f)
-    return hsvColor(hue, saturation, value = 0.38f)
+    // 背景氛围色（2.0.0 二次放宽）：饱和上限 0.60、系数 0.75，明度 0.44——
+    // 彩色封面呈现鲜明的同色系深色调；渲染端仍有稀释，此处是源头。
+    val saturation = (sourceSaturation * 0.75f).coerceIn(0.1f, 0.60f)
+    return hsvColor(hue, saturation, value = 0.44f)
 }
 
 private fun rgbHue(red: Float, green: Float, blue: Float): Float {

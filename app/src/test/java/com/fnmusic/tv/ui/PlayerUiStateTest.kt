@@ -223,7 +223,7 @@ class PlayerUiStateTest {
 
         assertTrue(color.blue > color.green)
         assertTrue(color.red > color.green)
-        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.42f)
+        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.48f)
     }
 
     @Test fun `cool violet subject is not replaced by a pale yellow green backdrop`() {
@@ -237,7 +237,7 @@ class PlayerUiStateTest {
         // 紫色块占 24%（≥15% 主导线）且是唯一彩色：2.0.0 起直接选它做背景色相
         assertTrue(color.blue > color.red)
         assertTrue(color.blue > color.green)
-        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.42f)
+        assertTrue(maxOf(color.red, color.green, color.blue) <= 0.48f)
     }
 
     @Test fun `small hot pink accent cannot overpower a mixed cool cover`() {
