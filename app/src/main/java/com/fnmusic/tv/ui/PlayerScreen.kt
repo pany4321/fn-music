@@ -743,10 +743,29 @@ private fun PlayerMainContent(
 ) {
     val placeholder = title.take(1).ifBlank { "音" }
     if (poster) {
+        // 过渡带参数：按封面右缘色与面板色的感知距离自适应——色差大给足缓冲（14%），
+        // 色差小收窄（6%），避免"低对比显脏、高对比生硬"两个极端。
+        val edgeSampleColor = artworkBitmap?.let { bitmap -> runCatching {
+            // 右缘竖条的均色：取 x=95% 处一列的均值，抗单像素噪声
+            val x = (bitmap.width * 0.95f).toInt().coerceIn(0, bitmap.width - 1)
+            var r = 0L; var g = 0L; var b = 0L; var n = 0
+            for (y in 0 until bitmap.height step (bitmap.height / 24).coerceAtLeast(1)) {
+                val p = bitmap.getPixel(x, y)
+                r += android.graphics.Color.red(p); g += android.graphics.Color.green(p); b += android.graphics.Color.blue(p)
+                n++
+            }
+            if (n == 0) null else Color(
+                red = (r / n) / 255f,
+                green = (g / n) / 255f,
+                blue = (b / n) / 255f,
+            )
+        }.getOrNull() } ?: placeholderAccent
+        val transitionFraction = posterTransitionFraction(edgeSampleColor, posterPanelColor)
+        val fadeStart = 0.50f - transitionFraction
         Box(Modifier.fillMaxSize()) {
             // 封面绘制区与右侧歌词面板的边界（50%）严丝合缝：此前画到 58%，右侧 8% 被
             // 面板色完全盖死、34%→50% 又被羽化带渐隐，观感即"封面右侧被藏、整体不居中"。
-            // 羽化带收窄到 0.40→0.50（10%），正方形封面在 50% 宽的矩形里居中裁剪（左右各约 6%）。
+            // 正方形封面在 50% 宽的矩形里居中裁剪（左右各约 6%）。
             if (artworkBitmap != null) {
                 Image(
                     artworkBitmap.asImageBitmap(),
@@ -762,24 +781,23 @@ private fun PlayerMainContent(
                     RectangleShape,
                 )
             }
+            // 过渡带：OKLab 感知插值 + smoothstep 缓动（两端导数为 0），
+            // 消除 sRGB 线性插值中点的"灰化带"与线性渐变的硬拐弯。
             Box(
                 Modifier.fillMaxSize().background(
-                    Brush.horizontalGradient(
-                        0.40f to Color.Transparent,
-                        0.50f to posterPanelColor,
+                    posterTransitionBrush(
+                        panelColor = posterPanelColor,
+                        startFraction = fadeStart,
+                        endFraction = 0.50f,
                     ),
                 ),
             )
+            // 右侧面板：同 OKLab 方式渐隐到 90% 面板色（近右缘混 10% 背景色）。
             Box(
                 Modifier.fillMaxWidth(0.50f).fillMaxHeight().align(Alignment.CenterEnd)
                     .background(
-                        Brush.horizontalGradient(
-                            0f to posterPanelColor,
-                            1f to androidx.compose.ui.graphics.lerp(
-                                posterPanelColor,
-                                FnColors.Background,
-                                0.10f,
-                            ),
+                        posterPanelBrush(
+                            panelColor = posterPanelColor,
                         ),
                     ),
             )
@@ -2370,6 +2388,86 @@ private fun hsvColor(hue: Float, saturation: Float, value: Float): Color {
 
 internal fun posterSurfaceColor(color: Color): Color {
     return toneMapPosterColor(colorToOklab(color))
+}
+
+/** 过渡带宽度的上限/下限（占屏宽比例）与感知距离满档阈值。 */
+private const val POSTER_TRANSITION_MIN = 0.06f
+private const val POSTER_TRANSITION_MAX = 0.14f
+private const val POSTER_TRANSITION_DISTANCE_FULL = 0.12f
+
+/**
+ * 封面→面板过渡带的宽度：随封面右缘色与面板色的 OKLab 距离线性增长，
+ * 距离超过 [POSTER_TRANSITION_DISTANCE_FULL] 后取满档。感知距离小的地方
+ * 宽过渡只会显脏，大的地方窄过渡会生硬。
+ */
+internal fun posterTransitionFraction(edgeColor: Color, panelColor: Color): Float {
+    val distance = perceptualColorDistance(edgeColor, panelColor)
+    val t = (distance / POSTER_TRANSITION_DISTANCE_FULL).coerceIn(0f, 1f)
+    return POSTER_TRANSITION_MIN + (POSTER_TRANSITION_MAX - POSTER_TRANSITION_MIN) * t
+}
+
+/** smoothstep 缓动：两端导数为 0，中间加速——渐变"起笔收笔"柔和。 */
+private fun smoothstep(t: Float): Float {
+    val x = t.coerceIn(0f, 1f)
+    return x * x * (3f - 2f * x)
+}
+
+/**
+ * 封面→面板过渡刷：在 [startFraction, endFraction] 区间内做 OKLab 感知插值 + smoothstep，
+ * 多个 color stop 重现平滑曲线（Compose 渐变只支持线性段，用密集采样逼近）。
+ * 区间外保持完全透明/完全不透明。
+ */
+@Composable
+private fun posterTransitionBrush(
+    panelColor: Color,
+    startFraction: Float,
+    endFraction: Float,
+): Brush {
+    val samples = 12
+    val start = startFraction.coerceAtMost(endFraction - 0.02f)
+    val panelOklab = colorToOklab(panelColor)
+    val stops: List<Pair<Float, Color>> = buildList {
+        add(start to Color.Transparent)
+        for (i in 1..samples) {
+            val t = i.toFloat() / samples
+            val eased = smoothstep(t)
+            // OKLab 明度/色度插值 + alpha 线性，中点不发灰
+            val mixed = oklabToColor(
+                OklabColor(
+                    lightness = panelOklab.lightness,
+                    a = panelOklab.a,
+                    b = panelOklab.b,
+                ),
+            ).copy(alpha = eased)
+            add(start + (endFraction - start) * t to mixed)
+        }
+    }
+    return Brush.horizontalGradient(colorStops = *stops.toTypedArray())
+}
+
+/** 右侧面板刷：从面板色 OKLab 渐隐到混 10% 背景色，替代 sRGB 线性 lerp。 */
+@Composable
+private fun posterPanelBrush(panelColor: Color): Brush {
+    val samples = 8
+    val panelOklab = colorToOklab(panelColor)
+    val targetOklab = colorToOklab(
+        androidx.compose.ui.graphics.lerp(panelColor, FnColors.Background, 0.10f),
+    )
+    val stops: List<Pair<Float, Color>> = buildList {
+        for (i in 0..samples) {
+            val t = i.toFloat() / samples
+            val eased = smoothstep(t)
+            val mixed = oklabToColor(
+                OklabColor(
+                    lightness = panelOklab.lightness + (targetOklab.lightness - panelOklab.lightness) * eased,
+                    a = panelOklab.a + (targetOklab.a - panelOklab.a) * eased,
+                    b = panelOklab.b + (targetOklab.b - panelOklab.b) * eased,
+                ),
+            )
+            add(t to mixed)
+        }
+    }
+    return Brush.horizontalGradient(colorStops = *stops.toTypedArray())
 }
 
 internal fun interpolatedLyricPosition(

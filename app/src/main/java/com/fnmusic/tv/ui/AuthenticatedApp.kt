@@ -177,7 +177,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -821,90 +820,12 @@ private fun BrowseHome(
     val playlistsLoaded = playlistSnapshot.initialLoadCompleted
     val albums = albumState.snapshot.entries
     val favoriteTracks = favoritePreviewState.snapshot.entries
-    // “随机漫游”卡片：与其它卡片同一套拼排逻辑——启动时从曲库随机取
-    // 3 首歌曲的封面，运行期间保持不变，下次启动重新生成。
-    val roamCoverState = retainedStore.list<FeatureArtworkItem>("covers:roam")
-    val roamArtwork = roamCoverState.snapshot.entries
-    LaunchedEffect(Unit) {
-        if (!roamCoverState.snapshot.initialLoadCompleted) {
-            // 先用上次启动存下的那组封面画出来（命中图片缓存，秒出）；
-            // 同时后台取一组新的写回偏好，下次启动换新——既快又保持随机感。
-            val persisted = container.appPreferences.homeDeck(ROAM_DECK_KEY)
-            if (persisted.isNotEmpty()) {
-                roamCoverState.snapshot = retainLoadedList(
-                    roamCoverState.snapshot,
-                    persisted.map { FeatureArtworkItem("", it) },
-                )
-            }
-            retainedStore.scope.launch {
-                var deck = randomTrackDeck { container.musicRepository.randomTrackSample(24) }
-                if (deck.isEmpty()) {
-                    // 首启请求偶发失败：退回专辑/歌单封面，保证卡片不会是空的。
-                    deck = featureArtworkSlots(
-                        primary = albums.map { FeatureArtworkItem(it.name, it.coverId) },
-                        fallback = playlists.map { FeatureArtworkItem(it.name, it.coverId) },
-                    )
-                }
-                if (deck.isNotEmpty()) {
-                    container.appPreferences.saveHomeDeck(ROAM_DECK_KEY, deck.mapNotNull { it.coverId })
-                    // 新采样到的那组立刻上屏：只"留给下次启动"的话，每次启动看到的都是上一组，
-                    // 观感上就是不随机（旧组的首帧已经先画出来了，这里只是换个更衣室）。
-                    roamCoverState.snapshot = retainLoadedList(roamCoverState.snapshot, deck)
-                }
-            }
-        }
-    }
-    val favoriteCoverState = retainedStore.list<FeatureArtworkItem>("covers:favorites")
-    LaunchedEffect(Unit) {
-        if (favoriteCoverState.snapshot.entries.isEmpty()) {
-            // 先用上次启动存下的那组封面画出来（命中图片缓存，秒出）；
-            // 故意不用 retainLoadedList（会把 initialLoadCompleted 置真），
-            // 真实数据到位后下面的换组逻辑仍要执行。
-            val persisted = container.appPreferences.homeDeck(FAVORITES_DECK_KEY)
-            if (persisted.isNotEmpty()) {
-                favoriteCoverState.snapshot = favoriteCoverState.snapshot.copy(
-                    entries = persisted.map { FeatureArtworkItem("", it) },
-                )
-            }
-        }
-    }
-    LaunchedEffect(favoriteTracks) {
-        if (favoriteTracks.isNotEmpty() && !favoriteCoverState.snapshot.initialLoadCompleted) {
-            val deck = featureArtworkSlots(
-                primary = favoriteTracks.shuffled().map { FeatureArtworkItem(it.title, it.coverId) },
-            )
-            if (deck.isNotEmpty()) {
-                container.appPreferences.saveHomeDeck(FAVORITES_DECK_KEY, deck.mapNotNull { it.coverId })
-                favoriteCoverState.snapshot = retainLoadedList(favoriteCoverState.snapshot, deck)
-            }
-        }
-    }
-    val favoriteArtwork = favoriteCoverState.snapshot.entries
+    // 三张功能卡（随机漫游/收藏/最近播放）的封面固定使用各自的特性插画兜底
+    // （收藏=心形、最近播放=时钟、随机漫游=黑胶），不再向服务器请求动态封面，
+    // 也不再有"首帧上一组→数据到位换组"的闪换。
+    val favoriteArtwork: List<FeatureArtworkItem> = emptyList()
+    val recentArtwork: List<FeatureArtworkItem> = emptyList()
     val recentTracksPreview = recentPreviewState.snapshot.entries
-    val recentCoverState = retainedStore.list<FeatureArtworkItem>("covers:recent")
-    LaunchedEffect(Unit) {
-        if (recentCoverState.snapshot.entries.isEmpty()) {
-            // 同收藏卡：先画持久化的上一组，等待真实数据换组。
-            val persisted = container.appPreferences.homeDeck(RECENT_DECK_KEY)
-            if (persisted.isNotEmpty()) {
-                recentCoverState.snapshot = recentCoverState.snapshot.copy(
-                    entries = persisted.map { FeatureArtworkItem("", it) },
-                )
-            }
-        }
-    }
-    LaunchedEffect(recentTracksPreview) {
-        if (recentTracksPreview.isNotEmpty() && !recentCoverState.snapshot.initialLoadCompleted) {
-            val deck = featureArtworkSlots(
-                primary = recentTracksPreview.shuffled().map { FeatureArtworkItem(it.title, it.coverId) },
-            )
-            if (deck.isNotEmpty()) {
-                container.appPreferences.saveHomeDeck(RECENT_DECK_KEY, deck.mapNotNull { it.coverId })
-                recentCoverState.snapshot = retainLoadedList(recentCoverState.snapshot, deck)
-            }
-        }
-    }
-    val recentArtwork = recentCoverState.snapshot.entries
     // “全部歌单”卡片：与其它歌单卡片同一套拼排逻辑——启动时从曲库随机取
     // 3 首歌曲的封面，运行期间保持不变，下次启动重新生成。
     val allPlaylistsDeckState = retainedStore.list<FeatureArtworkItem>("covers:all-playlists")
@@ -1007,14 +928,10 @@ private fun BrowseHome(
             }
         }
     }
-    // 启动预热分两批：第一批只预热三张功能卡的封面（至多 9 张 Grid）——首屏最先看到的位置，
-    // 并等它们进内存后才放行第二批（歌单行 + 缩略图行），避免近百张预热请求挤占
-    // 缩略图 6 路 FIFO 并发队列、功能卡封面反而排队。以 deck/数据状态为 key：
-    // deck 晚到（如收藏数据后返回）时本效果重跑，已进内存的 prefetch 返回 null，不会重复下载。
+    // 启动预热：歌单行 + 缩略图行的封面先预热（功能卡已固定插画、无需预热），
+    // 避免近百张预热请求挤占缩略图 6 路 FIFO 并发队列。
+    // 以数据状态为 key：数据晚到时本效果重跑，已进内存的 prefetch 返回 null，不会重复下载。
     LaunchedEffect(
-        roamArtwork,
-        favoriteArtwork,
-        recentArtwork,
         allPlaylistsDeckCovers,
         playlists,
         playlistCovers,
@@ -1022,14 +939,6 @@ private fun BrowseHome(
         randomSongs,
         recentlyAdded,
     ) {
-        val priorityCovers = buildList {
-            addAll(roamArtwork.mapNotNull { it.coverId })
-            addAll(favoriteArtwork.mapNotNull { it.coverId })
-            addAll(recentArtwork.mapNotNull { it.coverId })
-        }.filter(String::isNotBlank).distinct()
-        priorityCovers.mapNotNull { coverId ->
-            container.artworkBitmapCache.prefetch(coverId, CoverVariant.Grid)
-        }.joinAll()
         val gridCovers = buildList {
             addAll(allPlaylistsDeckCovers)
             playlists.take(12).forEach { playlist ->
@@ -1149,7 +1058,7 @@ private fun BrowseHome(
             HomeFeatureCard(
                 title = "随机漫游",
                 kind = HomeArtworkKind.Roam,
-                artwork = roamArtwork,
+                artwork = emptyList(),
                 modifier = Modifier
                     .weight(1f)
                     .focusProperties {
@@ -1186,7 +1095,7 @@ private fun BrowseHome(
             HomeFeatureCard(
                 title = "收藏",
                 kind = HomeArtworkKind.Favorites,
-                artwork = favoriteArtwork,
+                artwork = emptyList(),
                 modifier = Modifier
                     .weight(1f)
                     .focusProperties {
@@ -1206,7 +1115,7 @@ private fun BrowseHome(
             HomeFeatureCard(
                 title = "最近播放",
                 kind = HomeArtworkKind.Recent,
-                artwork = recentArtwork,
+                artwork = emptyList(),
                 modifier = Modifier
                     .weight(1f)
                     .focusProperties {
@@ -1704,12 +1613,9 @@ private suspend fun randomTrackDeck(fetch: suspend () -> List<Track>): List<Feat
 private const val RANDOM_DECK_ATTEMPTS = 2
 private const val RANDOM_DECK_RETRY_DELAY_MS = 700L
 
-/** 卡片叠层封面在偏好里的键：随机漫游 / 全部歌单 / 收藏 / 最近播放各存一组，供下次启动秒出。 */
+/** 卡片叠层封面在偏好里的键：「全部歌单」存一组，供下次启动秒出（三张功能卡已固定插画）。 */
 private const val HOME_PREFETCH_LIMIT = 48
-private const val ROAM_DECK_KEY = "roam"
 private const val ALL_PLAYLISTS_DECK_KEY = "all-playlists"
-private const val FAVORITES_DECK_KEY = "favorites"
-private const val RECENT_DECK_KEY = "recent"
 
 @Composable
 private fun HomePlaylistLockup(

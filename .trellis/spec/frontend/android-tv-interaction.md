@@ -345,7 +345,10 @@ interface AuthenticatedAppActions {
   a near-neutral winner (OKLab chroma below 0.02), falls back to the population-linear perceptual
   average — small accents cannot hijack the hue and neutral artwork stays neutral. Fade the
   artwork into that single panel hue; the far edge may only mix in a small amount of the app
-  background.
+  background. The artwork→panel transition band adapts its width (6–14 percent of the
+  viewport) to the perceptual OKLab distance between the artwork's right-edge color and the panel
+  color, interpolates in OKLab with a smoothstep ease (both ends zero-derivative), and the panel
+  fade toward the background uses the same OKLab interpolation.
 - Poster and cover modes render one Accompanist `KaraokeLyricsView` backed by `SyncedLyrics`.
 - An overlong line-synced (LRC) lyric line draws through a canvas `drawText` anchored at the
   container's left origin (never through a `Text` composable's alignment defaults): it holds fully
@@ -488,7 +491,9 @@ interface AuthenticatedAppActions {
   `歌单` heading with the playlist `LazyRow` (up to 12 playlists plus the terminal All Playlists
   entry), then a `随机专辑` heading with a 刷新 button and a 16-album row sampled by
   `randomAlbums(16)`, then a `随机歌曲` heading with a 刷新 button and a 16-track row sampled by
-  `randomTracks(16)`. Both random rows load on entry and re-sample on their own refresh action;
+  `randomTracks(16)`. The three feature cards draw their fixed themed feature illustrations only
+  (roam=record, favorites=heart, recent=clock) — they never fetch server covers, persist cover
+  decks, or swap artwork at runtime. Both random rows load on entry and re-sample on their own refresh action;
   tapping an album opens its detail route and tapping a song plays the sampled row as a fixed
   (source-less) queue starting at that track. Refresh buttons are 88x38dp so they align with the
   34sp headings. The Favorites route reuses the
