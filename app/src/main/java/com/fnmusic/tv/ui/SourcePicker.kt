@@ -10,13 +10,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -28,8 +33,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.yield
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.yield
 import androidx.tv.material3.Text
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.SourceTestResult
@@ -42,7 +49,10 @@ import com.fnmusic.tv.ui.FnColors
  * 而这个概念管的是"音乐从哪台服务器来"。
  */
 internal fun sourceTitle(entry: LoginHistoryEntry): String =
-    entry.serverName?.takeIf(String::isNotBlank) ?: sourceKindLabel(entry.kind)
+    entry.serverName
+        // 旧版本把 fn 源条目存成了简写 "fn"：显示时归一化为正式名称
+        ?.takeIf { it.isNotBlank() && !it.equals("fn", ignoreCase = true) }
+        ?: sourceKindLabel(entry.kind)
 
 /** 源类型的中文名（给用户看）。 */
 internal fun sourceKindLabel(kind: ServerKind): String = when (kind) {
@@ -170,7 +180,7 @@ internal fun SourceRow(
                 onClick = { if (!testing) onTest() },
                 modifier = Modifier
                     .width(112.dp)
-                    .height(76.dp)
+                    .height(68.dp)
                     .semantics { contentDescription = "测试音乐源：${sourceTitle(entry)}" }
                     .focusProperties {
                         left = focuses.body
@@ -193,7 +203,7 @@ internal fun SourceRow(
                 onClick = onDelete,
                 modifier = Modifier
                     .width(76.dp)
-                    .height(76.dp)
+                    .height(68.dp)
                     .semantics { contentDescription = "删除音乐源：${sourceTitle(entry)}" }
                     .focusProperties {
                         left = if (onTest != null) focuses.test else focuses.body
@@ -235,6 +245,9 @@ internal fun SourcePickerDialog(
     recentServers: List<String> = emptyList(),
     onRecentSelect: ((String) -> Unit)? = null,
 ) {
+    // 删除音乐源二次确认：✕ 只装填待删项，确认后才真正调 onDelete。
+    var pendingDelete by remember { mutableStateOf<LoginHistoryEntry?>(null) }
+    val confirmCancelFocus = remember { FocusRequester() }
     val rowFocuses = remember(sources) {
         List(sources.size) { SourceRowFocuses(FocusRequester(), FocusRequester(), FocusRequester()) }
     }
@@ -290,7 +303,7 @@ internal fun SourcePickerDialog(
                         onSelect = { onSelect(entry) },
                         onTest = onTest?.let { test -> { test(entry) } },
                         testing = entry.id == testingProfileId,
-                        onDelete = onDelete?.let { delete -> { delete(entry) } },
+                        onDelete = onDelete?.let { delete -> { pendingDelete = entry } },
                     )
                     statuses[entry.id]?.let { status -> SourceStatusLine(status) }
                 }
@@ -324,15 +337,15 @@ internal fun SourcePickerDialog(
                 }
                 Spacer(Modifier.height(2.dp))
                 // 底部按钮并排：横屏电视/车机的可视高度很矮，竖着放会把"关闭"挤到屏幕外。
-                // 几何与上方 SourceRow 完全对齐（间距同为 8dp）：
-                //   添加音乐源 = 歌单行的主体列（weight 1f）；关闭 = 测试(112) + 间距(8) + 删除(76) = 196dp。
+                // 几何与上方 SourceRow 完全对齐（间距同为 8dp，高度与源行主体一致 72dp）：
+                //   添加音乐源 = 歌单行的主体列（weight 1f）；关闭 = 测试(112) + 间距(8) + 删除(68) = 188dp。
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (onAdd != null) {
                         LoginActionButton(
                             onClick = onAdd,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(62.dp)
+                                .height(72.dp)
                                 .semantics { contentDescription = "添加音乐源" }
                                 .focusProperties { right = if (onClearAll != null) clearFocus else closeFocus }
                                 .focusRequester(addFocus),
@@ -345,7 +358,7 @@ internal fun SourcePickerDialog(
                             onClick = onClearAll,
                             modifier = Modifier
                                 .width(170.dp)
-                                .height(62.dp)
+                                .height(72.dp)
                                 .semantics { contentDescription = "清空全部音乐源" }
                                 .focusProperties {
                                     left = if (onAdd != null) addFocus else FocusRequester.Cancel
@@ -359,8 +372,8 @@ internal fun SourcePickerDialog(
                     LoginActionButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .width(196.dp)
-                            .height(62.dp)
+                            .width(188.dp)
+                            .height(72.dp)
                             .semantics { contentDescription = "关闭" }
                             .focusProperties {
                                 left = when {
@@ -372,6 +385,56 @@ internal fun SourcePickerDialog(
                             .focusRequester(closeFocus),
                     ) {
                         Text("关闭", color = FnColors.Muted, fontSize = 17.sp)
+                    }                }
+            }
+        }
+        // 删除音乐源二次确认（与清空收藏同一套自绘 Dialog 风格：取消键初始聚焦，确认键 Coral）
+        pendingDelete?.let { target ->
+            Dialog(onDismissRequest = { pendingDelete = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                val cancelFocus = confirmCancelFocus
+                LaunchedEffect(target) {
+                    yield()
+                    runCatching { cancelFocus.requestFocus() }
+                }
+                Column(
+                    Modifier
+                        .widthIn(max = 520.dp)
+                        .fillMaxWidth(0.9f)
+                        .background(FnColors.Surface, RoundedCornerShape(8.dp))
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("删除音乐源", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "将删除「${sourceTitle(target)}」及其登录信息，此操作不可撤销。",
+                        color = FnColors.Text,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        LoginActionButton(
+                            onClick = { pendingDelete = null },
+                            modifier = Modifier
+                                .width(132.dp)
+                                .height(46.dp)
+                                .focusRequester(cancelFocus),
+                        ) {
+                            Text("取消", fontSize = 15.sp)
+                        }
+                        LoginActionButton(
+                            onClick = {
+                                val entry = target
+                                pendingDelete = null
+                                onDelete?.invoke(entry)
+                            },
+                            modifier = Modifier
+                                .width(132.dp)
+                                .height(46.dp),
+                            selected = true,
+                        ) {
+                            Text("删除", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }

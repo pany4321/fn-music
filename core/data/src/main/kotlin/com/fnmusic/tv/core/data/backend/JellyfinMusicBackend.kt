@@ -261,6 +261,10 @@ internal class JellyfinMusicBackend(
         call { api.removeFromPlaylist(playlistGuid, listOf(entryId)) }
     }
 
+    override suspend fun deletePlaylist(playlistGuid: String) {
+        call { api.deletePlaylist(playlistGuid) }
+    }
+
     // ---- 歌词 ----
 
     /**

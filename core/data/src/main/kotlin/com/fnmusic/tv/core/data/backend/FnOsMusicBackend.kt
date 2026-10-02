@@ -233,6 +233,10 @@ internal class FnOsMusicBackend(
         session.authenticated { it.removeFromPlaylist(playlistGuid, listOf(track.guid.value)) }
     }
 
+    override suspend fun deletePlaylist(playlistGuid: String) {
+        session.authenticated { it.deletePlaylist(playlistGuid) }
+    }
+
     /** 原始歌词响应体（`LyricListDto` 的 JSON）：与改动前写进缓存/本地库的内容一致。 */
     override suspend fun lyricsRaw(trackGuid: String): String =
         ApiDecoder.json.encodeToString(session.authenticated { it.lyrics(trackGuid) })

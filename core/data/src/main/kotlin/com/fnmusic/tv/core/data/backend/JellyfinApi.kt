@@ -306,6 +306,15 @@ internal class JellyfinApi(
         execute(withAuthorization(request))
     }
 
+    /** 删除歌单本身：`DELETE /Playlists/{id}`（Jellyfin 标准端点）。 */
+    suspend fun deletePlaylist(playlistId: String) {
+        val request = Request.Builder()
+            .url(url("Playlists/$playlistId"))
+            .delete()
+            .build()
+        execute(withAuthorization(request))
+    }
+
     /** 从歌单删条目：必须用 `entryIds`（歌单条目的 PlaylistItemId，不是曲目 id）。 */
     suspend fun removeFromPlaylist(playlistId: String, entryIds: List<String>) {
         val request = Request.Builder()

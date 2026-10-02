@@ -348,6 +348,23 @@ internal fun AuthenticatedApp(
                         container.musicRepository.removeFromPlaylist(route.playlist.guid.value, track)
                     }.isSuccess
                 },
+                allowDeletePlaylist = true,
+                deletePlaylist = {
+                    val ok = runCatching {
+                        container.musicRepository.deletePlaylist(route.playlist.guid.value)
+                    }.isSuccess
+                    if (ok) {
+                        // 从会话级歌单列表里移除,首页歌单行/全部歌单页/添加到歌单弹窗同步消失
+                        val playlistsState = retainedState.list<Playlist>("playlists")
+                        playlistsState.snapshot = playlistsState.snapshot.copy(
+                            entries = playlistsState.snapshot.entries.filterNot {
+                                it.guid.value == route.playlist.guid.value
+                            },
+                        )
+                    }
+                    ok
+                },
+                onPlaylistDeleted = back,
             )
         }
         LibraryRoute.Artists -> ArtistGrid(
@@ -1052,7 +1069,7 @@ private fun BrowseHome(
                 .verticalScroll(rememberScrollState())
         ) {
         Spacer(Modifier.height(12.dp))
-        Text("听点什么", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text("听点什么", fontSize = 32.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
             HomeFeatureCard(
@@ -1134,7 +1151,7 @@ private fun BrowseHome(
             )
         }
         Spacer(Modifier.height(18.dp))
-        Text("歌单", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
+        Text("歌单", fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp))
         // Row + horizontalScroll 取代 LazyRow：列表项常驻组合，行级 FocusRequester
         // 不会因滚动回收而失效（此前造成焦点卡死无法上下移动）。
@@ -1188,7 +1205,7 @@ private fun BrowseHome(
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("随机专辑", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
+            Text("随机专辑", fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(14.dp))
             Button(
                 onClick = { refreshRandomAlbums() },
@@ -1240,7 +1257,7 @@ private fun BrowseHome(
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("随机歌曲", fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
+            Text("随机歌曲", fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(14.dp))
             Button(
                 onClick = { refreshRandomSongs() },
@@ -1297,7 +1314,7 @@ private fun BrowseHome(
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("最近添加", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("最近添加", fontSize = 32.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(14.dp))
         Row(
@@ -2065,31 +2082,15 @@ private fun ProfileStrip(
             ServerChip(serverName)
         }
         Spacer(Modifier.width(12.dp))
-        ProfileActionButton(
-            label = "设置",
-            glyph = ProfileGlyph.Settings,
-            modifier = Modifier
-                .width(83.dp)
-                .focusProperties {
-                    left = FocusRequester.Cancel
-                    right = switchAccountFocus
-                    up = searchUpFocus ?: homeTabFocus
-                    down = artistRowFocus
-                }
-                .focusRequester(settingsFocus)
-                .then(if (focusedKey == "settings") Modifier.focusRequester(restoredFocus) else Modifier)
-                .onFocusChanged { if (it.isFocused) onFocused("settings") },
-            onClick = onSettings,
-        )
-        Spacer(Modifier.width(8.dp))
+        // 「切换音乐源」紧邻它作用的账户/服务器区；「设置」靠最右边缘（惯例）。
         ProfileActionButton(
             label = "切换音乐源",
             glyph = ProfileGlyph.SwitchAccount,
             modifier = Modifier
                 .width(134.dp)
                 .focusProperties {
-                    left = settingsFocus
-                    right = FocusRequester.Cancel
+                    left = FocusRequester.Cancel
+                    right = settingsFocus
                     // 与旁边"设置"一致：UP 回搜索框（正上方横贯全宽），
                     // 之前直接跳到顶栏 tab，多跳一层。
                     up = searchUpFocus ?: myTabFocus
@@ -2099,6 +2100,23 @@ private fun ProfileStrip(
                 .then(if (focusedKey == "switch-account") Modifier.focusRequester(restoredFocus) else Modifier)
                 .onFocusChanged { if (it.isFocused) onFocused("switch-account") },
             onClick = onSwitchAccount,
+        )
+        Spacer(Modifier.width(8.dp))
+        ProfileActionButton(
+            label = "设置",
+            glyph = ProfileGlyph.Settings,
+            modifier = Modifier
+                .width(83.dp)
+                .focusProperties {
+                    left = switchAccountFocus
+                    right = FocusRequester.Cancel
+                    up = searchUpFocus ?: homeTabFocus
+                    down = artistRowFocus
+                }
+                .focusRequester(settingsFocus)
+                .then(if (focusedKey == "settings") Modifier.focusRequester(restoredFocus) else Modifier)
+                .onFocusChanged { if (it.isFocused) onFocused("settings") },
+            onClick = onSettings,
         )
     }
 }
@@ -2624,7 +2642,7 @@ private fun <T> PagedCatalogPage(
                     )
                     Spacer(Modifier.width(16.dp))
                 }
-                Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                Text(title, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                 snapshot.total?.let { total ->
                     Spacer(Modifier.width(14.dp))
                     Text(totalLabel(total), color = FnColors.Muted, fontSize = 12.sp)
@@ -2761,7 +2779,7 @@ private fun <T> GridPage(
                 )
                 Spacer(Modifier.width(16.dp))
             }
-            Text(title, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+            Text(title, fontSize = 34.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(20.dp))
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -3120,6 +3138,12 @@ private fun TrackCollection(
     removeKindLabel: String = "从歌单删除",
     /** 收藏页专用：允许"清空全部收藏"（没有批量接口，逐条取消并显示进度）。 */
     allowClearFavorites: Boolean = false,
+    /** 歌单详情页专用：允许"删除歌单"（含二次确认）。 */
+    allowDeletePlaylist: Boolean = false,
+    /** 删除歌单动作（数据层+retained 列表清理），返回是否成功。 */
+    deletePlaylist: (suspend () -> Boolean)? = null,
+    /** 歌单删除成功后的收尾（通常是返回上一页）。 */
+    onPlaylistDeleted: () -> Unit = {},
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val retained = retainedStore.tracks(stateKey)
@@ -3150,6 +3174,10 @@ private fun TrackCollection(
     var clearTotal by remember(stateKey) { mutableStateOf(0) }
     var clearMessage by remember(stateKey) { mutableStateOf<String?>(null) }
     var clearJob by remember(stateKey) { mutableStateOf<Job?>(null) }
+    // 删除歌单：确认弹窗状态与执行信息
+    var deleteConfirmVisible by remember(stateKey) { mutableStateOf(false) }
+    var deletingPlaylist by remember(stateKey) { mutableStateOf(false) }
+    var deletePlaylistMessage by remember(stateKey) { mutableStateOf<String?>(null) }
 
     fun requestRemove(track: Track) {
         if (removingTrack || removeTrack == null) return
@@ -3342,6 +3370,7 @@ private fun TrackCollection(
         val availableKeys = buildList {
             if (primaryActionEnabled) add("primary-action")
             if (allowClearFavorites && tracks.isNotEmpty()) add("clear-action")
+            if (allowDeletePlaylist) add("delete-playlist")
             detailHeader.tabs.filter { it.selected }.forEach { add(it.key) }
             if (showTrackList) addAll(playableTracks.map { it.guid.value })
             add("detail-back")
@@ -3400,6 +3429,9 @@ private fun TrackCollection(
         clearing = clearing,
         clearProgress = if (clearing) "$clearRemoved / $clearTotal" else null,
         onClearAction = { clearConfirmVisible = true },
+        deletePlaylistEnabled = allowDeletePlaylist,
+        deletingPlaylist = deletingPlaylist,
+        onDeletePlaylistAction = { deleteConfirmVisible = true },
     )
 
     if (clearConfirmVisible && allowClearFavorites) {
@@ -3466,6 +3498,86 @@ private fun TrackCollection(
                         ) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("清空", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 删除歌单二次确认：与清空收藏同一套风格（取消键初始聚焦、确认键 Coral）。
+    if (deleteConfirmVisible && allowDeletePlaylist) {
+        val deleteShape = RoundedCornerShape(24.dp)
+        val deleteScale = ButtonDefaults.scale(focusedScale = 1.05f)
+        val deleteCancelFocus = remember(stateKey) { FocusRequester() }
+        LaunchedEffect(deleteConfirmVisible) {
+            yield()
+            runCatching { deleteCancelFocus.requestFocus() }
+        }
+        Dialog(onDismissRequest = { if (!deletingPlaylist) deleteConfirmVisible = false }) {
+            Column(
+                Modifier
+                    .widthIn(max = 520.dp)
+                    .fillMaxWidth(0.9f)
+                    .background(FnColors.Surface, RoundedCornerShape(8.dp))
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(if (deletingPlaylist) "正在删除歌单" else "删除歌单", fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    when {
+                        deletingPlaylist -> "正在删除…"
+                        deletePlaylistMessage != null -> deletePlaylistMessage.orEmpty()
+                        else -> "将删除歌单「$title」及其全部歌曲，此操作不可撤销。"
+                    },
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    Button(
+                        onClick = { if (!deletingPlaylist) deleteConfirmVisible = false },
+                        modifier = Modifier
+                            .size(width = 132.dp, height = 46.dp)
+                            .focusRequester(deleteCancelFocus),
+                        shape = ButtonDefaults.shape(deleteShape, deleteShape, deleteShape, deleteShape, deleteShape),
+                        scale = deleteScale,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("取消", fontSize = 14.sp)
+                        }
+                    }
+                    if (!deletingPlaylist) {
+                        Button(
+                            onClick = {
+                                deletingPlaylist = true
+                                deletePlaylistMessage = null
+                                actionScope.launch {
+                                    val ok = deletePlaylist?.invoke() == true
+                                    deletingPlaylist = false
+                                    if (ok) {
+                                        deleteConfirmVisible = false
+                                        onPlaylistDeleted()
+                                    } else {
+                                        deletePlaylistMessage = "删除失败，当前音乐源可能不支持删除歌单"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.size(width = 132.dp, height = 46.dp),
+                            shape = ButtonDefaults.shape(deleteShape, deleteShape, deleteShape, deleteShape, deleteShape),
+                            scale = deleteScale,
+                            colors = ButtonDefaults.colors(
+                                containerColor = FnColors.Coral,
+                                contentColor = FnColors.Background,
+                            ),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("删除", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -3593,6 +3705,9 @@ private fun DetailTrackCollection(
     clearing: Boolean = false,
     clearProgress: String? = null,
     onClearAction: () -> Unit = {},
+    deletePlaylistEnabled: Boolean = false,
+    deletingPlaylist: Boolean = false,
+    onDeletePlaylistAction: () -> Unit = {},
     alternateContent: @Composable () -> Unit = {},
     emptyMessage: String,
 ) {
@@ -3734,6 +3849,48 @@ private fun DetailTrackCollection(
                         ) {
                             Text(
                                 if (clearing) "清空中… ${clearProgress.orEmpty()}" else "清空",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    if (deletePlaylistEnabled) {
+                        // 放在"清空"右侧(歌单页无清空,即紧跟"播放全部"):右边界取消避免逃逸。
+                        Button(
+                            enabled = !deletingPlaylist,
+                            onClick = onDeletePlaylistAction,
+                            modifier = Modifier
+                                .then(if (focusedKey == "delete-playlist") Modifier.focusRequester(restoredFocus) else Modifier)
+                                .focusProperties { right = FocusRequester.Cancel }
+                                .onFocusChanged { if (it.isFocused) onFocusKey("delete-playlist") }
+                                .height(44.dp),
+                            shape = ButtonDefaults.shape(
+                                primaryShape,
+                                primaryShape,
+                                primaryShape,
+                                primaryShape,
+                                primaryShape,
+                            ),
+                            scale = ButtonDefaults.scale(focusedScale = 1.035f),
+                            colors = ButtonDefaults.colors(
+                                containerColor = FnColors.Surface,
+                                contentColor = FnColors.Text,
+                                focusedContainerColor = FnColors.FocusFill,
+                                focusedContentColor = FnColors.Text,
+                                pressedContainerColor = FnColors.FocusFill,
+                                pressedContentColor = FnColors.Text,
+                                disabledContainerColor = FnColors.Disabled,
+                                disabledContentColor = FnColors.Muted,
+                            ),
+                            border = ButtonDefaults.border(
+                                border = Border(BorderStroke(1.dp, FnColors.Hairline), shape = primaryShape),
+                                focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = primaryShape),
+                                pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = primaryShape),
+                            ),
+                            contentPadding = PaddingValues(horizontal = 19.dp, vertical = 0.dp),
+                        ) {
+                            Text(
+                                if (deletingPlaylist) "删除中…" else "删除歌单",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -5290,7 +5447,7 @@ private fun SearchRoute(
                 onClick = onBack,
             )
             Spacer(Modifier.width(16.dp))
-            Text("搜索", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+            Text("搜索", fontSize = 34.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(18.dp))
         val fieldShape = RoundedCornerShape(27.dp)
@@ -5697,8 +5854,8 @@ private fun TrackContextMenuDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            // 宽度只求放下菜单项文字（用户反馈 0.9/420 太宽）；不显示歌名标题。
-            val dialogWidth = minOf(maxWidth * 0.62f, 300.dp)
+            // 标题行(歌名+关闭)加入后宽度略放宽,仍以放下菜单项文字为准。
+            val dialogWidth = minOf(maxWidth * 0.62f, 320.dp)
             Column(
                 Modifier
                     .width(dialogWidth)
@@ -5706,6 +5863,49 @@ private fun TrackContextMenuDialog(
                     .padding(vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        track.title,
+                        color = FnColors.Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        // 超长歌名与首页小窗一致:静止 3 秒后循环滚动
+                        overflow = TextOverflow.Clip,
+                        modifier = Modifier
+                            .weight(1f)
+                            .basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                repeatDelayMillis = 0,
+                                initialDelayMillis = 3000,
+                            ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // ✕ 关闭:仅指针/焦点关闭入口,D-pad 焦点仍默认落在"歌曲信息"
+                    val closeShape = CircleShape
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(44.dp),
+                        shape = ButtonDefaults.shape(closeShape, closeShape, closeShape, closeShape, closeShape),
+                        scale = ButtonDefaults.scale(focusedScale = 1.05f),
+                        colors = ButtonDefaults.colors(
+                            containerColor = Color.Transparent,
+                            contentColor = FnColors.Muted,
+                            focusedContainerColor = FnColors.Coral,
+                            focusedContentColor = FnColors.Background,
+                        ),
+                        border = ButtonDefaults.border(
+                            border = Border(BorderStroke(0.dp, Color.Transparent), shape = closeShape),
+                            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
                 TrackMenuItem(label = "歌曲信息", focusRequester = firstItemFocus) { infoVisible = true }
                 TrackMenuItem(label = "现在播放") {
                     onDismiss()

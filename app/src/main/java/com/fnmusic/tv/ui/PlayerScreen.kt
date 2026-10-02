@@ -9,6 +9,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -944,8 +945,16 @@ private fun PlayerDetails(
                 lineHeight = if (poster) 28.sp else 38.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                // 跑马灯按无限宽测量完整文本，Clip 才不会在滚动内容尾部出现省略号
+                overflow = TextOverflow.Clip,
+                // 超宽时静止 3 秒后不间断循环滚动；不超宽则完全静止（与首页小窗一致）
+                modifier = Modifier
+                    .weight(1f)
+                    .basicMarquee(
+                        iterations = Int.MAX_VALUE,
+                        repeatDelayMillis = 0,
+                        initialDelayMillis = 3000,
+                    ),
             )
             if (audioFormat.isNotBlank()) {
                 Spacer(Modifier.width(12.dp))

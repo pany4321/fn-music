@@ -135,6 +135,15 @@ class TrimMusicApi(
         return result.guidOrNull() ?: throw AppException(AppError.Unknown("playlist_create_no_guid"))
     }
 
+    /**
+     * 删除歌单：POST playlist/delete {"guid": guid}。
+     * 端点命名按 create/remove-track 的规律推测（仓库无 fn API 文档），
+     * 服务端不支持时会以 HTTP 错误浮出，UI 层提示"当前音乐源不支持删除歌单"。
+     */
+    suspend fun deletePlaylist(guid: String) {
+        postUnit("playlist/delete", PlaylistDeleteRequest(guid))
+    }
+
     suspend fun createFavorite(trackGuid: String) {
         postUnit("favorite-track/create", FavoriteTrackRequest(trackGuid))
     }

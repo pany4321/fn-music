@@ -34,6 +34,7 @@ data class SystemConfigDto(
 
 /** 新建歌单请求：coverId 用服务端约定的 playlist_<32位hex> 形式。 */
 @Serializable data class PlaylistCreateRequest(val coverId: String, val name: String)
+@Serializable data class PlaylistDeleteRequest(val guid: String)
 
 /** 新建歌单返回：不同版本服务端把新 guid 放在不同层级，逐层兜底解析。 */
 @Serializable data class PlaylistCreateResultDto(

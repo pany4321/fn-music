@@ -406,6 +406,26 @@ internal fun SettingsScreen(
                                         .focusRequester(cacheFocuses[index]),
                                 )
                             }
+                            // 清除按钮与档位胶囊同尺寸、同 FlowRow：窄屏随整体换行不挤压，
+                            // 注释文字保持在 FlowRow 之下（所有按钮最下方）。
+                            SettingsActionButton(
+                                label = "清除缓存",
+                                onClick = {
+                                    scope.launch {
+                                        container.authenticatedActions.clearAllEvictableCaches()
+                                        refreshUsage()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .width(104.dp)
+                                    .focusProperties {
+                                        up = onlineLyricsFocus
+                                        down = themeFocuses.first()
+                                        left = cacheFocuses.last()
+                                        right = FocusRequester.Cancel
+                                    }
+                                    .focusRequester(clearCacheFocus),
+                            )
                         }
                         Text(
                             "当前 ${formatBytes(usage.totalBytes)}（图片 ${formatBytes(usage.artworkBytes)} / 资料 ${formatBytes(usage.indexBytes)}）",
@@ -414,29 +434,6 @@ internal fun SettingsScreen(
                             lineHeight = 12.sp,
                         )
                     }
-                    Spacer(Modifier.weight(1f))
-                    SettingsActionButton(
-                        label = "清除图片、资料与歌词缓存",
-                        onClick = {
-                            scope.launch {
-                                container.authenticatedActions.clearAllEvictableCaches()
-                                refreshUsage()
-                            }
-                        },
-                        modifier = Modifier
-                            .width(166.dp)
-                            // 与左侧第一行 MB 档位胶囊水平对齐（整行是 CenterVertically，
-                            // 左侧列带"当前占用"文字比按钮高，居中后按钮会沉到胶囊行下方）
-                            .align(Alignment.Top)
-                            .focusProperties {
-                                up = onlineLyricsFocus
-                                // 下方是主题行。
-                                down = themeFocuses.first()
-                                left = cacheFocuses.last()
-                                right = FocusRequester.Cancel
-                            }
-                            .focusRequester(clearCacheFocus),
-                    )
                 }
                 SettingsDivider()
                 Row(
@@ -512,7 +509,7 @@ internal fun SettingsScreen(
                         }
                     }
                     Text(
-                        "自动按屏幕密度选择：1080P 车机 1.25 倍，电视/手机 1 倍。车机建议「较大」（1.5 倍）。",
+                        "自动按屏幕密度选择：1080P 车机 1.25 倍，电视/手机 1 倍。",
                         color = FnColors.Muted,
                         fontSize = 10.sp,
                         lineHeight = 12.sp,
@@ -526,26 +523,34 @@ internal fun SettingsScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .height(114.dp)
+                    .height(124.dp)
                     .background(SettingsPanel, RoundedCornerShape(9.dp))
                     .border(0.75.dp, SettingsBorderColor, RoundedCornerShape(9.dp))
                     .padding(horizontal = 22.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
-                    Modifier.width(238.dp),
+                    Modifier.width(272.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Image(
                         painter = painterResource(R.drawable.ic_logo),
                         contentDescription = null,
-                        modifier = Modifier.size(46.dp),
+                        modifier = Modifier.size(56.dp),
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("音乐坞", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                         Text(
                             "Android TV / 车机 音乐播放器",
+                            color = FnColors.Muted,
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "支持飞牛和Jellyfin音乐服务端",
                             color = FnColors.Muted,
                             fontSize = 10.sp,
                             lineHeight = 12.sp,

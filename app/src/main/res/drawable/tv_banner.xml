@@ -5,26 +5,31 @@
     android:viewportWidth="320"
     android:viewportHeight="180"
     tools:ignore="VectorRaster">
-    <path android:fillColor="#111315" android:pathData="M0,0h320v180h-320z" />
-    <!-- Coral record with a sound wave pressed into it -->
+    <!-- Coral ground (upper overlay simulates the two-stop gradient, matching ic_logo) -->
+    <path android:fillColor="#FF7657" android:pathData="M0,0h320v180h-320z" />
     <path
-        android:fillColor="#FF684D"
+        android:fillColor="#FF866D"
+        android:fillAlpha="0.55"
+        android:pathData="M0,0h320v64c0,6.6 -5.4,12 -12,12h-296c-6.6,0 -12,-5.4 -12,-12z" />
+    <!-- Charcoal record with a warm sound wave pressed into it -->
+    <path
+        android:fillColor="#111315"
         android:pathData="M42,90 a46,46 0 1 1 92,0 a46,46 0 1 1 -92,0 Z" />
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#111315"
-        android:strokeAlpha="0.22"
+        android:strokeColor="#FF7657"
+        android:strokeAlpha="0.28"
         android:strokeWidth="2.2"
         android:pathData="M56.5,90 a31.5,31.5 0 1 1 63.0,0 a31.5,31.5 0 1 1 -63.0,0 Z" />
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="#F5F1E8"
-        android:strokeAlpha="0.3"
+        android:strokeAlpha="0.34"
         android:strokeWidth="2.4"
         android:pathData="M42,90 a46,46 0 1 1 92,0 a46,46 0 1 1 -92,0 Z" />
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#111315"
+        android:strokeColor="#F5F1E8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="8.0"

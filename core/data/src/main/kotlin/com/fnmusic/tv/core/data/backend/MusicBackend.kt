@@ -238,6 +238,13 @@ interface MusicBackend {
      */
     suspend fun removeFromPlaylist(playlistGuid: String, track: Track)
 
+    /**
+     * 删除整个歌单。
+     * 飞牛走推测端点 `playlist/delete`（仓库无文档，服务端不支持时会以 HTTP 错误浮出）；
+     * Jellyfin 走标准 `DELETE /Playlists/{id}`。
+     */
+    suspend fun deletePlaylist(playlistGuid: String)
+
     // ---- 歌词 ----
 
     /** 服务端歌词的原始响应体（可缓存；没有歌词时按各家约定返回空表示）。 */

@@ -3,32 +3,37 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Charcoal rounded square -->
+    <!-- Coral rounded square (brand primary; upper overlay simulates the two-stop gradient
+         without aapt:attr gradients, which require API 24 — minSdk is 23) -->
+    <path
+        android:fillColor="#FF7657"
+        android:pathData="M22,0 H86 C98.15,0 108,9.85 108,22 V86 C108,98.15 98.15,108 86,108 H22 C9.85,108 0,98.15 0,86 V22 C0,9.85 9.85,0 22,0 Z" />
+    <path
+        android:fillColor="#FF866D"
+        android:fillAlpha="0.55"
+        android:pathData="M22,0 H86 C98.15,0 108,9.85 108,22 V46 C108,52.6 102.6,58 96,58 H12 C5.4,58 0,52.6 0,46 V22 C0,9.85 9.85,0 22,0 Z" />
+    <!-- Deep charcoal record (pressed into the coral ground) -->
     <path
         android:fillColor="#111315"
-        android:pathData="M22,0 H86 C98.15,0 108,9.85 108,22 V86 C108,98.15 98.15,108 86,108 H22 C9.85,108 0,98.15 0,86 V22 C0,9.85 9.85,0 22,0 Z" />
-    <!-- Coral record -->
-    <path
-        android:fillColor="#FF684D"
         android:pathData="M24,54 a30,30 0 1 1 60,0 a30,30 0 1 1 -60,0 Z" />
     <!-- Inner groove -->
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#111315"
-        android:strokeAlpha="0.22"
+        android:strokeColor="#FF7657"
+        android:strokeAlpha="0.28"
         android:strokeWidth="1.5"
         android:pathData="M33.5,54 a20.5,20.5 0 1 1 41.0,0 a20.5,20.5 0 1 1 -41.0,0 Z" />
     <!-- Warm edge light -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="#F5F1E8"
-        android:strokeAlpha="0.3"
+        android:strokeAlpha="0.34"
         android:strokeWidth="1.7"
         android:pathData="M24,54 a30,30 0 1 1 60,0 a30,30 0 1 1 -60,0 Z" />
     <!-- Sound wave pressed into the record -->
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#111315"
+        android:strokeColor="#F5F1E8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="6.2"

@@ -416,6 +416,16 @@ class MusicRepository internal constructor(
      * 新建歌单并返回它（guid 由服务端下发，封面 id 由后端按自家约定生成）。
      * 歌单索引（"playlists"）是带缓存的，创建后失效索引缓存，首页歌单行/全部歌单页下次加载就能看到。
      */
+    /**
+     * 删除整个歌单：失效歌单索引与该歌单的详情/曲目页缓存。
+     * fn 源的删除端点是按命名规律推测的，服务端不支持时会以 HTTP 错误浮出。
+     */
+    suspend fun deletePlaylist(playlistGuid: String) {
+        backend.deletePlaylist(playlistGuid)
+        runCatching { responses.invalidateSource(session.cacheNamespace(), "playlists") }
+        invalidatePlaylistPages(playlistGuid)
+    }
+
     suspend fun createPlaylist(name: String): Playlist {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty())
