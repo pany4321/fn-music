@@ -2691,35 +2691,6 @@ internal fun AddToPlaylistDialog(
                 Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 val addShape = CircleShape
                 val closeShape = CircleShape
-                // ✕ 关闭:仅指针/焦点关闭入口,D-pad 焦点链为 歌单列表→新建→✕
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .focusProperties {
-                            left = addActionFocus
-                            down = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
-                            right = FocusRequester.Cancel
-                            up = FocusRequester.Cancel
-                        },
-                    shape = ButtonDefaults.shape(closeShape, closeShape, closeShape, closeShape, closeShape),
-                    scale = ButtonDefaults.scale(focusedScale = 1.06f),
-                    colors = ButtonDefaults.colors(
-                        containerColor = FnColors.Control,
-                        contentColor = FnColors.Muted,
-                        focusedContainerColor = FnColors.Coral,
-                        focusedContentColor = FnColors.Background,
-                    ),
-                    border = ButtonDefaults.border(
-                        border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = closeShape),
-                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
-                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
-                    ),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Text("✕", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Spacer(Modifier.width(10.dp))
                 Button(
                     onClick = {
                         if (pendingGuid != null) return@Button
@@ -2753,6 +2724,35 @@ internal fun AddToPlaylistDialog(
                     contentPadding = PaddingValues(0.dp),
                 ) {
                     Text("+", fontSize = 24.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(10.dp))
+                // ✕ 关闭:D-pad 链 歌单列表→新建→✕;右侧取消防逃逸。
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .focusProperties {
+                            left = addActionFocus
+                            down = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                        },
+                    shape = ButtonDefaults.shape(closeShape, closeShape, closeShape, closeShape, closeShape),
+                    scale = ButtonDefaults.scale(focusedScale = 1.06f),
+                    colors = ButtonDefaults.colors(
+                        containerColor = FnColors.Control,
+                        contentColor = FnColors.Muted,
+                        focusedContainerColor = FnColors.Coral,
+                        focusedContentColor = FnColors.Background,
+                    ),
+                    border = ButtonDefaults.border(
+                        border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = closeShape),
+                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
+                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text("✕", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Button(
                     onClick = {

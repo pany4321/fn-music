@@ -632,13 +632,13 @@ fun KaraokeLineText(
                 if (overflowPx <= 0f) 0f
                 else {
                     val t = currentTimeProvider()
-                    // 设计意图（真机定稿）：起始居左**固定停 2.5 秒**（首字完整可读）→ 单次左移
+                    // 设计意图（真机定稿）：起始居左**固定停 2 秒**（首字完整可读）→ 单次左移
                     // （约 2 秒；本行剩余不足 2 秒时按剩余时长压缩，保证行尾一定滚到）→
                     // 行尾完整显示并停留到本行结束。此前按"行时长的 20%→80%"计算，
                     // 短句的驻留被压到 1 秒左右，首字刚显示就被左移裁掉。
                     val elapsed = (t - line.start).coerceAtLeast(0).toFloat()
                     val span = (line.end - line.start).coerceAtLeast(1)
-                    val scrollStart = 2_500f
+                    val scrollStart = 2_000f
                     val scrollDuration = (span - scrollStart).coerceIn(1_000f, 2_000f)
                     ((elapsed - scrollStart) / scrollDuration).coerceIn(0f, 1f)
                 }
