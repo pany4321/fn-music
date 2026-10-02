@@ -15,21 +15,21 @@
     <!-- Deep charcoal record (pressed into the coral ground) -->
     <path
         android:fillColor="#111315"
-        android:pathData="M24,54 a30,30 0 1 1 60,0 a30,30 0 1 1 -60,0 Z" />
+        android:pathData="M21,54 a33,33 0 1 1 66,0 a33,33 0 1 1 -66,0 Z" />
     <!-- Inner groove -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="#FF7657"
-        android:strokeAlpha="0.28"
-        android:strokeWidth="1.5"
-        android:pathData="M33.5,54 a20.5,20.5 0 1 1 41.0,0 a20.5,20.5 0 1 1 -41.0,0 Z" />
+        android:strokeAlpha="0.45"
+        android:strokeWidth="2.0"
+        android:pathData="M29.5,54 a24.5,24.5 0 1 1 49.0,0 a24.5,24.5 0 1 1 -49.0,0 Z" />
     <!-- Warm edge light -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeColor="#F5F1E8"
         android:strokeAlpha="0.34"
         android:strokeWidth="1.7"
-        android:pathData="M24,54 a30,30 0 1 1 60,0 a30,30 0 1 1 -60,0 Z" />
+        android:pathData="M21,54 a33,33 0 1 1 66,0 a33,33 0 1 1 -66,0 Z" />
     <!-- Sound wave pressed into the record -->
     <path
         android:fillColor="@android:color/transparent"
@@ -37,5 +37,5 @@
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="6.2"
-        android:pathData="M30,54 Q38.0,41.0 46.0,54 Q54.0,67.0 62.0,54 Q70.0,41.0 78.0,54" />
+        android:pathData="M27,54 Q36.0,40.0 45.0,54 Q54.0,68.0 63.0,54 Q72.0,40.0 81.0,54" />
 </vector>
