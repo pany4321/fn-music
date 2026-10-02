@@ -212,6 +212,24 @@ internal class JellyfinApi(
         )
     }
 
+    /**
+     * 标记已播放（`POST /Users/{userId}/PlayedItems/{itemId}`）。
+     * 幂等：同一曲目只有一条用户数据，重复标记只刷新 DatePlayed——
+     * "最近播放"（IsPlayed + DatePlayed 排序）因此不会出现重复条目。
+     */
+    suspend fun markPlayed(userId: String, itemId: String) {
+        val request = Request.Builder()
+            .url(url("Users/${uid(userId)}/PlayedItems/$itemId"))
+            .post(EMPTY_BODY)
+            .build()
+        execute(
+            request.newBuilder()
+                .header("Accept", "application/json")
+                .header("Authorization", authorizationHeader(requireToken()))
+                .build(),
+        )
+    }
+
     /** 按 id 取单个条目（拿 MediaSources 判断能不能直连）。 */
     suspend fun item(itemId: String, userId: String): JellyfinItemDto? =
         items(

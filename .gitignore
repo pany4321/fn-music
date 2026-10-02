@@ -41,3 +41,4 @@ SearchPlaybackDiagnosticTest.kt
 
 # 会话/计划草稿：里面会写测试服务器地址，不进仓库
 .zcode/
+.zcodeignore

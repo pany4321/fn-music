@@ -209,6 +209,10 @@ internal fun AuthenticatedApp(
     var lastHomeBackAt by remember(session.user.guid) { mutableStateOf(0L) }
     // 最近播放的内容随每次播放变化，进入页面时递增触发整表刷新。
     var recentContentTick by remember(session.user.guid) { mutableStateOf(0L) }
+    // 切歌即失效最近播放快照：播放页返回列表不再拿到旧数据，列表开着时也会跟随刷新。
+    LaunchedEffect(playback.mediaId) {
+        if (playback.mediaId.isNotBlank()) recentContentTick++
+    }
     val route = stack.last()
     val context = LocalContext.current
     val stateHolder = rememberSaveableStateHolder()

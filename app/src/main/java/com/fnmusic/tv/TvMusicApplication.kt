@@ -50,6 +50,7 @@ internal class AppContainer(private val application: Application) : AppUiDepende
         application,
         LocalPlaybackSessionStore(application, localStore),
         RepositoryPlaybackContentSource(musicRepository),
+        onTrackStarted = { trackGuid -> musicRepository.reportTrackPlayed(trackGuid) },
     )
     val playbackResumptionProvider = RepositoryPlaybackResumptionSource(
         context = application,

@@ -236,6 +236,10 @@ internal class JellyfinMusicBackend(
         call { api.setFavorite(userId, trackGuid, favorite) }
     }
 
+    override suspend fun reportTrackPlayed(trackGuid: String) {
+        call { api.markPlayed(userId, trackGuid) }
+    }
+
     /**
      * 新建歌单并返回它。
      * ⚠️ 实测：`POST /Playlists` 只回 `{"Id":"…"}`（不是完整条目），

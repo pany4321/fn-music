@@ -36,6 +36,21 @@ data class SystemConfigDto(
 @Serializable data class PlaylistCreateRequest(val coverId: String, val name: String)
 @Serializable data class PlaylistDeleteRequest(val guid: String)
 
+/**
+ * 播放上报（`POST event/report`）：与官方客户端同构的事件总线请求。
+ * 最近播放 = 服务端收到 track_play 事件后按 trackGUID 去重、刷新最近播放时间，
+ * 不会为重复播放生成多条历史。
+ */
+@Serializable data class EventReportRequest(val events: List<EventReportEvent>)
+
+@Serializable data class EventReportEvent(
+    val eventType: String,
+    val occurredAt: Long,
+    val payload: EventTrackPlayPayload,
+)
+
+@Serializable data class EventTrackPlayPayload(val trackGUID: String)
+
 /** 新建歌单返回：不同版本服务端把新 guid 放在不同层级，逐层兜底解析。 */
 @Serializable data class PlaylistCreateResultDto(
     val guid: String? = null,

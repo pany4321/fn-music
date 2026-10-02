@@ -144,6 +144,26 @@ class TrimMusicApi(
         postUnit("playlist/delete", PlaylistDeleteRequest(guid))
     }
 
+    /**
+     * 播放上报：POST event/report（track_play 事件）。
+     * 协议取自官方 Web 客户端（飞牛音乐），失败提示文案即"播放历史记录失败"；
+     * 服务端按 trackGUID 去重、刷新最近播放时间，重复播放不产生多条历史。
+     */
+    suspend fun reportTrackPlayed(trackGuid: String) {
+        postUnit(
+            "event/report",
+            EventReportRequest(
+                events = listOf(
+                    EventReportEvent(
+                        eventType = EVENT_TYPE_TRACK_PLAY,
+                        occurredAt = System.currentTimeMillis(),
+                        payload = EventTrackPlayPayload(trackGuid),
+                    ),
+                ),
+            ),
+        )
+    }
+
     suspend fun createFavorite(trackGuid: String) {
         postUnit("favorite-track/create", FavoriteTrackRequest(trackGuid))
     }
@@ -321,6 +341,9 @@ class TrimMusicApi(
 
     companion object {
         private const val MAX_RELAY_REDIRECTS = 5
+
+        /** 官方客户端事件枚举：TrackPlay = "track_play"。 */
+        private const val EVENT_TYPE_TRACK_PLAY = "track_play"
 
         fun client(): OkHttpClient = OkHttpClient.Builder()
             .followRedirects(false)

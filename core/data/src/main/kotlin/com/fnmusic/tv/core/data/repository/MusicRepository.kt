@@ -426,6 +426,15 @@ class MusicRepository internal constructor(
         invalidatePlaylistPages(playlistGuid)
     }
 
+    /**
+     * 上报一次播放（"最近播放"的数据来源）：服务端按曲目去重、刷新最近播放时间。
+     * 未登录/网络失败时静默失败——上报不能影响播放本身。
+     */
+    suspend fun reportTrackPlayed(trackGuid: String) {
+        if (trackGuid.isBlank()) return
+        runCatching { backend.reportTrackPlayed(trackGuid) }
+    }
+
     suspend fun createPlaylist(name: String): Playlist {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty())

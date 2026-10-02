@@ -245,6 +245,13 @@ interface MusicBackend {
      */
     suspend fun deletePlaylist(playlistGuid: String)
 
+    /**
+     * 记一次播放（"最近播放"的数据来源）。
+     * 服务端按曲目去重、刷新最近播放时间——重复播放不产生多条历史。
+     * 飞牛走官方客户端同款 `event/report`；Jellyfin 走幂等的 `PlayedItems` 标记。
+     */
+    suspend fun reportTrackPlayed(trackGuid: String)
+
     // ---- 歌词 ----
 
     /** 服务端歌词的原始响应体（可缓存；没有歌词时按各家约定返回空表示）。 */
