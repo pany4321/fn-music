@@ -457,6 +457,24 @@ class TrimMusicApiTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun `reportTrackPlayed posts track play event with guid payload`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder().body("""{"code":0,"msg":"success"}""").build(),
+        )
+
+        api().reportTrackPlayed("track-guid-9")
+
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/music/api/v1/event/report", request.target)
+        assertEquals("raw-user-token", request.headers["Authorization"])
+        val payload = ApiDecoder.json.decodeFromString<EventReportRequest>(request.body?.utf8().orEmpty())
+        assertEquals(1, payload.events.size)
+        assertEquals("track_play", payload.events.single().eventType)
+        assertEquals("track-guid-9", payload.events.single().payload.trackGUID)
+        assertTrue(payload.events.single().occurredAt > 0)
+    }
+
     private fun api(client: OkHttpClient = TrimMusicApi.client()): TrimMusicApi {
         val origin = server.url("/")
         return TrimMusicApi(

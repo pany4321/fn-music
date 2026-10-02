@@ -209,10 +209,6 @@ internal fun AuthenticatedApp(
     var lastHomeBackAt by remember(session.user.guid) { mutableStateOf(0L) }
     // 最近播放的内容随每次播放变化，进入页面时递增触发整表刷新。
     var recentContentTick by remember(session.user.guid) { mutableStateOf(0L) }
-    // 切歌即失效最近播放快照：播放页返回列表不再拿到旧数据，列表开着时也会跟随刷新。
-    LaunchedEffect(playback.mediaId) {
-        if (playback.mediaId.isNotBlank()) recentContentTick++
-    }
     val route = stack.last()
     val context = LocalContext.current
     val stateHolder = rememberSaveableStateHolder()
@@ -225,6 +221,13 @@ internal fun AuthenticatedApp(
     val open: (LibraryRoute) -> Unit = { stack = stack + it }
     val root: (LibraryRoute) -> Unit = { stack = listOf(it) }
     val back: () -> Unit = { if (stack.size > 1) stack = stack.dropLast(1) }
+    // 切歌即失效最近播放快照——但只在"不在最近播放页"时递增：
+    // TrackCollection 对 revision 变化是整表重置（滚动/焦点/已加载分页都丢），
+    // 浏览列表时跟随刷新会每 3-4 分钟被重置一次；此时列表保持稳定，
+    // 下次进入（首页卡片/从播放页返回，mediaId 在播放页变化时已递增）即拿到最新。
+    LaunchedEffect(playback.mediaId, route) {
+        if (playback.mediaId.isNotBlank() && route !is LibraryRoute.Recent) recentContentTick++
+    }
     LaunchedEffect(route) {
         container.updateController.setAutomaticPromptAllowed(route !is LibraryRoute.Player)
     }
@@ -450,6 +453,8 @@ internal fun AuthenticatedApp(
                 ),
                 contentRevision = recentContentTick,
                 emptyMessage = "还没有播放记录",
+                // 最近播放只取最近 50 首（一页即全量），历史全量在服务端，不需要向下翻。
+                maxPages = 1,
             )
         }
         is LibraryRoute.ArtistDetail -> ArtistDetail(
@@ -3151,6 +3156,8 @@ private fun TrackCollection(
     deletePlaylist: (suspend () -> Boolean)? = null,
     /** 歌单删除成功后的收尾（通常是返回上一页）。 */
     onPlaylistDeleted: () -> Unit = {},
+    /** 最多加载的页数：最近播放只取最近 50 首（一页即全量），不再显示"加载更多"。 */
+    maxPages: Int = Int.MAX_VALUE,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val retained = retainedStore.tracks(stateKey)
@@ -3408,6 +3415,7 @@ private fun TrackCollection(
         loading = loading,
         error = error,
         hasNext = hasNext,
+        showLoadMore = hasNext && page < maxPages,
         listState = listState,
         focusedKey = focusedKey,
         restoredFocus = restoredFocus,
@@ -3422,7 +3430,7 @@ private fun TrackCollection(
         onTrackFocused = { index, key ->
             focusedKey = key
             onFocusOwnerChanged()
-            if (hasNext && index >= tracks.size - 15) load(page + 1)
+            if (hasNext && page < maxPages && index >= tracks.size - 15) load(page + 1)
         },
         onTrack = ::play,
         onPlayer = onPlayer,
@@ -3691,6 +3699,8 @@ private fun DetailTrackCollection(
     loading: Boolean,
     error: AppError?,
     hasNext: Boolean,
+    /** 是否显示"加载更多"：最近播放限 50 首（maxPages=1）时为 false，列表只有一页。 */
+    showLoadMore: Boolean,
     listState: androidx.compose.foundation.lazy.LazyListState,
     focusedKey: String?,
     restoredFocus: FocusRequester,
@@ -3945,7 +3955,7 @@ private fun DetailTrackCollection(
                         onClick = { menuTrackIndex = index },
                     )
                 }
-                if (hasNext) {
+                if (showLoadMore) {
                     item {
                         Button(
                             enabled = !loading,

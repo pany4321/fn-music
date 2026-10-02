@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
-import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -60,8 +59,8 @@ internal fun StreamMode.media3MimeType(): String? = when (this) {
     StreamMode.HttpTranscode -> null
 }
 
-/** 最近播放上报防抖：同一首歌 2 秒内重复触发（如切歌与队列重建叠加）只报一次。 */
-private const val PLAY_REPORT_DEBOUNCE_MS = 2_000L
+/** 最近播放上报延迟：真实播放达到该时长才记一次，秒切/失败跳过不算"播过"。 */
+private const val PLAY_REPORT_DELAY_MS = 3_000L
 
 internal data class QueueRemovalPlan(
     val removeIndex: Int,
@@ -131,8 +130,11 @@ class PlaybackController(
     private var roamError: AppError? = null
     private var failedRoamDirection: RoamDirection? = null
     private var consecutiveDecodeFailures = 0
-    private var lastReportedTrackGuid: String? = null
-    private var lastReportedTrackAt = 0L
+    private val trackReportScheduler = TrackReportScheduler(
+        scope = scope,
+        delayMs = PLAY_REPORT_DELAY_MS,
+        report = onTrackStarted,
+    )
     private val queueProjector = PlaybackQueueProjector(MAX_QUEUE_ITEMS)
     private var forceNextPresentationProjection = false
     private val autoAdvanceGate = RoamAutoAdvanceGate()
@@ -147,13 +149,13 @@ class PlaybackController(
                     structuralSnapshot(player)
                 }
             }
-            maybeReportTrackStarted(mediaItem)
+            trackReportScheduler.onTrackBecameCurrent(mediaItem?.mediaId, controller?.playWhenReady == true)
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            // 覆盖两条 transition 覆盖不到的路径：暂停后继续播（刷新该曲最近时间）、
+            // 覆盖两条 transition 覆盖不到的路径：暂停后继续播、
             // "先 prepare 后 play"导致 transition 时还未开始播放的首次起播。
-            if (playWhenReady) maybeReportTrackStarted(controller?.currentMediaItem)
+            trackReportScheduler.onPlayWhenReadyChanged(playWhenReady, controller?.currentMediaItem?.mediaId)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -199,23 +201,6 @@ class PlaybackController(
                 ),
             )
         }
-    }
-
-    /**
-     * 最近播放上报：一首歌"成为当前曲目且正在播放"就记一次。
-     * 服务端按曲目去重、刷新最近播放时间（重复播放不产生多条历史），
-     * 所以这里不怕重复触发，只做短时防抖避免网络请求刷屏。
-     * 快照恢复（暂停态挂上 mediaId）不报：没有真实播放不算"播过"。
-     */
-    private fun maybeReportTrackStarted(mediaItem: MediaItem?) {
-        val guid = mediaItem?.mediaId?.takeIf(String::isNotBlank) ?: return
-        val player = controller ?: return
-        if (!player.playWhenReady || player.playbackState == Player.STATE_ENDED) return
-        val now = SystemClock.uptimeMillis()
-        if (guid == lastReportedTrackGuid && now - lastReportedTrackAt < PLAY_REPORT_DEBOUNCE_MS) return
-        lastReportedTrackGuid = guid
-        lastReportedTrackAt = now
-        scope.launch { runCatching { onTrackStarted(guid) } }
     }
 
     fun connect() {
