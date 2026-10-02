@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.yield
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import kotlinx.coroutines.yield
 import androidx.tv.material3.Text
 import com.fnmusic.tv.core.data.repository.LoginHistoryEntry
 import com.fnmusic.tv.core.data.repository.SourceTestResult
@@ -120,12 +119,17 @@ internal fun SourceRow(
     testing: Boolean = false,
     onDelete: (() -> Unit)? = null,
 ) {
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // 三列等高 68dp 且垂直居中：行内任何一侧都不再高出/偏上。
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         LoginActionButton(
             onClick = { if (!active) onSelect() },
             modifier = Modifier
                 .weight(1f)
-                .height(80.dp)
+                .height(68.dp)
                 .semantics { contentDescription = "音乐源：${sourceTitle(entry)}" }
                 .focusProperties {
                     left = FocusRequester.Cancel
@@ -335,17 +339,18 @@ internal fun SourcePickerDialog(
                         }
                     }
                 }
-                Spacer(Modifier.height(2.dp))
                 // 底部按钮并排：横屏电视/车机的可视高度很矮，竖着放会把"关闭"挤到屏幕外。
-                // 几何与上方 SourceRow 完全对齐（间距同为 8dp，高度与源行主体一致 72dp）：
-                //   添加音乐源 = 歌单行的主体列（weight 1f）；关闭 = 测试(112) + 间距(8) + 删除(68) = 188dp。
+                // 几何与上方 SourceRow 完全对齐（间距同为 8dp、高度同为 68dp）：
+                //   添加音乐源 = 主体列（weight 1f），右缘落在 W-204 与主体右缘重合；
+                //   关闭 = 测试(112) + 间距(8) + 删除(76) = 196dp，左缘与测试左缘（W-196）重合。
+                // （旧值 188 按"删除宽 68"误算，两处分界线都差 8dp 不对齐。）
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (onAdd != null) {
                         LoginActionButton(
                             onClick = onAdd,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(72.dp)
+                                .height(68.dp)
                                 .semantics { contentDescription = "添加音乐源" }
                                 .focusProperties { right = if (onClearAll != null) clearFocus else closeFocus }
                                 .focusRequester(addFocus),
@@ -358,7 +363,7 @@ internal fun SourcePickerDialog(
                             onClick = onClearAll,
                             modifier = Modifier
                                 .width(170.dp)
-                                .height(72.dp)
+                                .height(68.dp)
                                 .semantics { contentDescription = "清空全部音乐源" }
                                 .focusProperties {
                                     left = if (onAdd != null) addFocus else FocusRequester.Cancel
@@ -372,8 +377,8 @@ internal fun SourcePickerDialog(
                     LoginActionButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .width(188.dp)
-                            .height(72.dp)
+                            .width(196.dp)
+                            .height(68.dp)
                             .semantics { contentDescription = "关闭" }
                             .focusProperties {
                                 left = when {

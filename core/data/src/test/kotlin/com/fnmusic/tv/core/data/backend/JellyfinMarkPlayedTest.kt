@@ -55,9 +55,35 @@ class JellyfinMarkPlayedTest {
             request.target.startsWith("/Users/user-1/PlayedItems/item-9?"),
         )
         assertTrue(
-            "target=$request.target 含 datePlayed",
+            "target=${request.target} 含 datePlayed",
             request.target.contains("datePlayed="),
         )
+        assertNotNull(request.headers["Authorization"])
+    }
+
+    @Test fun `deletePlaylist deletes the playlist as a plain library item`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(204)
+                .build(),
+        )
+
+        val api = JellyfinApi(
+            origin = server.url("/"),
+            client = OkHttpClient.Builder()
+                .callTimeout(5, TimeUnit.SECONDS)
+                .build(),
+            deviceId = "test-device",
+            tokenProvider = { "test-token" },
+        )
+
+        api.deletePlaylist(playlistId = "playlist-9")
+
+        // /Playlists 下没有删除端点（此前 DELETE /Playlists/{id} 必然 404）：
+        // 歌单是普通库条目，标准删除走 /Items/{itemId}。
+        val request = server.takeRequest(5, TimeUnit.SECONDS)!!
+        assertEquals("DELETE", request.method)
+        assertEquals("/Items/playlist-9", request.target)
         assertNotNull(request.headers["Authorization"])
     }
 }

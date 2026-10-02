@@ -332,10 +332,15 @@ internal class JellyfinApi(
         execute(withAuthorization(request))
     }
 
-    /** 删除歌单本身：`DELETE /Playlists/{id}`（Jellyfin 标准端点）。 */
+    /**
+     * 删除歌单本身：`DELETE /Items/{itemId}`。
+     * ⚠️ 此前用的 `DELETE /Playlists/{id}` 在 Jellyfin OpenAPI 里根本不存在
+     * （/Playlists 下只有创建与条目增删），真机实测必然失败；
+     * 歌单是普通库条目，标准删除端点是 /Items/{itemId}（需账号有删除权限）。
+     */
     suspend fun deletePlaylist(playlistId: String) {
         val request = Request.Builder()
-            .url(url("Playlists/$playlistId"))
+            .url(url("Items/$playlistId"))
             .delete()
             .build()
         execute(withAuthorization(request))
