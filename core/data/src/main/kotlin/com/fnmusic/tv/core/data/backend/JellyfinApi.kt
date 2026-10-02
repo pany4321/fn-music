@@ -218,8 +218,16 @@ internal class JellyfinApi(
      * "最近播放"（IsPlayed + DatePlayed 排序）因此不会出现重复条目。
      */
     suspend fun markPlayed(userId: String, itemId: String) {
+        // 实测（bignas 服务器）：不带 datePlayed 的裸标记返回 200 但不刷新 LastPlayedDate，
+        // 最近播放（DatePlayed 排序）因此纹丝不动——必须显式携带本次播放时间。
+        // 每次播放都发当前时间：服务端按曲目去重，重复播放只刷新时间、不产生重复历史。
+        val playedAt = java.time.format.DateTimeFormatter.ISO_INSTANT.format(java.time.Instant.now())
         val request = Request.Builder()
-            .url(url("Users/${uid(userId)}/PlayedItems/$itemId"))
+            .url(
+                url("Users/${uid(userId)}/PlayedItems/$itemId").newBuilder()
+                    .addQueryParameter("datePlayed", playedAt)
+                    .build()
+            )
             .post(EMPTY_BODY)
             .build()
         execute(
