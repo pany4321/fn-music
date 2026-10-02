@@ -374,7 +374,11 @@ internal fun SettingsScreen(
                         fontSize = 12.sp,
                         modifier = Modifier.width(144.dp),
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Column(
+                        // 与区域上下边界留出间距(对齐缩放区的 13dp 处理)
+                        Modifier.padding(vertical = 13.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
                         // FlowRow lets the four budget pills wrap onto extra lines
                         // on narrow car screens instead of clipping.
                         FlowRow(
@@ -447,8 +451,10 @@ internal fun SettingsScreen(
                         modifier = Modifier.width(144.dp),
                     )
                     // 六个主题：窄屏自动换行；左右键行内移动，行首/行尾取消，上下接缓存行与更新按钮。
-                    // 垂直间距必须给：换行后两行胶囊贴死 + 聚焦放大互相压线（真机反馈）
+                    // 垂直间距必须给：换行后两行胶囊贴死 + 聚焦放大互相压线（真机反馈）；
+                    // 外层再与区域上下边界留出间距（对齐缓存区的 13dp 处理）。
                     FlowRow(
+                        modifier = Modifier.padding(vertical = 13.dp),
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
                         verticalArrangement = Arrangement.spacedBy(7.dp),
                     ) {

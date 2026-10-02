@@ -2690,6 +2690,70 @@ internal fun AddToPlaylistDialog(
             ) {
                 Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 val addShape = CircleShape
+                val closeShape = CircleShape
+                // ✕ 关闭:仅指针/焦点关闭入口,D-pad 焦点链为 歌单列表→新建→✕
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .focusProperties {
+                            left = addActionFocus
+                            down = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                        },
+                    shape = ButtonDefaults.shape(closeShape, closeShape, closeShape, closeShape, closeShape),
+                    scale = ButtonDefaults.scale(focusedScale = 1.06f),
+                    colors = ButtonDefaults.colors(
+                        containerColor = FnColors.Control,
+                        contentColor = FnColors.Muted,
+                        focusedContainerColor = FnColors.Coral,
+                        focusedContentColor = FnColors.Background,
+                    ),
+                    border = ButtonDefaults.border(
+                        border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = closeShape),
+                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
+                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text("✕", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Button(
+                    onClick = {
+                        if (pendingGuid != null) return@Button
+                        createError = null
+                        creatingPlaylist = true
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .focusProperties {
+                            // 右上角“新建歌单”：左侧/下方都回到歌单列表，右与上取消，保证不逃逸。
+                            left = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
+                            down = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                        }
+                        .focusRequester(addActionFocus)
+                        .semantics { contentDescription = "新建歌单" },
+                    shape = ButtonDefaults.shape(addShape, addShape, addShape, addShape, addShape),
+                    scale = ButtonDefaults.scale(focusedScale = 1.06f),
+                    colors = ButtonDefaults.colors(
+                        containerColor = FnColors.Control,
+                        contentColor = FnColors.Text,
+                        focusedContainerColor = FnColors.Coral,
+                        focusedContentColor = FnColors.Background,
+                    ),
+                    border = ButtonDefaults.border(
+                        border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = addShape),
+                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = addShape),
+                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = addShape),
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text("+", fontSize = 24.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
+                }
                 Button(
                     onClick = {
                         if (pendingGuid != null) return@Button

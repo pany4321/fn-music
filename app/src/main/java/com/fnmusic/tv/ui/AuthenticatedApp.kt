@@ -5962,6 +5962,7 @@ private fun TrackInfoDialog(track: Track, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        val closeFocus = remember { FocusRequester() }
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val dialogWidth = minOf(maxWidth * 0.9f, 460.dp)
             Column(
@@ -5971,7 +5972,43 @@ private fun TrackInfoDialog(track: Track, onDismiss: () -> Unit) {
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("歌曲信息", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "歌曲信息",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 右上角 ✕ 关闭：唯一的关闭入口（底部"关闭"按钮已移除），D-pad 初始焦点也在这
+                    val closeShape = CircleShape
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .focusRequester(closeFocus)
+                            .focusProperties {
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                                up = FocusRequester.Cancel
+                                down = FocusRequester.Cancel
+                            },
+                        shape = ButtonDefaults.shape(closeShape, closeShape, closeShape, closeShape, closeShape),
+                        scale = ButtonDefaults.scale(focusedScale = 1.06f),
+                        colors = ButtonDefaults.colors(
+                            containerColor = FnColors.Control,
+                            contentColor = FnColors.Muted,
+                            focusedContainerColor = FnColors.Coral,
+                            focusedContentColor = FnColors.Background,
+                        ),
+                        border = ButtonDefaults.border(
+                            border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = closeShape),
+                            focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = closeShape),
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text("✕", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
                 Column(
                     Modifier
                         .heightIn(max = 320.dp)
@@ -5989,29 +6026,11 @@ private fun TrackInfoDialog(track: Track, onDismiss: () -> Unit) {
                         if (track.isFavorite) InfoLine("收藏", "已收藏") else null,
                     ).forEach { row -> row() }
                 }
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .focusRequester(remember { FocusRequester() })
-                        .focusProperties {
-                            left = FocusRequester.Cancel
-                            right = FocusRequester.Cancel
-                        },
-                    colors = ButtonDefaults.colors(
-                        containerColor = FnColors.Control,
-                        contentColor = FnColors.Text,
-                        focusedContainerColor = FnColors.Coral,
-                        focusedContentColor = FnColors.Background,
-                    ),
-                ) {
-                    Text("关闭", fontSize = 14.sp)
-                }
             }
         }
         LaunchedEffect(Unit) {
             yield()
+            runCatching { closeFocus.requestFocus() }
         }
     }
 }
