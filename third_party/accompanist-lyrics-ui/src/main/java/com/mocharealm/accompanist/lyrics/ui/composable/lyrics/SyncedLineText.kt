@@ -79,14 +79,23 @@ fun SyncedLineText(
             val progress = remember(line, currentPositionMs) {
                 derivedStateOf {
                     val t = currentPositionMs.invoke()
-                    // 设计意图（真机定稿）：起始居左**固定停 2 秒** → 单次左移（约 2 秒；本行
-                    // 剩余不足 2 秒时按剩余时长压缩，保证行尾一定滚到）→ 行尾完整显示并
-                    // 停留到本行结束。此前按"行时长的百分比"算驻留期，短句驻留被压到
-                    // 约 1 秒，首字刚显示就被左移裁掉、滚动中段看似居中。
+                    // 设计意图（真机定稿）：超长行的驻留节奏随行时长伸缩——
+                    // 行 ≥6 秒：首尾各**驻留 2 秒**，滚动吃掉其余时间（行越长滚得越缓，
+                    // 滚动恰在行尾驻留前完成）；行 <6 秒（快歌）：滚动占 40%（0.8~2 秒），
+                    // 剩余 55/45 分给首尾（各自封顶 2 秒）——保证滚动在行内滚完，
+                    // 短行的行尾不再因切行被吞（旧固定 2 秒驻留会把 <4 秒的行挤没尾部）。
                     val elapsed = (t - line.start).coerceAtLeast(0)
                     val span = (line.end - line.start).coerceAtLeast(1)
-                    val scrollStart = 2_000f
-                    val scrollDuration = (span - scrollStart).coerceIn(1_000f, 2_000f)
+                    val scrollDuration = if (span >= 6_000f) {
+                        span - 4_000f
+                    } else {
+                        (span * 0.4f).coerceIn(800f, 2_000f).coerceAtMost(span.toFloat())
+                    }
+                    val scrollStart = if (span >= 6_000f) {
+                        2_000f
+                    } else {
+                        ((span - scrollDuration) * 0.55f).coerceIn(0f, 2_000f)
+                    }
                     ((elapsed - scrollStart) / scrollDuration).coerceIn(0f, 1f)
                 }
             }
