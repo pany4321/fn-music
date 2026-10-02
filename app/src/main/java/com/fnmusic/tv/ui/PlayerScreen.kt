@@ -2754,40 +2754,6 @@ internal fun AddToPlaylistDialog(
                 ) {
                     Text("✕", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Button(
-                    onClick = {
-                        if (pendingGuid != null) return@Button
-                        createError = null
-                        creatingPlaylist = true
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .focusProperties {
-                            // 右上角“新建歌单”：左侧/下方都回到歌单列表，右与上取消，保证不逃逸。
-                            left = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
-                            down = rowFocuses.firstOrNull() ?: FocusRequester.Cancel
-                            right = FocusRequester.Cancel
-                            up = FocusRequester.Cancel
-                        }
-                        .focusRequester(addActionFocus)
-                        .semantics { contentDescription = "新建歌单" },
-                    shape = ButtonDefaults.shape(addShape, addShape, addShape, addShape, addShape),
-                    scale = ButtonDefaults.scale(focusedScale = 1.06f),
-                    colors = ButtonDefaults.colors(
-                        containerColor = FnColors.Control,
-                        contentColor = FnColors.Text,
-                        focusedContainerColor = FnColors.Coral,
-                        focusedContentColor = FnColors.Background,
-                    ),
-                    border = ButtonDefaults.border(
-                        border = Border(BorderStroke(0.5.dp, FnColors.Hairline), shape = addShape),
-                        focusedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = addShape),
-                        pressedBorder = Border(BorderStroke(1.5.dp, FnColors.Coral), shape = addShape),
-                    ),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Text("+", fontSize = 24.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
-                }
             }
             // 内容区常规 360dp：加载中/空态/列表占同样空间，弹出不再跳变；
             // 底部消息行也预留固定一行，成功/失败提示出现时高度不变。
