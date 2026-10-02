@@ -967,7 +967,16 @@ private fun PlayerDetails(
             color = FnColors.Muted,
             fontSize = if (poster) 16.sp else 20.sp,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            // 跑马灯按无限宽测量完整文本，Clip 才不会在滚动内容尾部出现省略号
+            overflow = TextOverflow.Clip,
+            // 超宽时静止 3 秒后循环滚动（与歌名/首页小窗一致）；fillMaxWidth 提供有界宽度
+            modifier = Modifier
+                .fillMaxWidth()
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    repeatDelayMillis = 0,
+                    initialDelayMillis = 3000,
+                ),
         )
         Spacer(Modifier.height(if (poster) 44.dp else 34.dp))
         SmoothLyricProgress(

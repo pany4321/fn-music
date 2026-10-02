@@ -530,7 +530,7 @@ internal fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
-                    Modifier.width(272.dp),
+                    Modifier.width(262.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -563,7 +563,7 @@ internal fun SettingsScreen(
                 Column(
                     Modifier
                         .weight(1f)
-                        .padding(horizontal = 26.dp),
+                        .padding(horizontal = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     AboutValue("版本", "${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
@@ -573,7 +573,7 @@ internal fun SettingsScreen(
                 if (container.updateController.enabled) {
                     AboutDivider()
                     Column(
-                        Modifier.width(175.dp).padding(start = 20.dp),
+                        Modifier.width(175.dp).padding(start = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Text("软件更新", color = FnColors.Muted, fontSize = 12.sp, lineHeight = 14.sp)
@@ -638,8 +638,9 @@ private fun AboutValue(label: String, value: String) {
         Text(
             value,
             modifier = Modifier.weight(1f),
-            fontSize = 13.sp,
-            lineHeight = 15.sp,
+            // 12sp：小屏（手机横屏）下 GitHub 完整链接才放得下（配合收窄后的列边距）
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

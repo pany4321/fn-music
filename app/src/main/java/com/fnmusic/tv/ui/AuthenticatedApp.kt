@@ -2068,8 +2068,10 @@ private fun ProfileStrip(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ProfileAvatar(username, Modifier.size(40.dp))
+
         Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+        // 账户信息列紧贴头像（不占满），「切换音乐源」紧跟其后；「设置」由尾部弹性空隙推到最右。
+        Column(verticalArrangement = Arrangement.Center) {
             Text(
                 username.ifBlank { "音乐用户" },
                 fontSize = 18.sp,
@@ -2082,7 +2084,6 @@ private fun ProfileStrip(
             ServerChip(serverName)
         }
         Spacer(Modifier.width(12.dp))
-        // 「切换音乐源」紧邻它作用的账户/服务器区；「设置」靠最右边缘（惯例）。
         ProfileActionButton(
             label = "切换音乐源",
             glyph = ProfileGlyph.SwitchAccount,
@@ -2101,7 +2102,7 @@ private fun ProfileStrip(
                 .onFocusChanged { if (it.isFocused) onFocused("switch-account") },
             onClick = onSwitchAccount,
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.weight(1f))
         ProfileActionButton(
             label = "设置",
             glyph = ProfileGlyph.Settings,
@@ -2155,7 +2156,9 @@ private fun ServerChip(serverName: String) {
         ProfileGlyphCanvas(ProfileGlyph.Server, Modifier.size(11.dp), FnColors.Muted)
         Spacer(Modifier.width(5.dp))
         Text(
-            serverName.ifBlank { "NAS" },
+            // 与音乐源管理窗口一致：旧条目存的简写 "fn" 显示为正式名称
+            (serverName.takeIf { it.isNotBlank() && !it.equals("fn", ignoreCase = true) }
+                ?: "飞牛音乐").ifBlank { "NAS" },
             color = FnColors.Muted,
             fontSize = 10.sp,
             lineHeight = 11.sp,
@@ -5869,7 +5872,8 @@ private fun TrackContextMenuDialog(
                 ) {
                     Text(
                         track.title,
-                        color = FnColors.Text,
+                        // 标题用主题珊瑚色与下方菜单项（正文色）区分
+                        color = FnColors.Coral,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
