@@ -1334,13 +1334,12 @@ private fun BrowseHome(
                         .onFocusChanged { if (it.isFocused) focusedKey = key },
                     onClick = {
                         focusedKey = key
+                        // 菜单关闭后的焦点恢复统一走 DialogFocusRestorer（弹窗窗口移除后
+                        // 才聚焦——onDismiss 里同步聚焦会被弹窗销毁时的焦点回收覆盖）。
+                        homePendingRestore = { runCatching { contentFocus.requestFocus() } }
                         homeTrackMenu = TrackMenuRequest(
                             track = track,
                             play = { openSampledTrack(randomSongs, track) },
-                            // 回到被点卡片本身（focusedKey 已指向它、contentFocus 已挂载），
-                            // 而不是行头——菜单"现在播放"也会先走 restore，聚焦行头
-                            // 会把 focusedKey 改写成第一张，返回首页就回不到原卡了。
-                            restore = { runCatching { contentFocus.requestFocus() } },
                         )
                     },
                 )
@@ -1376,11 +1375,11 @@ private fun BrowseHome(
                         .onFocusChanged { if (it.isFocused) focusedKey = key },
                     onClick = {
                         focusedKey = key
+                        // 同随机歌曲卡：恢复统一走 DialogFocusRestorer（回被点卡片本身）。
+                        homePendingRestore = { runCatching { contentFocus.requestFocus() } }
                         homeTrackMenu = TrackMenuRequest(
                             track = track,
                             play = { openSampledTrack(recentlyAdded, track) },
-                            // 同随机歌曲卡：回到被点卡片本身而非行头。
-                            restore = { runCatching { contentFocus.requestFocus() } },
                         )
                     },
                 )
@@ -1394,26 +1393,26 @@ private fun BrowseHome(
             TrackContextMenuDialog(
                 container = container,
                 track = menu.track,
-                // 菜单项点击内部会先调 onDismiss 再执行动作：只有"用户取消"才 restore；
-                // "现在播放"先清状态（restore 聚焦行头会改写 focusedKey，覆盖被点卡片），
-                // 返回首页时恢复 effect 才能精确落回被点卡片。
-                onDismiss = {
-                    if (homeTrackMenu === menu) {
-                        homeTrackMenu = null
-                        menu.restore()
-                    }
-                },
-                onPlayNow = {
-                    homeTrackMenu = null
-                    menu.play()
-                },
+                // 菜单项点击内部会先调 onDismiss 再执行动作；这里只清状态，
+                // 焦点恢复统一由下方 DialogFocusRestorer 在弹窗窗口移除后执行
+                // （onDismiss 里同步聚焦会被弹窗销毁时的焦点回收覆盖，真机实测焦点错位）。
+                onDismiss = { homeTrackMenu = null },
+                onPlayNow = { menu.play() },
                 onAddToPlaylist = {
-                    // 菜单让位给加歌单弹窗：restore 暂存，由弹窗关闭时统一归还焦点。
-                    homePendingRestore = menu.restore
+                    // 菜单让位给加歌单弹窗：restore 留给加歌单关闭时的 restorer 消费。
                     homePlaylistTrack = menu.track
                     homeTrackMenu = null
                 },
             )
+        }
+        // 菜单直接关闭（dismiss/现在播放/添加为下一首/加入收藏）→ 立即归还焦点；
+        // 转加歌单路径 → 不消费，留给加歌单弹窗的 restorer。
+        DialogFocusRestorer(visible = homeTrackMenu != null) {
+            if (homePlaylistTrack == null) {
+                val restore = homePendingRestore
+                homePendingRestore = null
+                restore?.invoke()
+            }
         }
         DialogFocusRestorer(visible = homePlaylistTrack != null) {
             val restore = homePendingRestore
@@ -4057,11 +4056,8 @@ private fun DetailTrackCollection(
             TrackContextMenuDialog(
                 container = container,
                 track = menuTrack,
-                // 关闭（含 BACK）即归还焦点：聚焦行已在 focusedKey 里，restoredFocus 挂在该行。
-                onDismiss = {
-                    menuTrackIndex = null
-                    runCatching { restoredFocus.requestFocus() }
-                },
+                // 只清状态；焦点恢复由下方 DialogFocusRestorer 在弹窗窗口移除后执行。
+                onDismiss = { menuTrackIndex = null },
                 // 单曲语义：只把这一首加入队列（滑窗 play(index) 会带入整段上下文）
                 onPlayNow = {
                     menuScope.launch {
@@ -4084,6 +4080,11 @@ private fun DetailTrackCollection(
                 },
             )
         }
+    }
+    // 菜单窗口移除后焦点归还被点过的曲目行（focusedKey 已记录，restoredFocus 挂在该行）；
+    // 现在播放/添加为下一首/加入收藏路径同样经过这里，弹窗移除后一帧聚焦不被回收覆盖。
+    DialogFocusRestorer(visible = menuTrackIndex != null) {
+        runCatching { restoredFocus.requestFocus() }
     }
     // 加歌单弹窗关闭（dismiss/创建成功自动关）后焦点归还被点过的曲目行。
     DialogFocusRestorer(visible = playlistTrackGuid != null) {
@@ -5829,6 +5830,8 @@ private fun SearchRoute(
                                     Modifier
                                 },
                                 onClick = {
+                                    // 菜单关闭后的焦点恢复统一走 DialogFocusRestorer。
+                                    searchPendingRestore = { runCatching { resultsFocus.requestFocus() } }
                                     searchTrackMenu = TrackMenuRequest(
                                         track = track,
                                         play = {
@@ -5850,7 +5853,6 @@ private fun SearchRoute(
                                                 }
                                             }
                                         },
-                                        restore = { runCatching { resultsFocus.requestFocus() } },
                                     )
                                 },
                             )
@@ -5873,18 +5875,24 @@ private fun SearchRoute(
         TrackContextMenuDialog(
             container = container,
             track = menu.track,
-            onDismiss = {
-                searchTrackMenu = null
-                menu.restore()
-            },
+            // 只清状态；焦点恢复由下方 DialogFocusRestorer 在弹窗窗口移除后执行。
+            onDismiss = { searchTrackMenu = null },
             onPlayNow = { menu.play() },
             onAddToPlaylist = {
-                // 菜单让位给加歌单弹窗：restore 暂存，由弹窗关闭时统一归还焦点。
-                searchPendingRestore = menu.restore
+                // 菜单让位给加歌单弹窗：restore 留给加歌单关闭时的 restorer 消费。
                 searchPlaylistTrack = menu.track
                 searchTrackMenu = null
             },
         )
+    }
+    // 菜单直接关闭（dismiss/现在播放/添加为下一首/加入收藏）→ 立即归还焦点；
+    // 转加歌单路径 → 不消费，留给加歌单弹窗的 restorer。
+    DialogFocusRestorer(visible = searchTrackMenu != null) {
+        if (searchPlaylistTrack == null) {
+            val restore = searchPendingRestore
+            searchPendingRestore = null
+            restore?.invoke()
+        }
     }
     DialogFocusRestorer(visible = searchPlaylistTrack != null) {
         val restore = searchPendingRestore
@@ -5952,8 +5960,15 @@ private fun TrackContextMenuDialog(
     var infoVisible by remember { mutableStateOf(false) }
     val firstItemFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
-        yield()
-        runCatching { firstItemFocus.requestFocus() }
+        // 帧循环重试（1 秒上限）：打开转场期间 requestFocus 会失败，
+        // 焦点留在背景页上会让方向键/OK 误触背景元素。
+        var firstFrame = 0L
+        while (true) {
+            val now = withFrameNanos { it }
+            if (firstFrame == 0L) firstFrame = now
+            if (now - firstFrame > 1_000_000_000L) break
+            if (runCatching { firstItemFocus.requestFocus() }.isSuccess) break
+        }
     }
 
     Dialog(
@@ -6194,7 +6209,6 @@ private fun TrackMenuItem(
 private class TrackMenuRequest(
     val track: Track,
     val play: () -> Unit,
-    val restore: () -> Unit,
 )
 
 @Composable
