@@ -2743,7 +2743,7 @@ private fun <T> PagedCatalogPage(
                     Text(appErrorMessage(error), color = FnColors.Coral, fontSize = 12.sp)
                 }
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(14.dp))
             // 非惰性网格：每页固定 12 项，全部常驻组合。惰性网格在窄屏滚动时会
             // 回收条目，itemFocuses 随之失效，上下左右焦点目标变成未挂载的
             // FocusRequester，表现为“焦点卡死无法移动”（与首页各行同类问题）。
@@ -2817,7 +2817,7 @@ private fun <T> PagedCatalogPage(
             }
             // 翻页器与网格的保底间距：矮屏（车机）弹性间隔会收缩为 0，
             // 翻页器紧贴卡片行造成触摸误触。
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
             if (!scrollableGrid) {
                 Spacer(Modifier.weight(1f))
             }
@@ -5286,7 +5286,11 @@ private fun CatalogPager(
     onNext: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp),
+        // 翻页器整体下移 2dp：与卡片行拉开后更贴近屏幕底缘（真机观感校准）。
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset(y = 2.dp)
+            .height(48.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -5312,17 +5316,17 @@ private fun CatalogPager(
             Text(
                 currentPage.toString(),
                 color = FnColors.Muted,
-                fontSize = 15.sp,
-                lineHeight = 15.sp,
+                fontSize = 14.sp,
+                lineHeight = 14.sp,
             )
             Spacer(Modifier.width(6.dp))
-            Text("/", color = FnColors.Muted, fontSize = 15.sp, lineHeight = 15.sp)
+            Text("/", color = FnColors.Muted, fontSize = 14.sp, lineHeight = 14.sp)
             Spacer(Modifier.width(6.dp))
             Text(
                 totalPages.toString(),
                 color = FnColors.Muted,
-                fontSize = 15.sp,
-                lineHeight = 15.sp,
+                fontSize = 14.sp,
+                lineHeight = 14.sp,
             )
         }
         CatalogPageArrowButton(
@@ -5379,23 +5383,26 @@ private fun CatalogPageArrowButton(
         val contentColor = LocalContentColor.current
         // Canvas 填满按钮（fillMaxSize）：此前 15dp 小画布在钮内默认顶部对齐，
         // 折线整体偏上——与居中的页码数字错位。
-        Canvas(Modifier.fillMaxSize()) {
-            val left = if (direction == CatalogPagerTarget.Previous) size.width * 0.66f else size.width * 0.34f
-            val right = if (direction == CatalogPagerTarget.Previous) size.width * 0.34f else size.width * 0.66f
-            drawLine(
-                color = contentColor,
-                start = androidx.compose.ui.geometry.Offset(left, size.height * 0.38f),
-                end = androidx.compose.ui.geometry.Offset(right, size.height * 0.50f),
-                strokeWidth = 1.8.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = contentColor,
-                start = androidx.compose.ui.geometry.Offset(right, size.height * 0.50f),
-                end = androidx.compose.ui.geometry.Offset(left, size.height * 0.62f),
-                strokeWidth = 1.8.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
+        // 箭头缩小：11dp 画布（钮内居中）+ 1.5dp 线宽，视觉约缩小 25%。
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(11.dp)) {
+                val left = if (direction == CatalogPagerTarget.Previous) size.width * 0.66f else size.width * 0.34f
+                val right = if (direction == CatalogPagerTarget.Previous) size.width * 0.34f else size.width * 0.66f
+                drawLine(
+                    color = contentColor,
+                    start = androidx.compose.ui.geometry.Offset(left, size.height * 0.18f),
+                    end = androidx.compose.ui.geometry.Offset(right, size.height * 0.50f),
+                    strokeWidth = 1.5.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = contentColor,
+                    start = androidx.compose.ui.geometry.Offset(right, size.height * 0.50f),
+                    end = androidx.compose.ui.geometry.Offset(left, size.height * 0.82f),
+                    strokeWidth = 1.5.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
         }
     }
 }
