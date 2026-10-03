@@ -110,6 +110,9 @@ internal fun SettingsScreen(
     val themeFocuses = remember { List(AppTheme.entries.size) { FocusRequester() } }
     val scaleFocuses = remember { List(UiScaleMode.entries.size) { FocusRequester() } }
     val updateFocus = remember { FocusRequester() }
+    // 手动检查更新后弹窗关闭（状态回到 Idle）时，焦点回到"检查更新"按钮。
+    // 自动弹出的更新提示不还原（弹出时用户未在操作，没有可归还的焦点）。
+    var manualUpdateCheck by remember { mutableStateOf(false) }
     var usage by remember { mutableStateOf(CacheUsage(artworkBytes = 0, indexBytes = 0)) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -149,6 +152,19 @@ internal fun SettingsScreen(
         focusedKey = null
     }
 
+    // 音乐源弹窗关闭（dismiss/切换成功）后焦点回到"管理音乐源"按钮；
+    // onAdd 跳登录页路径也走这里，路由随后整体切换，无害。
+    DialogFocusRestorer(visible = sourcePickerVisible) {
+        runCatching { manageSourcesFocus.requestFocus() }
+    }
+    // 更新弹窗（由 FnMusicApp 的 UpdateDialogHost 渲染）关闭后焦点回"检查更新"按钮，
+    // 仅限本页手动触发的检查（manualUpdateCheck 标志）。
+    DialogFocusRestorer(visible = updateState !is UpdateUiState.Idle) {
+        if (manualUpdateCheck) {
+            manualUpdateCheck = false
+            runCatching { updateFocus.requestFocus() }
+        }
+    }
     if (sourcePickerVisible) {
         SourcePickerDialog(
             sources = sources,
@@ -480,46 +496,56 @@ internal fun SettingsScreen(
                     }
                 }
                 SettingsDivider()
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 13.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                // 与"图片磁盘缓存上限"区完全同构：左侧 144dp 标签列垂直居中，
+                // 右侧内容列 13dp 垂直边距 + 档位 FlowRow（窄屏自动换行）+ 说明文字。
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("界面缩放", color = FnColors.Muted, fontSize = 12.sp)
-                    // 四个档位固定在单行（总宽约 437dp，最短的横屏也放得下），
-                    // 不换行意味着上下键不会跳格：上行接主题、下行接更新按钮。
-                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        UiScaleMode.entries.forEachIndexed { index, mode ->
-                            SettingsChoiceButton(
-                                label = uiScaleLabel(mode),
-                                selected = preferencesUiScale == mode,
-                                onClick = { container.appPreferences.setUiScale(mode) },
-                                modifier = Modifier
-                                    // 等分可用宽度并封顶 104dp：窄屏（手机开 1.5 倍）也不会把
-                                    // 第四个档位挤出边界，宽屏仍与主题行胶囊等宽。
-                                    .weight(1f, fill = false)
-                                    .widthIn(max = 104.dp)
-                                    .focusProperties {
-                                        up = themeFocuses.last()
-                                        down = if (container.updateController.enabled) {
-                                            updateFocus
-                                        } else {
-                                            FocusRequester.Cancel
-                                        }
-                                        left = scaleFocuses.getOrNull(index - 1)
-                                            ?: FocusRequester.Cancel
-                                        right = scaleFocuses.getOrNull(index + 1)
-                                            ?: FocusRequester.Cancel
-                                    }
-                                    .focusRequester(scaleFocuses[index]),
-                            )
-                        }
-                    }
                     Text(
-                        "自动按屏幕密度选择：1080P 车机 1.25 倍，电视/手机 1 倍。",
+                        "界面缩放",
                         color = FnColors.Muted,
-                        fontSize = 10.sp,
-                        lineHeight = 12.sp,
+                        fontSize = 12.sp,
+                        modifier = Modifier.width(144.dp),
                     )
+                    Column(
+                        Modifier.padding(vertical = 13.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            UiScaleMode.entries.forEachIndexed { index, mode ->
+                                SettingsChoiceButton(
+                                    label = uiScaleLabel(mode),
+                                    selected = preferencesUiScale == mode,
+                                    onClick = { container.appPreferences.setUiScale(mode) },
+                                    modifier = Modifier
+                                        .width(104.dp)
+                                        .focusProperties {
+                                            up = themeFocuses.last()
+                                            down = if (container.updateController.enabled) {
+                                                updateFocus
+                                            } else {
+                                                FocusRequester.Cancel
+                                            }
+                                            left = scaleFocuses.getOrNull(index - 1)
+                                                ?: FocusRequester.Cancel
+                                            right = scaleFocuses.getOrNull(index + 1)
+                                                ?: FocusRequester.Cancel
+                                        }
+                                        .focusRequester(scaleFocuses[index]),
+                                )
+                            }
+                        }
+                        Text(
+                            "自动按屏幕密度选择：1080P 车机 1.25 倍，电视/手机 1 倍。",
+                            color = FnColors.Muted,
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
+                        )
+                    }
                 }
             }
 
@@ -589,6 +615,7 @@ internal fun SettingsScreen(
                             // 忙时不 disable：禁用会把焦点从图里摘掉。重入由 onClick 挡住。
                             onClick = {
                                 if ((updateState as? UpdateUiState.Checking)?.source != UpdateCheckSource.Manual) {
+                                    manualUpdateCheck = true
                                     container.updateController.checkManually()
                                 }
                             },

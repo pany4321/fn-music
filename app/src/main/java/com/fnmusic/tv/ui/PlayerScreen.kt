@@ -284,11 +284,6 @@ internal fun ImmersivePlayer(
     var consumeBackKeyUp by remember { mutableStateOf(false) }
     var consumeCenterKeyUp by remember { mutableStateOf(false) }
     var interactionEpoch by remember { mutableStateOf(0) }
-    // 最后聚焦的控制钮槽位：控制条自动隐藏后按方向键重新唤出时，
-    // 焦点直接落在"离开前控件"的相邻控件上（而不是每次都回到播放键），
-    // 消除"第一下只唤出、第二下才开始动"的体感。
-    var lastControlSlot by remember { mutableStateOf<PlayerControlSlot?>(null) }
-    var pendingDirectionalFocus by remember { mutableStateOf<AndroidKeyDirection?>(null) }
     val playerFocus = remember { FocusRequester() }
     val progressFocus = remember { FocusRequester() }
     val previousFocus = remember { FocusRequester() }
@@ -399,10 +394,8 @@ internal fun ImmersivePlayer(
                 setConsumeCenterKeyUp = { consumeCenterKeyUp = it },
                 onCenter = container.playbackController::playPause,
                 onReveal = ::revealControls,
-                onDirectionalReveal = { direction ->
-                    revealControls()
-                    pendingDirectionalFocus = direction
-                },
+                // 方向键唤出控制条；后续聚焦统一由 controlsVisible 三态 effect 交给播放键。
+                onDirectionalReveal = { revealControls() },
             )
             .pointerInput(controlsVisible, queueVisible) {
                 if (!controlsVisible && !queueVisible) {
@@ -460,7 +453,6 @@ internal fun ImmersivePlayer(
                     positionMs = positionMs,
                     durationMs = durationMs,
                     isPlaying = playback.isPlaying,
-                    onFocusedSlot = { slot -> lastControlSlot = slot },
                 roaming = roaming,
                     previousEnabled = previousEnabled,
                     nextEnabled = nextEnabled,
@@ -620,9 +612,6 @@ internal fun Modifier.dismissPlayerChromeOnBack(
 
 /** 控制行内"相邻控件"解析：自动隐藏后按方向键，焦点直接落到相邻钮而不是回到播放键。 */
 internal enum class AndroidKeyDirection { Left, Right }
-
-/** 控制行各钮的槽位：用于"隐藏后方向键直达相邻钮"的焦点定位。 */
-internal enum class PlayerControlSlot { Mode, Favorite, Add, Previous, Play, Next, Queue, ExitRoam }
 
 internal fun Modifier.revealPlayerChromeOnKey(
     chromeVisible: Boolean,
@@ -1624,7 +1613,6 @@ internal fun PlayerControlOverlay(
     durationMs: Long,
     isPlaying: Boolean,
     roaming: Boolean,
-    onFocusedSlot: (PlayerControlSlot) -> Unit,
     previousEnabled: Boolean,
     nextEnabled: Boolean,
     progressFocus: FocusRequester,
@@ -1746,7 +1734,7 @@ internal fun PlayerControlOverlay(
                         upFocus = progressFocus,
                         leftFocus = null,
                         rightFocus = favoriteFocus,
-                        onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Mode) },
+                        onFocus = { onInteraction() },
                         onClick = {
                             onInteraction()
                             onCyclePlayMode()
@@ -1761,7 +1749,7 @@ internal fun PlayerControlOverlay(
                     leftFocus = if (!roaming) modeFocus else null,
                     rightFocus = addToPlaylistFocus,
                     selected = favorite,
-                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Favorite) },
+                    onFocus = { onInteraction() },
                     onClick = {
                         onInteraction()
                         if (favoriteEnabled) onToggleFavorite()
@@ -1774,7 +1762,7 @@ internal fun PlayerControlOverlay(
                     upFocus = progressFocus,
                     leftFocus = favoriteFocus,
                     rightFocus = if (previousEnabled) previousFocus else playFocus,
-                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Add) },
+                    onFocus = { onInteraction() },
                     onClick = {
                         onInteraction()
                         onAddToPlaylist()
@@ -1795,7 +1783,7 @@ internal fun PlayerControlOverlay(
                     // 左移次序：上一首 → 添加到歌单（漫游下同样存在）→ 收藏 → 播放模式
                     leftFocus = addToPlaylistFocus,
                     rightFocus = playFocus,
-                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Previous) },
+                    onFocus = { onInteraction() },
                     onClick = onPrevious,
                 )
                 PlayerTransportButton(
@@ -1814,7 +1802,7 @@ internal fun PlayerControlOverlay(
                         else -> queueFocus
                     },
                     emphasized = true,
-                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Play) },
+                    onFocus = { onInteraction() },
                     onClick = onPlayPause,
                 )
                 PlayerTransportButton(
@@ -1825,7 +1813,7 @@ internal fun PlayerControlOverlay(
                     upFocus = progressFocus,
                     leftFocus = playFocus,
                     rightFocus = if (roaming) exitRoamFocus else queueFocus,
-                    onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Next) },
+                    onFocus = { onInteraction() },
                     onClick = onNext,
                 )
             }
@@ -1836,7 +1824,7 @@ internal fun PlayerControlOverlay(
                 focusRequester = if (roaming) exitRoamFocus else queueFocus,
                 upFocus = progressFocus,
                 leftFocus = if (nextEnabled) nextFocus else playFocus,
-                onFocus = { onInteraction(); onFocusedSlot(PlayerControlSlot.Queue) },
+                onFocus = { onInteraction() },
                 onClick = {
                     onInteraction()
                     if (roaming) onExitRoam() else onOpenQueue()
@@ -2581,6 +2569,23 @@ internal fun interpolatedLyricPosition(
 
 internal fun playerProgressFraction(positionMs: Long, durationMs: Long): Float =
     if (durationMs <= 0L) 0f else (positionMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
+
+/**
+ * 弹窗关闭时把焦点还给上一层：仅在 [visible] 由 true→false 跳变时执行 [onReturn]
+ * （避免覆盖进页初始焦点）。Compose Dialog 是独立窗口，关闭后不保证主窗口自动
+ * 收回焦点（真机反复出现"焦点丢失遥控器失灵"），各弹窗调用点统一用它兜底。
+ */
+@Composable
+internal fun DialogFocusRestorer(visible: Boolean, onReturn: () -> Unit) {
+    var wasVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(visible) {
+        if (wasVisible && !visible) {
+            yield()
+            runCatching { onReturn() }
+        }
+        wasVisible = visible
+    }
+}
 
 @Composable
 internal fun AddToPlaylistDialog(

@@ -925,6 +925,8 @@ private fun BrowseHome(
     // 首页歌曲行的上下文菜单：play = 点位既有的「现在播放」逻辑；restore = 弹窗关闭后的焦点还原。
     var homeTrackMenu by remember { mutableStateOf<TrackMenuRequest?>(null) }
     var homePlaylistTrack by remember { mutableStateOf<Track?>(null) }
+    // 菜单→"加入歌单"链式打开时暂存菜单的恢复回调：加歌单弹窗关闭时还焦点。
+    var homePendingRestore by remember { mutableStateOf<(() -> Unit)?>(null) }
     LaunchedEffect(Unit) {
         retainedStore.scope.launch {
             runCatching { container.musicRepository.recentTracks(1) }.onSuccess { page ->
@@ -1032,14 +1034,24 @@ private fun BrowseHome(
                 addAll(playlists.take(12).map { "playlist:${it.guid.value}" })
                 add("all-playlists")
             }
+            addAll(randomAlbums.map { "random-album:${it.guid.value}" })
+            addAll(randomSongs.map { "random-song:${it.guid.value}" })
+            addAll(recentlyAdded.map { "recent-added:${it.guid.value}" })
             if (playback.hasMedia) add("now-playing")
         }
         focusedKey = focusedKey?.takeIf(availableKeys::contains) ?: availableKeys.firstOrNull()
-        yield()
-        if (focusedKey != null) {
-            runCatching { contentFocus.requestFocus() }
-            initialFocusRequested = true
+        if (focusedKey == null) return@LaunchedEffect
+        // 恢复失败不置门闩，每帧重试直到成功（返回转场动画期间 requestFocus 会失败，
+        // 固定 3 帧全部落在动画窗口内——上限 1 秒，覆盖转场 + 数据就绪）。
+        var restored = false
+        var firstFrame = 0L
+        while (!restored) {
+            val now = withFrameNanos { it }
+            if (firstFrame == 0L) firstFrame = now
+            if (now - firstFrame > 1_000_000_000L) break
+            restored = runCatching { contentFocus.requestFocus() }.isSuccess
         }
+        if (restored) initialFocusRequested = true
     }
     val window = LocalAdaptiveWindow.current
     Column(
@@ -1249,6 +1261,7 @@ private fun BrowseHome(
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             randomAlbums.forEachIndexed { index, album ->
+                val key = "random-album:${album.guid.value}"
                 AlbumLockup(
                     title = album.name,
                     subtitle = album.artistName.orEmpty(),
@@ -1259,8 +1272,13 @@ private fun BrowseHome(
                             up = refreshAlbumsFocus
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == randomAlbums.lastIndex) right = FocusRequester.Cancel
-                        },
-                    onClick = { onAlbum(album) },
+                        }
+                        .then(if (focusedKey == key) Modifier.focusRequester(contentFocus) else Modifier)
+                        .onFocusChanged { if (it.isFocused) focusedKey = key },
+                    onClick = {
+                        focusedKey = key
+                        onAlbum(album)
+                    },
                 )
             }
         }
@@ -1300,6 +1318,7 @@ private fun BrowseHome(
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             randomSongs.forEachIndexed { index, track ->
+                val key = "random-song:${track.guid.value}"
                 TrackLockup(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
@@ -1310,12 +1329,18 @@ private fun BrowseHome(
                             up = refreshSongsFocus
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == randomSongs.lastIndex) right = FocusRequester.Cancel
-                        },
+                        }
+                        .then(if (focusedKey == key) Modifier.focusRequester(contentFocus) else Modifier)
+                        .onFocusChanged { if (it.isFocused) focusedKey = key },
                     onClick = {
+                        focusedKey = key
                         homeTrackMenu = TrackMenuRequest(
                             track = track,
                             play = { openSampledTrack(randomSongs, track) },
-                            restore = { runCatching { randomSongsRowFocus.requestFocus() } },
+                            // 回到被点卡片本身（focusedKey 已指向它、contentFocus 已挂载），
+                            // 而不是行头——菜单"现在播放"也会先走 restore，聚焦行头
+                            // 会把 focusedKey 改写成第一张，返回首页就回不到原卡了。
+                            restore = { runCatching { contentFocus.requestFocus() } },
                         )
                     },
                 )
@@ -1334,6 +1359,7 @@ private fun BrowseHome(
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             recentlyAdded.forEachIndexed { index, track ->
+                val key = "recent-added:${track.guid.value}"
                 TrackLockup(
                     title = track.title,
                     subtitle = track.artistName.orEmpty(),
@@ -1345,12 +1371,16 @@ private fun BrowseHome(
                             up = if (randomSongs.isNotEmpty()) randomSongsRowFocus else FocusRequester.Cancel
                             if (index == 0) left = FocusRequester.Cancel
                             if (index == recentlyAdded.lastIndex) right = FocusRequester.Cancel
-                        },
+                        }
+                        .then(if (focusedKey == key) Modifier.focusRequester(contentFocus) else Modifier)
+                        .onFocusChanged { if (it.isFocused) focusedKey = key },
                     onClick = {
+                        focusedKey = key
                         homeTrackMenu = TrackMenuRequest(
                             track = track,
                             play = { openSampledTrack(recentlyAdded, track) },
-                            restore = { runCatching { recentlyAddedRowFocus.requestFocus() } },
+                            // 同随机歌曲卡：回到被点卡片本身而非行头。
+                            restore = { runCatching { contentFocus.requestFocus() } },
                         )
                     },
                 )
@@ -1364,16 +1394,31 @@ private fun BrowseHome(
             TrackContextMenuDialog(
                 container = container,
                 track = menu.track,
+                // 菜单项点击内部会先调 onDismiss 再执行动作：只有"用户取消"才 restore；
+                // "现在播放"先清状态（restore 聚焦行头会改写 focusedKey，覆盖被点卡片），
+                // 返回首页时恢复 effect 才能精确落回被点卡片。
                 onDismiss = {
-                    homeTrackMenu = null
-                    menu.restore()
+                    if (homeTrackMenu === menu) {
+                        homeTrackMenu = null
+                        menu.restore()
+                    }
                 },
-                onPlayNow = { menu.play() },
+                onPlayNow = {
+                    homeTrackMenu = null
+                    menu.play()
+                },
                 onAddToPlaylist = {
+                    // 菜单让位给加歌单弹窗：restore 暂存，由弹窗关闭时统一归还焦点。
+                    homePendingRestore = menu.restore
                     homePlaylistTrack = menu.track
                     homeTrackMenu = null
                 },
             )
+        }
+        DialogFocusRestorer(visible = homePlaylistTrack != null) {
+            val restore = homePendingRestore
+            homePendingRestore = null
+            restore?.invoke()
         }
         homePlaylistTrack?.let { playlistTrack ->
             AddToPlaylistDialog(
@@ -1913,6 +1958,11 @@ private fun BrowseMy(
                 sourcePickerVisible = true
             },
         )
+        // 音乐源弹窗关闭（dismiss/切换成功）后焦点回到"切换音乐源"按钮；
+        // onAdd 跳登录页路径也走这里，路由随后整体切换，无害。
+        DialogFocusRestorer(visible = sourcePickerVisible) {
+            runCatching { switchAccountFocus.requestFocus() }
+        }
         if (sourcePickerVisible) {
             SourcePickerDialog(
                 sources = sources,
@@ -3244,7 +3294,12 @@ private fun TrackCollection(
                 } else {
                     null
                 }
-                if (outcome.failed == 0) clearConfirmVisible = false
+                if (outcome.failed == 0) {
+                    clearConfirmVisible = false
+                    // 列表已清空：重置初始焦点门闩，让恢复 effect 把焦点落到
+                    // 播放全部/空态——否则全屏无焦点，遥控器失灵。
+                    initialFocusRequested = false
+                }
             } catch (cause: CancellationException) {
                 clearMessage = "已取消，已清空 $clearRemoved 首"
                 throw cause
@@ -3395,13 +3450,26 @@ private fun TrackCollection(
             return@LaunchedEffect
         }
         if (targetKey != null) {
-            repeat(3) {
-                withFrameNanos { }
-                if (runCatching { restoredFocus.requestFocus() }.getOrDefault(false)) {
-                    initialFocusRequested = true
-                    return@LaunchedEffect
-                }
+            // 目标是曲目行时先滚到它：行未组合时 requestFocus 也会失败。
+            // 前置 item（错误/加载/空态）计入偏移。
+            val trackIndex = tracks.indexOfFirst { it.guid.value == targetKey }
+            if (trackIndex >= 0) {
+                val frontItems = (if (error != null) 1 else 0) +
+                    (if (tracks.isEmpty() && loading) 1 else 0) +
+                    (if (tracks.isEmpty() && !loading && error == null) 1 else 0)
+                runCatching { listState.scrollToItem(index = frontItems + trackIndex) }
             }
+            // 每帧重试直到成功（1 秒上限）：返回转场动画期间 requestFocus 会失败，
+            // 固定次数的重试会全部落在动画窗口内、之后 effect 不再重跑——遥控器死。
+            var restored = false
+            var firstFrame = 0L
+            while (!restored) {
+                val now = withFrameNanos { it }
+                if (firstFrame == 0L) firstFrame = now
+                if (now - firstFrame > 1_000_000_000L) break
+                restored = runCatching { restoredFocus.requestFocus() }.getOrDefault(false)
+            }
+            if (restored) initialFocusRequested = true
         }
     }
     DetailTrackCollection(
@@ -3449,6 +3517,8 @@ private fun TrackCollection(
         onDeletePlaylistAction = { deleteConfirmVisible = true },
     )
 
+    // 确认弹窗关闭（取消/BACK）后焦点归还打开它的按钮（restoredFocus 挂载点随 focusedKey 走）。
+    DialogFocusRestorer(visible = clearConfirmVisible) { runCatching { restoredFocus.requestFocus() } }
     if (clearConfirmVisible && allowClearFavorites) {
         val clearShape = RoundedCornerShape(24.dp)
         val clearScale = ButtonDefaults.scale(focusedScale = 1.05f)
@@ -3522,6 +3592,7 @@ private fun TrackCollection(
     }
 
     // 删除歌单二次确认：与清空收藏同一套风格（取消键初始聚焦、确认键 Coral）。
+    DialogFocusRestorer(visible = deleteConfirmVisible) { runCatching { restoredFocus.requestFocus() } }
     if (deleteConfirmVisible && allowDeletePlaylist) {
         val deleteShape = RoundedCornerShape(24.dp)
         val deleteScale = ButtonDefaults.scale(focusedScale = 1.05f)
@@ -3601,6 +3672,8 @@ private fun TrackCollection(
         }
     }
 
+    // 取消删除时焦点归还被点删除钮的行；成功路径由 confirmRemove 的邻行恢复接管。
+    DialogFocusRestorer(visible = pendingRemoveTrack != null) { runCatching { restoredFocus.requestFocus() } }
     pendingRemoveTrack?.let { track ->
         val cancelFocus = remember(track) { FocusRequester() }
         LaunchedEffect(track) {
@@ -3984,7 +4057,11 @@ private fun DetailTrackCollection(
             TrackContextMenuDialog(
                 container = container,
                 track = menuTrack,
-                onDismiss = { menuTrackIndex = null },
+                // 关闭（含 BACK）即归还焦点：聚焦行已在 focusedKey 里，restoredFocus 挂在该行。
+                onDismiss = {
+                    menuTrackIndex = null
+                    runCatching { restoredFocus.requestFocus() }
+                },
                 // 单曲语义：只把这一首加入队列（滑窗 play(index) 会带入整段上下文）
                 onPlayNow = {
                     menuScope.launch {
@@ -4007,6 +4084,10 @@ private fun DetailTrackCollection(
                 },
             )
         }
+    }
+    // 加歌单弹窗关闭（dismiss/创建成功自动关）后焦点归还被点过的曲目行。
+    DialogFocusRestorer(visible = playlistTrackGuid != null) {
+        runCatching { restoredFocus.requestFocus() }
     }
     playlistTrackGuid?.let { trackGuid ->
         AddToPlaylistDialog(
@@ -5392,6 +5473,8 @@ private fun SearchRoute(
     // 搜索结果歌曲行的上下文菜单。
     var searchTrackMenu by remember { mutableStateOf<TrackMenuRequest?>(null) }
     var searchPlaylistTrack by remember { mutableStateOf<Track?>(null) }
+    // 菜单→"加入歌单"链式打开时暂存菜单的恢复回调：加歌单弹窗关闭时还焦点。
+    var searchPendingRestore by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     suspend fun performSearch(term: String) {
         if (term.isEmpty()) {
@@ -5796,10 +5879,17 @@ private fun SearchRoute(
             },
             onPlayNow = { menu.play() },
             onAddToPlaylist = {
+                // 菜单让位给加歌单弹窗：restore 暂存，由弹窗关闭时统一归还焦点。
+                searchPendingRestore = menu.restore
                 searchPlaylistTrack = menu.track
                 searchTrackMenu = null
             },
         )
+    }
+    DialogFocusRestorer(visible = searchPlaylistTrack != null) {
+        val restore = searchPendingRestore
+        searchPendingRestore = null
+        restore?.invoke() ?: runCatching { resultsFocus.requestFocus() }
     }
     searchPlaylistTrack?.let { playlistTrack ->
         AddToPlaylistDialog(

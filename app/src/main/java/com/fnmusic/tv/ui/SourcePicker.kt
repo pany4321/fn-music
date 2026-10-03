@@ -251,6 +251,8 @@ internal fun SourcePickerDialog(
 ) {
     // 删除音乐源二次确认：✕ 只装填待删项，确认后才真正调 onDelete。
     var pendingDelete by remember { mutableStateOf<LoginHistoryEntry?>(null) }
+    // pendingDelete 清空后仍留存，供恢复回调定位被点 ✕ 的行。
+    var lastDeleteTarget by remember { mutableStateOf<LoginHistoryEntry?>(null) }
     val confirmCancelFocus = remember { FocusRequester() }
     val rowFocuses = remember(sources) {
         List(sources.size) { SourceRowFocuses(FocusRequester(), FocusRequester(), FocusRequester()) }
@@ -307,7 +309,7 @@ internal fun SourcePickerDialog(
                         onSelect = { onSelect(entry) },
                         onTest = onTest?.let { test -> { test(entry) } },
                         testing = entry.id == testingProfileId,
-                        onDelete = onDelete?.let { delete -> { pendingDelete = entry } },
+                        onDelete = onDelete?.let { delete -> { lastDeleteTarget = entry; pendingDelete = entry } },
                     )
                     statuses[entry.id]?.let { status -> SourceStatusLine(status) }
                 }
@@ -394,6 +396,12 @@ internal fun SourcePickerDialog(
             }
         }
         // 删除音乐源二次确认（与清空收藏同一套自绘 Dialog 风格：取消键初始聚焦，确认键 Coral）
+        // 关闭（取消/删除执行）后焦点归还被点 ✕ 的那一行，避免音乐源弹窗内焦点丢失。
+        // lastDeleteTarget 在 pendingDelete 清空后仍留存，恢复回调据此定位行。
+        DialogFocusRestorer(visible = pendingDelete != null) {
+            val index = sources.indexOfFirst { it.id == lastDeleteTarget?.id }
+            if (index >= 0) runCatching { rowFocuses.getOrNull(index)?.delete?.requestFocus() }
+        }
         pendingDelete?.let { target ->
             Dialog(onDismissRequest = { pendingDelete = null },
                 properties = DialogProperties(usePlatformDefaultWidth = false)) {
