@@ -5377,12 +5377,14 @@ private fun CatalogPageArrowButton(
         contentPadding = PaddingValues(0.dp),
     ) {
         val contentColor = LocalContentColor.current
-        Canvas(Modifier.size(15.dp)) {
+        // Canvas 填满按钮（fillMaxSize）：此前 15dp 小画布在钮内默认顶部对齐，
+        // 折线整体偏上——与居中的页码数字错位。
+        Canvas(Modifier.fillMaxSize()) {
             val left = if (direction == CatalogPagerTarget.Previous) size.width * 0.66f else size.width * 0.34f
             val right = if (direction == CatalogPagerTarget.Previous) size.width * 0.34f else size.width * 0.66f
             drawLine(
                 color = contentColor,
-                start = androidx.compose.ui.geometry.Offset(left, size.height * 0.18f),
+                start = androidx.compose.ui.geometry.Offset(left, size.height * 0.38f),
                 end = androidx.compose.ui.geometry.Offset(right, size.height * 0.50f),
                 strokeWidth = 1.8.dp.toPx(),
                 cap = StrokeCap.Round,
@@ -5390,7 +5392,7 @@ private fun CatalogPageArrowButton(
             drawLine(
                 color = contentColor,
                 start = androidx.compose.ui.geometry.Offset(right, size.height * 0.50f),
-                end = androidx.compose.ui.geometry.Offset(left, size.height * 0.82f),
+                end = androidx.compose.ui.geometry.Offset(left, size.height * 0.62f),
                 strokeWidth = 1.8.dp.toPx(),
                 cap = StrokeCap.Round,
             )
