@@ -205,7 +205,16 @@ internal fun AuthenticatedApp(
     playback: PlaybackUiState,
     onExitApplication: () -> Unit,
 ) {
-    var stack by remember(session.user.guid) { mutableStateOf(listOf<LibraryRoute>(LibraryRoute.Home)) }
+    // 栈不按会话 guid 重置：切换/添加音乐源后会话对象更换，若按 guid 重置
+    // 会把用户甩回首页（"从哪里切换的就回不去了"）。改为保留栈，会话更换时
+    // 只保留页级路由（详情路由指向旧源内容，全部作废），焦点由各页
+    // focusedKey 恢复到入口锚点（切换音乐源/管理音乐源/添加音乐源按钮）。
+    var stack by remember { mutableStateOf(listOf<LibraryRoute>(LibraryRoute.Home)) }
+    LaunchedEffect(session.user.guid) {
+        stack = stack.filter {
+            it == LibraryRoute.Home || it == LibraryRoute.My || it == LibraryRoute.Settings
+        }.ifEmpty { listOf(LibraryRoute.Home) }
+    }
     var lastHomeBackAt by remember(session.user.guid) { mutableStateOf(0L) }
     // 最近播放的内容随每次播放变化，进入页面时递增触发整表刷新。
     var recentContentTick by remember(session.user.guid) { mutableStateOf(0L) }
