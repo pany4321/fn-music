@@ -188,7 +188,7 @@ private fun SessionRecoveryScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("正在重新连接", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text("正在重新连接", color = FnColors.Text, fontSize = 25.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Text(state.server, color = FnColors.Muted, fontSize = 21.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         state.username?.let { username ->
@@ -357,7 +357,7 @@ internal fun LoginScreen(
             )
             // 同一个页面要同时承担"首次安装添加源"和"应用内新增源"，
             // 所以抬头说的是"这一步在做什么"（连接一个音乐源），而不是"登录"。
-            Text("连接音乐源", color = FnColors.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("连接音乐源", color = FnColors.Text, fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

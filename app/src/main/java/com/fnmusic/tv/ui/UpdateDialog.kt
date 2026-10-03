@@ -438,7 +438,7 @@ private fun UpdateProgressDialog(
             Modifier.width(620.dp).background(FnColors.Surface, RoundedCornerShape(22.dp))
                 .border(1.dp, FnColors.Hairline, RoundedCornerShape(22.dp)).padding(38.dp),
         ) {
-            Text(title, fontSize = 31.sp, fontWeight = FontWeight.Bold)
+            Text(title, fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             Text(message, color = FnColors.Muted, fontSize = 18.sp)
             Spacer(Modifier.height(26.dp))
@@ -474,7 +474,7 @@ private fun UpdateStatusDialog(
             Modifier.width(590.dp).background(FnColors.Surface, RoundedCornerShape(22.dp))
                 .border(1.dp, FnColors.Hairline, RoundedCornerShape(22.dp)).padding(38.dp),
         ) {
-            Text(title, fontSize = 31.sp, fontWeight = FontWeight.Bold)
+            Text(title, fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
             Text(message, color = FnColors.Muted, fontSize = 18.sp)
             if (primaryLabel != null && onPrimary != null) {

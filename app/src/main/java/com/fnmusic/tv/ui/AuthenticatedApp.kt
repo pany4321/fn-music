@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1099,7 +1100,7 @@ private fun BrowseHome(
                 .verticalScroll(rememberScrollState())
         ) {
         Spacer(Modifier.height(12.dp))
-        Text("听点什么", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+        Text("听点什么", fontSize = 25.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
             HomeFeatureCard(
@@ -1181,7 +1182,7 @@ private fun BrowseHome(
             )
         }
         Spacer(Modifier.height(18.dp))
-        Text("歌单", fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+        Text("歌单", fontSize = 25.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp))
         // Row + horizontalScroll 取代 LazyRow：列表项常驻组合，行级 FocusRequester
         // 不会因滚动回收而失效（此前造成焦点卡死无法上下移动）。
@@ -1235,7 +1236,7 @@ private fun BrowseHome(
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("随机专辑", fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+            Text("随机专辑", fontSize = 25.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(14.dp))
             Button(
                 onClick = { refreshRandomAlbums() },
@@ -1293,7 +1294,7 @@ private fun BrowseHome(
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("随机歌曲", fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+            Text("随机歌曲", fontSize = 25.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(14.dp))
             Button(
                 onClick = { refreshRandomSongs() },
@@ -1356,7 +1357,7 @@ private fun BrowseHome(
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("最近添加", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text("最近添加", fontSize = 25.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(14.dp))
         Row(
@@ -1516,8 +1517,8 @@ private fun HomeFeatureCard(
             Text(
                 title,
                 modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 16.dp),
-                fontSize = 22.sp,
-                lineHeight = 25.sp,
+                fontSize = 18.sp,
+                lineHeight = 22.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -2610,7 +2611,8 @@ private fun <T> PagedCatalogPage(
             maxColumns = 4,
         )
         val scrollableGrid = columns < 4
-        val gridHeight = 95.dp * 3 + 14.dp * 2 + 8.dp
+        // 网格区域高度：三行卡片 + 行距 + 保底余量（+20dp 抬高区域，卡片本身不变）
+        val gridHeight = 95.dp * 3 + 14.dp * 2 + 28.dp
         val totalPages = catalogPageCount(snapshot.total, entries.size, pageSize)
         val visibleEntries = catalogPageEntries(entries, currentPage, pageSize)
         val itemFocuses = remember(stateKey, pageSize) { List(pageSize) { FocusRequester() } }
@@ -2731,7 +2733,7 @@ private fun <T> PagedCatalogPage(
                     )
                     Spacer(Modifier.width(16.dp))
                 }
-                Text(title, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text(title, fontSize = 25.sp, fontWeight = FontWeight.Bold)
                 snapshot.total?.let { total ->
                     Spacer(Modifier.width(14.dp))
                     Text(totalLabel(total), color = FnColors.Muted, fontSize = 12.sp)
@@ -2749,7 +2751,9 @@ private fun <T> PagedCatalogPage(
                 modifier = if (scrollableGrid) {
                     Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())
                 } else {
-                    Modifier.fillMaxWidth()
+                    // 网格区域最低高度：三行卡片 + 行距 + 28dp 余量（比此前多 20dp，
+                    // 区域加高、卡片高度不变；小屏底部富余空间收进卡片区域）
+                    Modifier.fillMaxWidth().heightIn(min = gridHeight)
                 },
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -2811,6 +2815,9 @@ private fun <T> PagedCatalogPage(
                     modifier = Modifier.focusRequester(retryFocus),
                 ) { load(1) }
             }
+            // 翻页器与网格的保底间距：矮屏（车机）弹性间隔会收缩为 0，
+            // 翻页器紧贴卡片行造成触摸误触。
+            Spacer(Modifier.height(14.dp))
             if (!scrollableGrid) {
                 Spacer(Modifier.weight(1f))
             }
@@ -2887,7 +2894,7 @@ private fun <T> GridPage(
                 )
                 Spacer(Modifier.width(16.dp))
             }
-            Text(title, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text(title, fontSize = 25.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(20.dp))
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -3889,8 +3896,8 @@ private fun DetailTrackCollection(
                 }
                 Text(
                     title,
-                    fontSize = 31.sp,
-                    lineHeight = 35.sp,
+                    fontSize = 25.sp,
+                    lineHeight = 28.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -4245,7 +4252,14 @@ internal fun DetailBackButton(modifier: Modifier = Modifier, onClick: () -> Unit
         ),
         contentPadding = PaddingValues(0.dp),
     ) {
-        Text("‹", fontSize = 40.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold)
+        // "‹" 字形在字体 em 框内天然偏下：整体上移 2dp 使视觉对齐圆心。
+        Text(
+            "‹",
+            fontSize = 40.sp,
+            lineHeight = 40.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.offset(y = (-2).dp),
+        )
     }
 }
 
@@ -4967,12 +4981,15 @@ private fun ArtistLockup(
     onClick: () -> Unit,
 ) {
     val container = LocalAuthenticatedDependencies.current
-    val shape = RoundedCornerShape(8.dp)
+    // 聚焦描边沿 Button 边界向外画 1.5dp：shape 与内容整体内缩，让描边落在
+    // 卡片背景之内（否则描边越出卡片上/左缘，真机上呈"描边溢出"）。
+    val shape = RoundedCornerShape(6.dp)
     Button(
         enabled = enabled,
         onClick = onClick,
         modifier = modifier
             .size(width = 170.dp, height = 95.dp)
+            .padding(1.5.dp)
             .onFocusChanged { state ->
                 if (state.isFocused && coverId != null) {
                     // 预取变体必须与下方 RemoteArtwork 的渲染变体一致（缓存键含 variant，
@@ -5050,13 +5067,15 @@ private fun AlbumLockup(
     onClick: () -> Unit,
 ) {
     val container = LocalAuthenticatedDependencies.current
-    val shape = RoundedCornerShape(8.dp)
+    // 同 ArtistLockup：整体内缩 1.5dp，聚焦描边画在卡片背景之内。
+    val shape = RoundedCornerShape(6.dp)
     val artworkShape = RoundedCornerShape(4.dp)
     Button(
         enabled = enabled,
         onClick = onClick,
         modifier = modifier
             .size(width = 165.dp, height = 95.dp)
+            .padding(1.5.dp)
             .onFocusChanged { state ->
                 if (state.isFocused && coverId != null) {
                     // 预取变体必须与下方 RemoteArtwork 的渲染变体一致（缓存键含 variant，
@@ -5290,11 +5309,21 @@ private fun CatalogPager(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(currentPage.toString(), color = FnColors.Muted, fontSize = 13.sp)
+            Text(
+                currentPage.toString(),
+                color = FnColors.Muted,
+                fontSize = 15.sp,
+                lineHeight = 20.sp,
+            )
             Spacer(Modifier.width(6.dp))
-            Text("/", color = FnColors.Muted, fontSize = 13.sp)
+            Text("/", color = FnColors.Muted, fontSize = 15.sp, lineHeight = 20.sp)
             Spacer(Modifier.width(6.dp))
-            Text(totalPages.toString(), color = FnColors.Muted, fontSize = 13.sp)
+            Text(
+                totalPages.toString(),
+                color = FnColors.Muted,
+                fontSize = 15.sp,
+                lineHeight = 20.sp,
+            )
         }
         CatalogPageArrowButton(
             direction = CatalogPagerTarget.Next,
@@ -5637,7 +5666,7 @@ private fun SearchRoute(
                 onClick = onBack,
             )
             Spacer(Modifier.width(16.dp))
-            Text("搜索", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("搜索", fontSize = 25.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(18.dp))
         val fieldShape = RoundedCornerShape(27.dp)

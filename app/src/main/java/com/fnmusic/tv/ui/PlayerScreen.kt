@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -575,7 +576,13 @@ internal fun ImmersivePlayer(
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Text("‹", fontSize = 33.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold)
+            Text(
+            "‹",
+            fontSize = 33.sp,
+            lineHeight = 33.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.offset(y = (-2).dp),
+        )
         }
     }
 }
@@ -2693,7 +2700,7 @@ internal fun AddToPlaylistDialog(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("添加到歌单", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("添加到歌单", fontSize = 25.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 val addShape = CircleShape
                 val closeShape = CircleShape
                 Button(

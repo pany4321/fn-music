@@ -256,7 +256,7 @@ internal fun SettingsScreen(
                         },
                 )
                 Spacer(Modifier.width(16.dp))
-                Text("设置", fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+                Text("设置", fontSize = 25.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
             Text("音乐源", fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)

@@ -286,7 +286,7 @@ internal fun SourcePickerDialog(
                     .padding(horizontal = 26.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(title, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
                 if (sources.isEmpty()) {
                     Text(
                         if (legacyVisible) "还没有保存的音乐源" else "还没有添加音乐源",
