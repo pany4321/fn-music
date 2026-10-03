@@ -2494,7 +2494,13 @@ private fun AllPlaylists(container: AuthenticatedAppDependencies, onBack: () -> 
             }
         }
     }
-    GridPage("全部歌单", playlists, { it.guid.value }, onBack = onBack) { playlist, modifier ->
+    GridPage(
+        "全部歌单",
+        playlists,
+        { it.guid.value },
+        onBack = onBack,
+        onOpen = onOpen,
+    ) { playlist, modifier, onClick ->
         PlaylistTile(
             playlist.name,
             "歌单",
@@ -2502,7 +2508,8 @@ private fun AllPlaylists(container: AuthenticatedAppDependencies, onBack: () -> 
             FnColors.Coral,
             derivedCovers = playlistCovers[playlist.guid.value].orEmpty(),
             modifier = modifier,
-        ) { onOpen(playlist) }
+            onClick = onClick,
+        )
     }
 }
 
@@ -2519,8 +2526,9 @@ private fun ArtistGrid(
         loader = { page -> container.musicRepository.artists(page, FULL_CATALOG_PAGE_SIZE) },
         key = { it.guid.value },
         onBack = onBack,
-    ) { artist, modifier ->
-        ArtistLockup(artist.name, artistCountLabel(artist.trackCount), artist.coverId, modifier = modifier) { onOpen(artist) }
+        onOpen = onOpen,
+    ) { artist, modifier, onClick ->
+        ArtistLockup(artist.name, artistCountLabel(artist.trackCount), artist.coverId, modifier = modifier, onClick = onClick)
     }
 }
 
@@ -2537,8 +2545,9 @@ private fun AlbumGrid(
         loader = { page -> container.musicRepository.albums(page, FULL_CATALOG_PAGE_SIZE) },
         key = { it.guid.value },
         onBack = onBack,
-    ) { album, modifier ->
-        AlbumLockup(album.name, album.artistName.orEmpty(), album.coverId, modifier = modifier) { onOpen(album) }
+        onOpen = onOpen,
+    ) { album, modifier, onClick ->
+        AlbumLockup(album.name, album.artistName.orEmpty(), album.coverId, modifier = modifier, onClick = onClick)
     }
 }
 
@@ -2550,7 +2559,8 @@ private fun <T> PagedCatalogPage(
     loader: suspend (Int) -> Page<T>,
     key: (T) -> String,
     onBack: (() -> Unit)? = null,
-    item: @Composable (T, Modifier) -> Unit,
+    onOpen: (T) -> Unit,
+    item: @Composable (T, Modifier, () -> Unit) -> Unit,
 ) {
     val retainedStore = LocalLibraryRetainedState.current
     val retained = retainedStore.paged<T>("grid:$stateKey")
@@ -2623,7 +2633,10 @@ private fun <T> PagedCatalogPage(
             }
         }
 
-        LaunchedEffect(snapshot.initialLoadCompleted, entries, pageSize, focusedKey) {
+        // currentPage 必须在 keys 里：被点条目在第 2 页以后时，恢复要先翻页
+        // （此前翻完页直接 return，currentPage 不在 keys 导致 effect 不再重跑，
+        // 页面对了但焦点没人管）。翻页完成后走同一套帧循环重试聚焦。
+        LaunchedEffect(snapshot.initialLoadCompleted, entries, pageSize, focusedKey, currentPage) {
             if (!snapshot.initialLoadCompleted || entries.isEmpty() || initialFocusRequested) return@LaunchedEffect
             val retainedIndex = focusedKey?.let { retainedKey -> entries.indexOfFirst { key(it) == retainedKey } } ?: -1
             val targetPage = if (retainedIndex >= 0) retainedIndex / pageSize + 1 else currentPage.coerceIn(1, totalPages)
@@ -2634,9 +2647,15 @@ private fun <T> PagedCatalogPage(
             val targetIndex = if (retainedIndex >= 0) retainedIndex % pageSize else 0
             focusedKey = key(visibleEntries.getOrElse(targetIndex) { visibleEntries.first() })
             lastFocusedIndex = targetIndex.coerceAtMost(visibleEntries.lastIndex)
-            yield()
-            runCatching { itemFocuses[lastFocusedIndex].requestFocus() }
-            initialFocusRequested = true
+            var restored = false
+            var firstFrame = 0L
+            while (!restored) {
+                val now = withFrameNanos { it }
+                if (firstFrame == 0L) firstFrame = now
+                if (now - firstFrame > 1_000_000_000L) break
+                restored = runCatching { itemFocuses[lastFocusedIndex].requestFocus() }.getOrDefault(false)
+            }
+            if (restored) initialFocusRequested = true
         }
 
         LaunchedEffect(snapshot.initialLoadCompleted, entries, snapshot.error) {
@@ -2744,6 +2763,12 @@ private fun <T> PagedCatalogPage(
                             val entryKey = key(entry)
                             val nextRowIndex = index + columns
                             val pagerTarget = catalogPagerTarget(column, columns, canPrevious, canNext)
+                            // 点击（触摸与 D-pad OK 皆经此）记录 focusedKey：返回时恢复到被点条目。
+                            val itemOnClick = {
+                                focusedKey = entryKey
+                                lastFocusedIndex = index
+                                onOpen(entry)
+                            }
                             item(
                                 entry,
                                 Modifier
@@ -2774,6 +2799,7 @@ private fun <T> PagedCatalogPage(
                                             lastFocusedIndex = index
                                         }
                                     },
+                                itemOnClick,
                             )
                         }
                     }
@@ -2811,7 +2837,8 @@ private fun <T> GridPage(
     entries: List<T>,
     key: (T) -> String,
     onBack: (() -> Unit)? = null,
-    item: @Composable (T, Modifier) -> Unit,
+    onOpen: (T) -> Unit,
+    item: @Composable (T, Modifier, () -> Unit) -> Unit,
 ) {
     var focusedKey by rememberSaveable(title) { mutableStateOf<String?>(null) }
     var initialFocusRequested by remember(title) { mutableStateOf(false) }
@@ -2823,9 +2850,20 @@ private fun <T> GridPage(
         if (entries.isEmpty() || initialFocusRequested) return@LaunchedEffect
         val keys = entries.map(key)
         focusedKey = focusedKey?.takeIf(keys::contains) ?: keys.first()
-        yield()
-        runCatching { contentFocus.requestFocus() }
-        initialFocusRequested = true
+        // 恢复到被点条目：先滚到它（可能远在网格下方，LazyColumn 未组合时
+        // requestFocus 必失败），再帧循环重试聚焦（1 秒上限）——返回转场动画
+        // 期间单次尝试必然失败，随即上闩会永久放弃（焦点/描边全丢）。
+        val index = entries.indexOfFirst { key(it) == focusedKey }
+        if (index >= 0) runCatching { gridState.scrollToItem(index) }
+        var restored = false
+        var firstFrame = 0L
+        while (!restored) {
+            val now = withFrameNanos { it }
+            if (firstFrame == 0L) firstFrame = now
+            if (now - firstFrame > 1_000_000_000L) break
+            restored = runCatching { contentFocus.requestFocus() }.isSuccess
+        }
+        if (restored) initialFocusRequested = true
     }
     val window = LocalAdaptiveWindow.current
     Column(
@@ -2873,6 +2911,11 @@ private fun <T> GridPage(
                 itemsIndexed(entries, key = { _, entry -> key(entry) }) { index, entry ->
                     val entryKey = key(entry)
                     val column = index % columns
+                    // 点击（触摸与 D-pad OK 皆经此）先记录 focusedKey：返回时恢复到被点条目。
+                    val itemOnClick = {
+                        focusedKey = entryKey
+                        onOpen(entry)
+                    }
                     item(
                         entry,
                         Modifier
@@ -2887,6 +2930,7 @@ private fun <T> GridPage(
                             }
                             .then(if (focusedKey == entryKey) Modifier.focusRequester(contentFocus) else Modifier)
                             .onFocusChanged { if (it.isFocused) focusedKey = entryKey },
+                        itemOnClick,
                     )
                 }
             }
@@ -5443,13 +5487,19 @@ private fun Genres(container: AuthenticatedAppDependencies, onBack: () -> Unit, 
     LaunchedEffect(Unit) {
         retainedStore.loadListOnce(genreState) { container.musicRepository.genres() }
     }
-    GridPage("全部风格", genres, { it.guid.value }, onBack = onBack) { genre, modifier ->
+    GridPage(
+        "全部风格",
+        genres,
+        { it.guid.value },
+        onBack = onBack,
+        onOpen = onGenre,
+    ) { genre, modifier, onClick ->
         GenreLockup(
             title = genre.name,
             subtitle = genre.trackCount?.let { "$it 首歌曲" }.orEmpty(),
             coverId = genre.coverId,
             modifier = modifier,
-            onClick = { onGenre(genre) },
+            onClick = onClick,
         )
     }
 }
