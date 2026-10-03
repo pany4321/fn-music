@@ -5524,9 +5524,17 @@ private fun SearchRoute(
     var searched by rememberSaveable { mutableStateOf("") }
     // 历史胶囊：直接搜索的请求（立即执行，不等防抖、不写回输入框）。
     var searchRequest by remember { mutableStateOf<String?>(null) }
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var artists by remember { mutableStateOf<List<Artist>>(emptyList()) }
-    var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    // 结果存 retainedStore（会话级保留）：从结果进详情/播放后返回，结果还在。
+    // 此前三列表用普通 remember，路由离开即销毁——"搜完点一首再返回结果全丢"。
+    // 键带 historyNamespace（按账号隔离）；切源/登出时缓存命名空间失效一并清掉。
+    val retainedStore = LocalLibraryRetainedState.current
+    val searchTrackState = retainedStore.list<Track>("search:tracks:$historyNamespace")
+    val searchArtistState = retainedStore.list<Artist>("search:artists:$historyNamespace")
+    val searchAlbumState = retainedStore.list<Album>("search:albums:$historyNamespace")
+    val tracks = searchTrackState.snapshot.entries
+    val artists = searchArtistState.snapshot.entries
+    val albums = searchAlbumState.snapshot.entries
+    val hasResults = tracks.isNotEmpty() || artists.isNotEmpty() || albums.isNotEmpty()
     val fieldFocus = remember { FocusRequester() }
     val resultsFocus = remember { FocusRequester() }
     val backFocus = remember { FocusRequester() }
@@ -5539,7 +5547,9 @@ private fun SearchRoute(
     suspend fun performSearch(term: String) {
         if (term.isEmpty()) {
             searched = ""
-            tracks = emptyList(); artists = emptyList(); albums = emptyList()
+            searchTrackState.snapshot = RetainedListSnapshot()
+            searchArtistState.snapshot = RetainedListSnapshot()
+            searchAlbumState.snapshot = RetainedListSnapshot()
             loading = false
             return
         }
@@ -5550,9 +5560,9 @@ private fun SearchRoute(
                 val t = async { runCatching { container.musicRepository.searchTracks(term, size = SEARCH_TRACK_PAGE_SIZE) }.getOrNull() }
                 val a = async { runCatching { container.musicRepository.searchArtists(term) }.getOrNull() }
                 val al = async { runCatching { container.musicRepository.searchAlbums(term) }.getOrNull() }
-                tracks = t.await()?.items ?: emptyList()
-                artists = a.await()?.items ?: emptyList()
-                albums = al.await()?.items ?: emptyList()
+                searchTrackState.snapshot = RetainedListSnapshot(entries = t.await()?.items ?: emptyList())
+                searchArtistState.snapshot = RetainedListSnapshot(entries = a.await()?.items ?: emptyList())
+                searchAlbumState.snapshot = RetainedListSnapshot(entries = al.await()?.items ?: emptyList())
             }
         } catch (cause: CancellationException) {
             throw cause
@@ -5575,11 +5585,31 @@ private fun SearchRoute(
         refreshHistory()
     }
 
-    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    // 有结果时聚焦结果区首项（继续浏览），无结果聚焦输入框（准备输入）。
+    // 有结果分支用帧循环重试（1 秒上限）：返回转场动画期间单次 requestFocus 必失败。
+    LaunchedEffect(Unit) {
+        yield()
+        if (hasResults) {
+            var restored = false
+            var firstFrame = 0L
+            while (!restored) {
+                val now = withFrameNanos { it }
+                if (firstFrame == 0L) firstFrame = now
+                if (now - firstFrame > 1_000_000_000L) break
+                restored = runCatching { resultsFocus.requestFocus() }.isSuccess
+            }
+            if (!restored) runCatching { fieldFocus.requestFocus() }
+        } else {
+            runCatching { fieldFocus.requestFocus() }
+        }
+    }
     // 输入防抖：只在有关键词时搜索；清空输入框不抹掉已有结果
     // （历史胶囊直搜时输入框保持为空，若因此触发空搜索会立刻清掉结果）。
+    // 首次组合：结果与关键词已从状态恢复且一致，跳过——否则恢复的关键词
+    // 会立刻触发一次重复搜索（覆盖 retained 结果 + loading 闪烁）。
     LaunchedEffect(query.text) {
         if (query.text.isBlank()) return@LaunchedEffect
+        if (query.text.trim() == searched && hasResults) return@LaunchedEffect
         kotlinx.coroutines.delay(500)
         performSearch(query.text.trim())
     }
@@ -5612,8 +5642,6 @@ private fun SearchRoute(
         Spacer(Modifier.height(18.dp))
         val fieldShape = RoundedCornerShape(27.dp)
         var fieldFocused by remember { mutableStateOf(false) }
-        // 无结果时向下不指向任何目标，显式取消，避免焦点搜索落到未挂载的 FocusRequester。
-        val hasResults = artists.isNotEmpty() || albums.isNotEmpty() || tracks.isNotEmpty()
         // 历史条目最多 6 条 + “清空”胶囊，FlowRow 动态宽度（单行 ellipsis 防极端长词）；
         // “清空”不另起一行，作为最后一颗胶囊跟随排列（描边/文字用 Coral 区分）。
         val historySlots = remember(history) { history.take(6) }
