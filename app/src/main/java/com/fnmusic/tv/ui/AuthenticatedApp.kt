@@ -2612,7 +2612,7 @@ private fun <T> PagedCatalogPage(
         )
         val scrollableGrid = columns < 4
         // 网格区域高度：三行卡片 + 行距 + 保底余量（+20dp 抬高区域，卡片本身不变）
-        val gridHeight = 95.dp * 3 + 14.dp * 2 + 28.dp
+        val gridHeight = 95.dp * 3 + 14.dp * 2 + 48.dp
         val totalPages = catalogPageCount(snapshot.total, entries.size, pageSize)
         val visibleEntries = catalogPageEntries(entries, currentPage, pageSize)
         val itemFocuses = remember(stateKey, pageSize) { List(pageSize) { FocusRequester() } }
@@ -5313,16 +5313,16 @@ private fun CatalogPager(
                 currentPage.toString(),
                 color = FnColors.Muted,
                 fontSize = 15.sp,
-                lineHeight = 20.sp,
+                lineHeight = 15.sp,
             )
             Spacer(Modifier.width(6.dp))
-            Text("/", color = FnColors.Muted, fontSize = 15.sp, lineHeight = 20.sp)
+            Text("/", color = FnColors.Muted, fontSize = 15.sp, lineHeight = 15.sp)
             Spacer(Modifier.width(6.dp))
             Text(
                 totalPages.toString(),
                 color = FnColors.Muted,
                 fontSize = 15.sp,
-                lineHeight = 20.sp,
+                lineHeight = 15.sp,
             )
         }
         CatalogPageArrowButton(
