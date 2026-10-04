@@ -250,9 +250,17 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
 - `TrackDto.isFavorite` maps into `Track.isFavorite`. Metadata, ordinary track pages, roam results,
   and favorite pages seed one account-scoped `FavoriteLibraryState` keyed by track GUID. A namespace
   change or sign-out clears it before the next account can observe any value.
-- The NAS is the source of truth. Favorite list pages bypass the persistent response cache and use
-  server paging, so another device's changes are visible on reload. No favorite is persisted in
-  Room or preferences as authoritative state.
+- The NAS is the source of truth for favorite MEMBERSHIP. Favorite list pages bypass the persistent
+  response cache and use full refetch + reconcile, so another device's changes are visible on
+  reload. Favorite STATUS is never persisted in Room or preferences as authoritative state.
+- Ordering metadata only: the local Room table `favorite_time(namespace, trackGuid, favoritedAt)`
+  records when each track was favorited so the list can show "oldest favorite first" (ascending by
+  last-favorited time; re-favoriting refreshes the timestamp). It is not favorite status authority:
+  every load refetches the full member set from the server, reconciles (keep local in-app times >
+  response-provided `favoriteAt`/Jellyfin `DateLastSaved` > reversal-seeded synthetic times for
+  members without any timestamp), drops records for members the server no longer lists, then sorts
+  in memory and slices pages (`sort = "favoriteAt,asc"`; full-fetch failure degrades to plain
+  server paging with the server's `favoriteAt,desc` until the next successful mutation).
 - Toggle publishes one optimistic desired value under a serialized mutation, calls create/delete,
   increments `revision` only after success, and removes the pending marker. Failure or cancellation
   restores the last server-confirmed value; cancellation is rethrown. Every mutation captures its
@@ -616,7 +624,7 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
 | `/access_code_verify` rejects a blank code | `AppException(AccessCodeRequired)` |
 | `/access_code_verify` rejects a supplied code | `AppException(InvalidAccessCode)` |
 | Password login request | Send SHA-256 lowercase hex, never the plain password |
-| Favorite list request | GET page/size with `favoriteAt,desc`; do not serve an authoritative local cache |
+| Favorite list request | GET page/size with `favoriteAt,desc`; response favoriteAt is an optional seed only — ordering authority is the local `favorite_time` table (see §Server-backed favorites) |
 | Favorite create/delete succeeds with `data: null` | Accept Unit success and increment favorite revision once |
 | Favorite create/delete fails | Restore the prior server-confirmed state and clear pending |
 | Authenticated namespace changes | Clear all in-memory favorite statuses, pending entries, revisions, and errors |

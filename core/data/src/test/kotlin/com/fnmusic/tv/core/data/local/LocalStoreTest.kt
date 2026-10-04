@@ -44,6 +44,27 @@ class LocalStoreTest {
         assertEquals("queue-b", store.account("server:user-b")?.queueJson)
     }
 
+    @Test fun `favorite times support refresh delete and namespace isolation`() = runBlocking {
+        store.recordFavoriteTimes("server:user-a", mapOf("t1" to 100L, "t2" to 200L))
+        // 重复收藏 = 刷新最后一次收藏时间
+        store.recordFavoriteTimes("server:user-a", mapOf("t1" to 300L))
+        store.recordFavoriteTimes("server:user-b", mapOf("t1" to 999L))
+
+        assertEquals(mapOf("t1" to 300L, "t2" to 200L), store.favoriteTimes("server:user-a"))
+        assertEquals(mapOf("t1" to 999L), store.favoriteTimes("server:user-b"))
+
+        // 取消收藏删除记录
+        store.deleteFavoriteTime("server:user-a", "t2")
+        assertEquals(mapOf("t1" to 300L), store.favoriteTimes("server:user-a"))
+
+        // 清缓存（includeEssential=false）保留收藏时间；移除账号才清掉
+        store.clearNamespace("server:user-a", includeEssential = false)
+        assertEquals(mapOf("t1" to 300L), store.favoriteTimes("server:user-a"))
+        store.clearNamespace("server:user-a", includeEssential = true)
+        assertTrue(store.favoriteTimes("server:user-a").isEmpty())
+        assertEquals(mapOf("t1" to 999L), store.favoriteTimes("server:user-b"))
+    }
+
     @Test fun `eviction preserves essential state and bounds database ownership`() = runBlocking {
         val namespace = "server:user"
         store.saveQueue(namespace, "essential-queue")

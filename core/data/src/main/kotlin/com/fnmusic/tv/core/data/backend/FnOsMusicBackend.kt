@@ -3,6 +3,7 @@ package com.fnmusic.tv.core.data.backend
 import com.fnmusic.tv.core.data.api.AlbumDto
 import com.fnmusic.tv.core.data.api.ApiDecoder
 import com.fnmusic.tv.core.data.api.ArtistDto
+import com.fnmusic.tv.core.data.api.favoriteTimeMillisOrNull
 import com.fnmusic.tv.core.data.api.GenreDto
 import com.fnmusic.tv.core.data.api.LyricDto
 import com.fnmusic.tv.core.data.api.LyricListDto
@@ -275,7 +276,10 @@ internal class FnOsMusicBackend(
 }
 
 /** 收藏列表里的曲目一律视为已收藏（与服务端返回值无关，与改动前一致）。 */
-internal fun TrackDto.toFavoriteDomain(): Track = toDomain().copy(isFavorite = true)
+internal fun TrackDto.toFavoriteDomain(): Track = toDomain().copy(
+    isFavorite = true,
+    favoritedAt = favoriteAt.favoriteTimeMillisOrNull(),
+)
 
 /**
  * 歌词版本选择（与改动前 `MusicRepository.decodeLyrics` 的优先级一致）：

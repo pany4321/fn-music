@@ -60,6 +60,18 @@ data class CachedIndexEntity(
     val accessedAt: Long,
 )
 
+/**
+ * 收藏时间（收藏列表"先收藏在前"排序的依据），namespace+曲目一条。
+ * 不是缓存：不参与 32MB 淘汰；服务器是收藏成员的权威，这张表只存排序用的本地时间
+ * （本 App 收藏动作写入的权威时间 + 首次对账回填的服务器时间/种子时间）。
+ */
+@Entity(tableName = "favorite_time", primaryKeys = ["namespace", "trackGuid"])
+data class FavoriteTimeEntity(
+    val namespace: String,
+    val trackGuid: String,
+    val favoritedAt: Long,
+)
+
 @Dao
 interface AppDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -129,6 +141,18 @@ interface AppDao {
     @Query("UPDATE cache_index SET accessedAt = :accessedAt WHERE namespace = :namespace AND indexKey = :indexKey")
     suspend fun touchIndex(namespace: String, indexKey: String, accessedAt: Long)
 
+    @Upsert
+    suspend fun upsertFavoriteTimes(entities: List<FavoriteTimeEntity>)
+
+    @Query("SELECT * FROM favorite_time WHERE namespace = :namespace")
+    suspend fun favoriteTimes(namespace: String): List<FavoriteTimeEntity>
+
+    @Query("DELETE FROM favorite_time WHERE namespace = :namespace AND trackGuid = :trackGuid")
+    suspend fun deleteFavoriteTime(namespace: String, trackGuid: String)
+
+    @Query("DELETE FROM favorite_time WHERE namespace = :namespace")
+    suspend fun deleteFavoriteTimes(namespace: String)
+
     @Query("SELECT COALESCE(SUM(length(payload)), 0) FROM cache_page")
     suspend fun pagePayloadBytes(): Long
 
@@ -188,8 +212,9 @@ interface AppDao {
         CachedLyricEntity::class,
         CachedMatchedLyricEntity::class,
         CachedIndexEntity::class,
+        FavoriteTimeEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -223,9 +248,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS favorite_time (" +
+                        "namespace TEXT NOT NULL, " +
+                        "trackGuid TEXT NOT NULL, " +
+                        "favoritedAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(namespace, trackGuid))",
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(context, AppDatabase::class.java, NAME)
             .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .addCallback(object : Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     val autoVacuum = db.query("PRAGMA auto_vacuum").use { cursor ->

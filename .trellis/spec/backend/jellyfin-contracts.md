@@ -68,7 +68,7 @@ GET /Items?userId=<uid>&Recursive=true
 | `title,asc` | `SortBy=SortName&SortOrder=Ascending` |
 | `trackNo,asc` | `SortBy=ParentIndexNumber,IndexNumber` |
 | `trackCount,desc`（歌手） | `SortBy=SortName`（Jellyfin 无曲目数排序，用名称） |
-| 收藏 `favoriteAt,desc` | `SortBy=DateCreated&SortOrder=Descending`（无收藏时间排序） |
+| 收藏 `favoriteAt,desc` | `SortBy=DateCreated&SortOrder=Descending`（无收藏时间排序；响应 `UserData.DateLastSaved` 仅作本地收藏时间排序的候选种子，见 android-client-contracts.md §Server-backed favorites） |
 
 ## 4. 各目录端点（实测均 200）
 

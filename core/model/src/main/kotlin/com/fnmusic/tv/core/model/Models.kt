@@ -63,6 +63,12 @@ data class Track(
     val audioFormat: String? = null,
     val isFavorite: Boolean = false,
     /**
+     * 服务器响应自带的收藏时间（epoch 毫秒，尽力而为）：飞牛 `favorite-track/list` 的
+     * `favoriteAt`、Jellyfin 的 `UserData.DateLastSaved`。仅作收藏列表排序的候选种子，
+     * 权威时间在本地 favorite_time 表（见 MusicRepository 对账逻辑）；拿不到为 null。
+     */
+    val favoritedAt: Long? = null,
+    /**
      * 歌单内条目的 id（Jellyfin 从歌单删曲目用 `entryIds`；其它后端为 null）。
      */
     val playlistEntryId: String? = null,

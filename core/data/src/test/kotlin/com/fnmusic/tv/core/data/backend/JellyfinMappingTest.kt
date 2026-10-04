@@ -99,6 +99,20 @@ class JellyfinMappingTest {
     }
 
     @Test
+    fun `date last saved seeds favorite time and absence leaves it null`() {
+        // DateLastSaved 是 Jellyfin 侧唯一可用的收藏时间候选（收藏动作会写它）
+        val json = """{"Id":"abc","Name":"Solo",
+            "UserData":{"IsFavorite":true,"DateLastSaved":"2026-01-01T00:00:00.500Z"}}"""
+
+        val track = ApiDecoder.json.decodeFromString<JellyfinItemDto>(json).toTrack()
+
+        assertEquals(1_767_225_600_500L, track.favoritedAt)
+
+        // 实测样本无 DateLastSaved：favoritedAt 为 null，走本地种子回填
+        assertNull(ApiDecoder.json.decodeFromString<JellyfinItemDto>(itemJson).toTrack().favoritedAt)
+    }
+
+    @Test
     fun `jellyfin lyrics convert to lrc text in time order`() {
         val json = """{"Lyrics":[{"Text":"第二行","Start":15000000},
             {"Text":"第一行","Start":5000000},{"Text":"","Start":9000000}]}"""

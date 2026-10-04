@@ -79,11 +79,28 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
         recordEvictableWrite(entity.payload)
     }
 
+    /** 收藏时间批量写入（收藏成功/首次对账回填），同 guid 覆盖即"重复收藏刷新时间"。 */
+    suspend fun recordFavoriteTimes(namespace: String, times: Map<String, Long>) {
+        if (times.isEmpty()) return
+        dao.upsertFavoriteTimes(times.map { (trackGuid, favoritedAt) ->
+            FavoriteTimeEntity(namespace = namespace, trackGuid = trackGuid, favoritedAt = favoritedAt)
+        })
+    }
+
+    suspend fun favoriteTimes(namespace: String): Map<String, Long> =
+        dao.favoriteTimes(namespace).associate { it.trackGuid to it.favoritedAt }
+
+    suspend fun deleteFavoriteTime(namespace: String, trackGuid: String) {
+        dao.deleteFavoriteTime(namespace, trackGuid)
+    }
+
     suspend fun clearNamespace(namespace: String, includeEssential: Boolean) = budgetMutex.withLock {
         dao.deletePages(namespace)
         dao.deleteLyrics(namespace)
         dao.deleteMatchedLyrics(namespace)
         dao.deleteIndexes(namespace)
+        // 收藏时间跟着账号走：仅移除账号本体时清掉（清缓存/清可淘汰项都保留它）。
+        if (includeEssential) dao.deleteFavoriteTimes(namespace)
         if (includeEssential) dao.deleteAccount(namespace)
         reclaimSpace()
         resetBudgetEstimate()

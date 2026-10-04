@@ -9,6 +9,8 @@ import com.fnmusic.tv.core.model.Playlist
 import com.fnmusic.tv.core.model.Track
 import com.fnmusic.tv.core.model.TrackGuid
 import kotlinx.serialization.Serializable
+import java.time.Instant
+import java.time.OffsetDateTime
 
 /**
  * Jellyfin 的 DTO 与领域映射。
@@ -44,7 +46,21 @@ internal data class JellyfinUserDataDto(
     val IsFavorite: Boolean = false,
     val Played: Boolean = false,
     val LastPlayedDate: String? = null,
+    /**
+     * 最近一次 UserData 保存时间：收藏动作会写它，但播放上报等也会刷新——
+     * 只作收藏时间排序的候选种子（Jellyfin 没有专门的收藏时间字段），拿不到走反转序种子。
+     */
+    val DateLastSaved: String? = null,
 )
+
+/** Jellyfin 的时间戳是 ISO-8601 字符串（"2026-10-03T12:34:56.789Z"）；解析不出返回 null。 */
+internal fun String?.jellyfinTimeMillisOrNull(): Long? = this
+    ?.trim()?.takeIf(String::isNotEmpty)
+    ?.let { raw ->
+        runCatching { Instant.parse(raw).toEpochMilli() }
+            .recoverCatching { OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
+            .getOrNull()
+    }
 
 @Serializable
 internal data class JellyfinMediaSourceDto(
@@ -106,6 +122,7 @@ internal fun JellyfinItemDto.toTrack(): Track = Track(
         ?.takeIf(String::isNotEmpty)
         ?.uppercase(),
     isFavorite = UserData?.IsFavorite == true,
+    favoritedAt = UserData?.DateLastSaved.jellyfinTimeMillisOrNull(),
     // 歌单里的曲目会带 PlaylistItemId：Jellyfin 删条目要用它（见 jellyfin-contracts.md §4）。
     playlistEntryId = PlaylistItemId,
 )

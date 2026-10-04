@@ -213,6 +213,17 @@ class MusicRepository internal constructor(
     )
     private val favoriteMutationMutex = Mutex()
 
+    /**
+     * 收藏列表的本地排序快照（namespace → 按收藏时间升序的全量曲目），会话内内存缓存。
+     * 收藏/取消收藏后失效，下次读取重建（服务器始终是收藏成员的权威）。
+     */
+    private data class FavoriteListSnapshot(val namespace: String, val tracks: List<Track>)
+
+    @Volatile private var favoriteListSnapshot: FavoriteListSnapshot? = null
+
+    /** 全量构建失败后的降级标记：降级路径粘滞，直到下一次收藏动作重试重建。 */
+    @Volatile private var favoriteListDegraded = false
+
     /** 无封面条目的负缓存（key 含 namespace/variant），5 分钟后允许重试。 */
     private val negativeArtworkUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val _favoriteState = MutableStateFlow(FavoriteLibraryState())
@@ -393,6 +404,18 @@ class MusicRepository internal constructor(
 
     suspend fun favoriteTracks(page: Int): Page<Track> {
         val namespace = session.cacheNamespace()
+        // 全量快照的构建与失效都走 favoriteMutationMutex：保证"收藏动作失效快照"不会被
+        // 一个更早启动、尚未完成的重建用旧数据覆盖回去（invalidate 一定排在它后面执行）。
+        favoriteMutationMutex.withLock {
+            val snapshot = favoriteSnapshotLocked(namespace)
+            if (snapshot != null) {
+                val paged = sliceFavoritePage(snapshot, page, FAVORITE_PAGE_SIZE)
+                observeFavoriteTracks(paged, namespace)
+                return paged
+            }
+        }
+        // 降级：服务端分页原序。降级粘滞到下次收藏动作，避免同一轮加载里各页 sort
+        // 忽而 desc 忽而 asc 触发 UI 的漂移误报（CollectionChanged）。
         val result = backend.favoriteTracks(page, FAVORITE_PAGE_SIZE).toDomainPage(page, FAVORITE_PAGE_SIZE)
         observeFavoriteTracks(result, namespace)
         return result
@@ -483,6 +506,7 @@ class MusicRepository internal constructor(
             try {
                 backend.setFavorite(trackGuid, mutation.desired)
                 _favoriteState.update { it.complete(mutation) }
+                recordFavoriteTimeChange(mutation)
                 Result.success(mutation.desired)
             } catch (cause: CancellationException) {
                 _favoriteState.update { it.rollback(mutation) }
@@ -507,6 +531,7 @@ class MusicRepository internal constructor(
             try {
                 backend.setFavorite(trackGuid, mutation.desired)
                 _favoriteState.update { it.complete(mutation) }
+                recordFavoriteTimeChange(mutation)
                 Result.success(mutation.desired)
             } catch (cause: CancellationException) {
                 _favoriteState.update { it.rollback(mutation) }
@@ -520,6 +545,62 @@ class MusicRepository internal constructor(
 
     fun clearFavoriteState() {
         _favoriteState.value = FavoriteLibraryState()
+        favoriteListSnapshot = null
+        favoriteListDegraded = false
+    }
+
+    /**
+     * 收藏动作成功后的本地时间维护 + 快照失效：
+     * 收藏（含重复收藏）→ 记录当前时间（"重复收藏=刷新最后一次收藏时间"）；取消 → 删除记录。
+     * 时间按 mutation 的 namespace 落库，天然隔离多账号。失效快照让下一次读取重建排序。
+     */
+    private suspend fun recordFavoriteTimeChange(mutation: FavoriteMutation) {
+        runCatching {
+            if (mutation.desired) {
+                localStore.recordFavoriteTimes(mutation.namespace, mapOf(mutation.trackGuid to now()))
+            } else {
+                localStore.deleteFavoriteTime(mutation.namespace, mutation.trackGuid)
+            }
+        }
+        favoriteListSnapshot = null
+        favoriteListDegraded = false
+    }
+
+    /** 持有 [favoriteMutationMutex] 调用。返回 null = 走降级路径（构建失败或已降级）。 */
+    private suspend fun favoriteSnapshotLocked(namespace: String): List<Track>? {
+        favoriteListSnapshot?.takeIf { it.namespace == namespace }?.let { return it.tracks }
+        if (favoriteListDegraded) return null
+        return try {
+            loadFavoriteSnapshot(namespace).also {
+                favoriteListSnapshot = FavoriteListSnapshot(namespace, it)
+            }
+        } catch (cause: CancellationException) {
+            throw cause
+        } catch (_: Exception) {
+            favoriteListDegraded = true
+            null
+        }
+    }
+
+    /** 全量拉取收藏成员 → 对账回填本地收藏时间 → 按"先收藏在前"升序排序。 */
+    private suspend fun loadFavoriteSnapshot(namespace: String): List<Track> {
+        val fetched = mutableListOf<Track>()
+        var page = 1
+        while (true) {
+            val decoded = backend.favoriteTracks(page, FAVORITE_PAGE_SIZE).toDomainPage(page, FAVORITE_PAGE_SIZE)
+            fetched += decoded.items
+            if (!decoded.hasNext) break
+            page += 1
+        }
+        val localTimes = runCatching { localStore.favoriteTimes(namespace) }.getOrDefault(emptyMap())
+        val reconciliation = reconcileFavoriteTimes(
+            serverOrder = fetched.map { it.guid.value },
+            serverTimes = fetched.mapNotNull { track -> track.favoritedAt?.let { track.guid.value to it } }.toMap(),
+            localTimes = localTimes,
+            nowMillis = now(),
+        )
+        runCatching { localStore.recordFavoriteTimes(namespace, reconciliation.upserts) }
+        return fetched.sortedBy { reconciliation.times[it.guid.value] ?: Long.MAX_VALUE }
     }
 
     suspend fun queuePage(source: QueueSource, page: Int): Page<Track> = when (source) {
@@ -642,6 +723,8 @@ class MusicRepository internal constructor(
         artworkCache.clearNamespace(namespace)
         localStore.clearNamespace(namespace, includeEssential)
         _playlistCovers.value = emptyMap()
+        favoriteListSnapshot = null
+        favoriteListDegraded = false
     }
 
     suspend fun clearLocalNamespace(includeEssential: Boolean) {
@@ -904,6 +987,59 @@ internal fun sizedPageSourceKey(sourceKey: String, size: Int): String {
 internal fun <T> DecodedPage<T>.toDomainPage(page: Int, pageSize: Int): Page<T> {
     require(pageSize > 0)
     return Page(items, page, pageSize, total, sort)
+}
+
+/** 收藏列表本地排序路径的 sort 标识：与降级路径（服务端 "favoriteAt,desc"）严格区分。 */
+internal const val FAVORITE_LOCAL_SORT = "favoriteAt,asc"
+
+/** 种子时间的间隔：首次对账回填时逐首递减 1 秒，保证全部早于本次对账时刻。 */
+private const val FAVORITE_SEED_STEP_MS = 1_000L
+
+/** 收藏时间对账结果：times=全部成员的最终时间；upserts=需写库的；removals=需删库的。 */
+internal data class FavoriteTimeReconciliation(
+    val times: Map<String, Long>,
+    val upserts: Map<String, Long>,
+    val removals: Set<String>,
+)
+
+/**
+ * 收藏时间对账（每次收藏列表全量拉取后执行一次，本地表=服务器收藏集合的投影）：
+ * - 本 App 收藏动作已写入的时间优先，已存在的本地记录不覆盖；
+ * - 服务器响应自带收藏时间（飞牛 favoriteAt / Jellyfin DateLastSaved）的新成员直接回填真实值；
+ * - 其余新成员按"服务端返回序反转"分配种子时间（从 [nowMillis] 向回每首 1 秒）：
+ *   服务端 desc 序（最新在前）反转后即"先收藏在前"，拿不到真实时间顺序也正确；
+ * - 本地有、服务器没有的（其他端取消收藏）进入 removals。
+ */
+internal fun reconcileFavoriteTimes(
+    serverOrder: List<String>,
+    serverTimes: Map<String, Long>,
+    localTimes: Map<String, Long>,
+    nowMillis: Long,
+): FavoriteTimeReconciliation {
+    val serverSet = serverOrder.toHashSet()
+    val removals = localTimes.keys.filterNot(serverSet::contains).toSet()
+    val kept = localTimes.filterKeys { it !in removals }
+    val seeds = serverOrder.asReversed().filter { it !in kept && it !in serverTimes }
+    val seedTimes = seeds.mapIndexed { index, guid ->
+        guid to nowMillis - (seeds.size - index) * FAVORITE_SEED_STEP_MS
+    }.toMap()
+    val upserts = serverTimes.filterKeys { it !in kept } + seedTimes
+    return FavoriteTimeReconciliation(times = kept + upserts, upserts = upserts, removals = removals)
+}
+
+/** 本地排序后的收藏列表内存切片分页（页码从 1 起，页语义与服务器分页一致）。 */
+internal fun <T> sliceFavoritePage(items: List<T>, page: Int, pageSize: Int): Page<T> {
+    require(page >= 1)
+    require(pageSize > 0)
+    val from = ((page - 1) * pageSize).coerceAtMost(items.size)
+    val to = (from + pageSize).coerceAtMost(items.size)
+    return Page(
+        items = items.subList(from, to),
+        page = page,
+        pageSize = pageSize,
+        total = items.size,
+        sort = FAVORITE_LOCAL_SORT,
+    )
 }
 
 /**

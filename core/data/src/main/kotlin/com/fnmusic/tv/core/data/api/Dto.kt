@@ -16,6 +16,9 @@ import com.fnmusic.tv.core.model.TrackGuid
 import com.fnmusic.tv.core.model.User
 import com.fnmusic.tv.core.model.UserGuid
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import java.time.OffsetDateTime
 
 @Serializable
 data class SystemConfigDto(
@@ -145,6 +148,12 @@ data class TrackDto(
     val audioSpec: AudioSpecDto = AudioSpecDto(),
     val accessStatus: Int? = null,
     val isFavorite: Boolean = false,
+    /**
+     * 收藏时间（服务端契约只承诺 `sort=favoriteAt,desc`，未承诺响应字段；实测可能缺省，
+     * 也可能是毫秒/秒数值或 ISO 字符串）。声明为 JsonPrimitive 容忍形态差异：
+     * 缺省 → null；类型不匹配的极端形态才可能抛错，由 [favoriteTimeMillisOrNull] 归一化。
+     */
+    val favoriteAt: JsonPrimitive? = null,
 ) {
     fun toDomain(sourceAudioSpec: AudioSpecDto = audioSpec) = Track(
         guid = TrackGuid(guid),
@@ -162,6 +171,26 @@ data class TrackDto(
             codec = sourceAudioSpec.codec,
         ),
     )
+}
+
+/**
+ * `TrackDto.favoriteAt` 归一化为 epoch 毫秒（只用于收藏排序，解析不出就 null 走种子回填）。
+ * 服务端契约只承诺 `sort=favoriteAt,desc`，响应字段本身未写入契约文档，这里按
+ * 毫秒数值 / 秒数值（< 1e12 视为秒）/ ISO-8601 字符串三种形态尽力解析。
+ */
+internal fun JsonPrimitive?.favoriteTimeMillisOrNull(): Long? {
+    val primitive = this ?: return null
+    val numeric = primitive.longOrNull ?: primitive.content.trim().toLongOrNull()
+    if (numeric != null) return numeric.normalizeEpochMillis()
+    return runCatching {
+        OffsetDateTime.parse(primitive.content.trim()).toInstant().toEpochMilli()
+    }.getOrNull()
+}
+
+private fun Long.normalizeEpochMillis(): Long = when {
+    this >= 1_000_000_000_000L -> this
+    this >= 1_000_000_000L -> this * 1_000L
+    else -> this
 }
 
 /**

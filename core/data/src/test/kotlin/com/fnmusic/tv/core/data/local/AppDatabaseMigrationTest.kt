@@ -80,8 +80,43 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test fun `migration to version four creates favorite time table`() {
+        helper.createDatabase(TEST_DATABASE_V4, 3).apply {
+            execSQL(
+                "INSERT INTO cache_lyric (namespace, trackGuid, payload, accessedAt) " +
+                    "VALUES ('server:user', 'fn-track', 'fn-payload', 8)",
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(TEST_DATABASE_V4, 4, true, AppDatabase.MIGRATION_3_4).use { db ->
+            db.execSQL(
+                "INSERT INTO favorite_time (namespace, trackGuid, favoritedAt) " +
+                    "VALUES ('server:user', 'track', 100)",
+            )
+            // 收藏时间覆盖写 = "重复收藏刷新最后一次收藏时间"
+            db.execSQL(
+                "INSERT OR REPLACE INTO favorite_time (namespace, trackGuid, favoritedAt) " +
+                    "VALUES ('server:user', 'track', 200)",
+            )
+            db.query(
+                "SELECT favoritedAt FROM favorite_time " +
+                    "WHERE namespace = 'server:user' AND trackGuid = 'track'",
+            ).use {
+                it.moveToFirst()
+                assertEquals(200, it.getLong(0))
+            }
+            // 迁移不丢既有可淘汰缓存
+            db.query("SELECT payload FROM cache_lyric WHERE trackGuid = 'fn-track'").use {
+                it.moveToFirst()
+                assertEquals("fn-payload", it.getString(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "migration-test.db"
         const val TEST_DATABASE_V3 = "migration-v3-test.db"
+        const val TEST_DATABASE_V4 = "migration-v4-test.db"
     }
 }
