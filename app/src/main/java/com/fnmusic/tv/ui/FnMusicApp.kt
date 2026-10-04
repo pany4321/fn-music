@@ -119,8 +119,13 @@ internal fun FnMusicApp(container: AppUiDependencies, onExitApplication: () -> U
             ),
         ) {
             BoxWithConstraints(Modifier.fillMaxSize().background(FnColors.Background)) {
+                // shortHeight 判定与实际布局要用同一个坐标系：布局在 safeDrawing
+                // 内层扣掉了车机常驻的底部导航栏，判定也按扣栏后的内容区算。
+                val bottomInset = with(LocalDensity.current) {
+                    WindowInsets.safeDrawing.getBottom(this).toDp()
+                }
                 CompositionLocalProvider(
-                    LocalAdaptiveWindow provides adaptiveWindowFor(maxWidth, maxHeight, uiScale),
+                    LocalAdaptiveWindow provides adaptiveWindowFor(maxWidth, maxHeight, uiScale, bottomInset),
                 ) {
                     Box(
                         Modifier

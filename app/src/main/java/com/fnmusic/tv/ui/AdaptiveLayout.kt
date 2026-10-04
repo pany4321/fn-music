@@ -22,7 +22,13 @@ val LocalAdaptiveWindow = staticCompositionLocalOf {
     AdaptiveWindow(horizontalMargin = 64.dp, compact = false, shortHeight = false)
 }
 
-internal fun adaptiveWindowFor(maxWidth: Dp, maxHeight: Dp, uiScale: Float = 1f): AdaptiveWindow {
+internal fun adaptiveWindowFor(
+    maxWidth: Dp,
+    maxHeight: Dp,
+    uiScale: Float = 1f,
+    /** 底部安全区插入（车机常驻导航栏）：shortHeight 判定要按扣掉它之后的内容区算。 */
+    bottomInset: Dp = 0.dp,
+): AdaptiveWindow {
     val horizontalMargin = when {
         maxWidth >= 880.dp -> 64.dp
         maxWidth >= 600.dp -> 40.dp
@@ -32,8 +38,10 @@ internal fun adaptiveWindowFor(maxWidth: Dp, maxHeight: Dp, uiScale: Float = 1f)
         horizontalMargin = horizontalMargin,
         compact = maxWidth < 880.dp,
         // 16:9 TVs are 960x540dp; only shorter car viewports (e.g. 1920x720
-        // at 1.5x density = 480dp tall) count as short.
-        shortHeight = maxHeight < 520.dp,
+        // at 1.5x density = 480dp tall) count as short. Car head units keep a
+        // persistent bottom system bar, so judge by the content area behind
+        // the insets rather than the raw window (the layout is inset already).
+        shortHeight = maxHeight - bottomInset < 520.dp,
         uiScale = uiScale,
     )
 }

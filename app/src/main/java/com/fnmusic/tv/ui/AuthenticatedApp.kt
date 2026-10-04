@@ -2604,15 +2604,11 @@ private fun <T> PagedCatalogPage(
         val horizontalPadding = window.horizontalMargin
         val verticalPadding = if (window.shortHeight) 16.dp else 44.dp
         // Four fixed columns stay the tuned TV layout; narrower car screens
-        // shrink the column count and enable grid scrolling so all 12 page
-        // items remain reachable.
+        // shrink the column count so all 12 page items remain reachable.
         val columns = fittedGridColumns(
             availableWidth = maxWidth - horizontalPadding * 2,
             maxColumns = 4,
         )
-        val scrollableGrid = columns < 4
-        // 网格区域高度：三行卡片 + 行距 + 保底余量（+20dp 抬高区域，卡片本身不变）
-        val gridHeight = 95.dp * 3 + 14.dp * 2 + 48.dp
         val totalPages = catalogPageCount(snapshot.total, entries.size, pageSize)
         val visibleEntries = catalogPageEntries(entries, currentPage, pageSize)
         val itemFocuses = remember(stateKey, pageSize) { List(pageSize) { FocusRequester() } }
@@ -2744,17 +2740,17 @@ private fun <T> PagedCatalogPage(
                 }
             }
             Spacer(Modifier.height(14.dp))
+            // 网格占满页头与翻页器之间的剩余空间：大屏（电视）网格区域吃掉全部富余、
+            // 翻页器钉底；矮屏（车机）网格收缩、一页 12 项放不下时在网格内滚动。
+            // 此前非滚动分支的固定 heightIn(min) 会在车机上把翻页器整行顶出屏幕外。
             // 非惰性网格：每页固定 12 项，全部常驻组合。惰性网格在窄屏滚动时会
             // 回收条目，itemFocuses 随之失效，上下左右焦点目标变成未挂载的
             // FocusRequester，表现为“焦点卡死无法移动”（与首页各行同类问题）。
             Column(
-                modifier = if (scrollableGrid) {
-                    Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())
-                } else {
-                    // 网格区域最低高度：三行卡片 + 行距 + 28dp 余量（比此前多 20dp，
-                    // 区域加高、卡片高度不变；小屏底部富余空间收进卡片区域）
-                    Modifier.fillMaxWidth().heightIn(min = gridHeight)
-                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 visibleEntries.chunked(columns).forEachIndexed { rowIndex, rowEntries ->
@@ -2815,12 +2811,9 @@ private fun <T> PagedCatalogPage(
                     modifier = Modifier.focusRequester(retryFocus),
                 ) { load(1) }
             }
-            // 翻页器与网格的保底间距：矮屏（车机）弹性间隔会收缩为 0，
-            // 翻页器紧贴卡片行造成触摸误触。
+            // 翻页器与网格的保底间距：网格区域可收缩后这里也不会贴上卡片行，
+            // 翻页器始终钉在可视区底部（车机矮屏实测此前整行被顶出屏幕）。
             Spacer(Modifier.height(12.dp))
-            if (!scrollableGrid) {
-                Spacer(Modifier.weight(1f))
-            }
             CatalogPager(
                 currentPage = currentPage,
                 totalPages = totalPages,
