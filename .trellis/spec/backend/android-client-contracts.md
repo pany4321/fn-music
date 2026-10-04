@@ -254,13 +254,14 @@ Command failures use `SessionError` codes, not removed `SessionResult.RESULT_ERR
   response cache and use full refetch + reconcile, so another device's changes are visible on
   reload. Favorite STATUS is never persisted in Room or preferences as authoritative state.
 - Ordering metadata only: the local Room table `favorite_time(namespace, trackGuid, favoritedAt)`
-  records when each track was favorited so the list can show "oldest favorite first" (ascending by
+  records when each track was favorited so the list can show "newest favorite first" (descending by
   last-favorited time; re-favoriting refreshes the timestamp). It is not favorite status authority:
   every load refetches the full member set from the server, reconciles (keep local in-app times >
-  response-provided `favoriteAt`/Jellyfin `DateLastSaved` > reversal-seeded synthetic times for
-  members without any timestamp), drops records for members the server no longer lists, then sorts
-  in memory and slices pages (`sort = "favoriteAt,asc"`; full-fetch failure degrades to plain
-  server paging with the server's `favoriteAt,desc` until the next successful mutation).
+  response-provided `favoriteAt`/Jellyfin `DateLastSaved` > server-desc-order-seeded synthetic times
+  for members without any timestamp — the earlier in the server desc order, the larger the seed),
+  drops records for members the server no longer lists, then sorts
+  in memory and slices pages (`sort = "favoriteAt,desc,local"`; full-fetch failure degrades to plain
+  server paging with the server's own sort until the next successful mutation).
 - Toggle publishes one optimistic desired value under a serialized mutation, calls create/delete,
   increments `revision` only after success, and removes the pending marker. Failure or cancellation
   restores the last server-confirmed value; cancellation is rethrown. Every mutation captures its

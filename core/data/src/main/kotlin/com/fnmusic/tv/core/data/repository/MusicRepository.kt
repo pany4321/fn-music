@@ -214,7 +214,7 @@ class MusicRepository internal constructor(
     private val favoriteMutationMutex = Mutex()
 
     /**
-     * 收藏列表的本地排序快照（namespace → 按收藏时间升序的全量曲目），会话内内存缓存。
+     * 收藏列表的本地排序快照（namespace → 按收藏时间降序（最新收藏在前）的全量曲目），会话内内存缓存。
      * 收藏/取消收藏后失效，下次读取重建（服务器始终是收藏成员的权威）。
      */
     private data class FavoriteListSnapshot(val namespace: String, val tracks: List<Track>)
@@ -415,7 +415,7 @@ class MusicRepository internal constructor(
             }
         }
         // 降级：服务端分页原序。降级粘滞到下次收藏动作，避免同一轮加载里各页 sort
-        // 忽而 desc 忽而 asc 触发 UI 的漂移误报（CollectionChanged）。
+        // 忽而本地序忽而服务端序触发 UI 的漂移误报（CollectionChanged）。
         val result = backend.favoriteTracks(page, FAVORITE_PAGE_SIZE).toDomainPage(page, FAVORITE_PAGE_SIZE)
         observeFavoriteTracks(result, namespace)
         return result
@@ -582,7 +582,7 @@ class MusicRepository internal constructor(
         }
     }
 
-    /** 全量拉取收藏成员 → 对账回填本地收藏时间 → 按"先收藏在前"升序排序。 */
+    /** 全量拉取收藏成员 → 对账回填本地收藏时间 → 按"最新收藏在前"降序排序。 */
     private suspend fun loadFavoriteSnapshot(namespace: String): List<Track> {
         val fetched = mutableListOf<Track>()
         var page = 1
@@ -600,7 +600,7 @@ class MusicRepository internal constructor(
             nowMillis = now(),
         )
         runCatching { localStore.recordFavoriteTimes(namespace, reconciliation.upserts) }
-        return fetched.sortedBy { reconciliation.times[it.guid.value] ?: Long.MAX_VALUE }
+        return fetched.sortedByDescending { reconciliation.times[it.guid.value] ?: Long.MIN_VALUE }
     }
 
     suspend fun queuePage(source: QueueSource, page: Int): Page<Track> = when (source) {
@@ -989,10 +989,11 @@ internal fun <T> DecodedPage<T>.toDomainPage(page: Int, pageSize: Int): Page<T> 
     return Page(items, page, pageSize, total, sort)
 }
 
-/** 收藏列表本地排序路径的 sort 标识：与降级路径（服务端 "favoriteAt,desc"）严格区分。 */
-internal const val FAVORITE_LOCAL_SORT = "favoriteAt,asc"
+/** 收藏列表本地排序路径的 sort 标识：带 local 后缀与降级路径（服务端 "favoriteAt,desc"）严格区分，
+ *  页序混用（本地序↔服务端序）时 UI 漂移检测才能报 CollectionChanged。 */
+internal const val FAVORITE_LOCAL_SORT = "favoriteAt,desc,local"
 
-/** 种子时间的间隔：首次对账回填时逐首递减 1 秒，保证全部早于本次对账时刻。 */
+/** 种子时间的间隔：首次对账回填时按服务端 desc 序逐首递减 1 秒，保证全部早于本次对账时刻。 */
 private const val FAVORITE_SEED_STEP_MS = 1_000L
 
 /** 收藏时间对账结果：times=全部成员的最终时间；upserts=需写库的；removals=需删库的。 */
@@ -1006,8 +1007,8 @@ internal data class FavoriteTimeReconciliation(
  * 收藏时间对账（每次收藏列表全量拉取后执行一次，本地表=服务器收藏集合的投影）：
  * - 本 App 收藏动作已写入的时间优先，已存在的本地记录不覆盖；
  * - 服务器响应自带收藏时间（飞牛 favoriteAt / Jellyfin DateLastSaved）的新成员直接回填真实值；
- * - 其余新成员按"服务端返回序反转"分配种子时间（从 [nowMillis] 向回每首 1 秒）：
- *   服务端 desc 序（最新在前）反转后即"先收藏在前"，拿不到真实时间顺序也正确；
+ * - 其余新成员按服务端 desc 序（最新在前）分配种子时间（从 [nowMillis] 向回每首 1 秒）：
+ *   服务端序第 i 项（越新）种子越大，降序显示即与服务器收藏时间序一致，拿不到真实时间顺序也正确；
  * - 本地有、服务器没有的（其他端取消收藏）进入 removals。
  */
 internal fun reconcileFavoriteTimes(
@@ -1019,9 +1020,9 @@ internal fun reconcileFavoriteTimes(
     val serverSet = serverOrder.toHashSet()
     val removals = localTimes.keys.filterNot(serverSet::contains).toSet()
     val kept = localTimes.filterKeys { it !in removals }
-    val seeds = serverOrder.asReversed().filter { it !in kept && it !in serverTimes }
+    val seeds = serverOrder.filter { it !in kept && it !in serverTimes }
     val seedTimes = seeds.mapIndexed { index, guid ->
-        guid to nowMillis - (seeds.size - index) * FAVORITE_SEED_STEP_MS
+        guid to nowMillis - (index + 1) * FAVORITE_SEED_STEP_MS
     }.toMap()
     val upserts = serverTimes.filterKeys { it !in kept } + seedTimes
     return FavoriteTimeReconciliation(times = kept + upserts, upserts = upserts, removals = removals)

@@ -6,26 +6,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 收藏列表"先收藏在前"（按最后一次收藏时间升序）的对账与切片逻辑（纯函数）。
+ * 收藏列表"最新收藏在前"（按最后一次收藏时间降序）的对账与切片逻辑（纯函数）。
  * 规则见 .trellis/spec/backend/android-client-contracts.md §Server-backed favorites：
- * 本 App 收藏动作时间 > 响应自带时间（favoriteAt/DateLastSaved） > 反转服务端 desc 序的种子时间。
+ * 本 App 收藏动作时间 > 响应自带时间（favoriteAt/DateLastSaved） > 按服务端 desc 序分配的种子时间。
  */
 class FavoriteTimeOrderingTest {
     private val now = 1_770_000_000_000L
 
-    @Test fun `first sync without any times seeds reversed server order`() {
+    @Test fun `first sync without any times seeds server order newest first`() {
         // 服务端 desc 序：index 0 = 最新收藏
         val serverOrder = listOf("d", "c", "b", "a")
 
         val result = reconcileFavoriteTimes(serverOrder, emptyMap(), emptyMap(), now)
 
-        // 反转后升序 = a, b, c, d：先收藏的在前
-        assertEquals(listOf("a", "b", "c", "d"), serverOrder.sortedBy { result.times.getValue(it) })
-        // 种子全部早于本次对账时刻且互不重叠
+        // 降序显示 = d, c, b, a：最新收藏的在前
+        assertEquals(listOf("d", "c", "b", "a"), serverOrder.sortedByDescending { result.times.getValue(it) })
+        // 种子全部早于本次对账时刻且互不重叠；服务端序越靠前（越新）种子越大
         assertTrue(result.times.values.all { it in (now - 4_000L) until now })
         assertEquals(4, result.times.values.toSet().size)
-        assertEquals(now - 4_000L, result.times.getValue("a"))
         assertEquals(now - 1_000L, result.times.getValue("d"))
+        assertEquals(now - 4_000L, result.times.getValue("a"))
         assertEquals(result.times, result.upserts)
         assertTrue(result.removals.isEmpty())
     }
@@ -37,7 +37,7 @@ class FavoriteTimeOrderingTest {
 
         val result = reconcileFavoriteTimes(serverOrder, serverTimes, emptyMap(), now)
 
-        assertEquals(listOf("old", "mid", "new"), serverOrder.sortedBy { result.times.getValue(it) })
+        assertEquals(listOf("new", "mid", "old"), serverOrder.sortedByDescending { result.times.getValue(it) })
         assertEquals(serverTimes, result.upserts)
         assertTrue(result.removals.isEmpty())
     }
@@ -69,15 +69,16 @@ class FavoriteTimeOrderingTest {
         assertTrue(result.upserts.isEmpty())
     }
 
-    @Test fun `new members favorited elsewhere sort after existing favorites`() {
-        // 第二次对账：本地已有旧种子，服务器新增 e（其他端刚收藏，响应不带时间）
+    @Test fun `new members favorited elsewhere sort before existing favorites`() {
+        // 第二次对账：本地已有旧种子，服务器新增 e（其他端刚收藏，响应不带时间）——
+        // 最新收藏在前：e 的种子比所有现有时间都大，排在最前
         val existing = now - 60_000L
 
         val result = reconcileFavoriteTimes(listOf("e", "a"), emptyMap(), mapOf("a" to existing), now)
 
         assertEquals(now - 1_000L, result.times.getValue("e"))
         assertEquals(existing, result.times.getValue("a"))
-        assertEquals(listOf("a", "e"), listOf("e", "a").sortedBy { result.times.getValue(it) })
+        assertEquals(listOf("e", "a"), listOf("e", "a").sortedByDescending { result.times.getValue(it) })
         assertEquals(mapOf("e" to now - 1_000L), result.upserts)
     }
 
