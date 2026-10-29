@@ -57,6 +57,26 @@ data class LyricsSearchQuery(
     val request: LyricsMatchRequest,
 )
 
+/**
+ * 繁→简后的检索请求；文本里没有任何繁体字时返回 null——编排器据此保证非繁体曲目
+ * **不会多发请求**。
+ *
+ * 标题必须一起转：QQ 桌面搜索只读 `request.title`（不读 keyword），只转关键词等于没转。
+ */
+internal fun LyricsMatchRequest.simplifiedForSearch(): LyricsMatchRequest? {
+    val simplifiedTitle = TraditionalChinese.toSimplified(title)
+    val simplifiedArtists = artists.map(TraditionalChinese::toSimplified)
+    val simplifiedAlbum = album?.let(TraditionalChinese::toSimplified)
+    if (
+        simplifiedTitle == title &&
+        simplifiedArtists == artists &&
+        simplifiedAlbum == album
+    ) {
+        return null
+    }
+    return copy(title = simplifiedTitle, artists = simplifiedArtists, album = simplifiedAlbum)
+}
+
 interface LyricsSource {
     val id: LyricsSourceId
 

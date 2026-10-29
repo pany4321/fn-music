@@ -175,6 +175,36 @@ class LyricsCandidateScorerTest {
         assertTrue(scorer.score(short, listOf(remote)).isEmpty())
     }
 
+    @Test fun `traditional and simplified titles score as the same recording`() {
+        // 本地繁体、在线简体（或反之）时，未做繁简归一化前标题分只有 50，被入选闸门直接拒掉
+        val traditional = request.copy(
+            title = "春風秋雨",
+            artists = listOf("葉倩文"),
+            album = null,
+            durationMs = 200_000,
+        )
+        val simplified = candidate(
+            title = "春风秋雨",
+            artists = listOf("叶倩文"),
+            album = null,
+            durationMs = 200_000,
+        )
+
+        val scored = scorer.score(traditional, listOf(simplified))
+
+        assertEquals(1, scored.size)
+        assertEquals(100.0, scored.single().titleScore, 0.001)
+        assertEquals(100.0, scored.single().score, 0.001)
+    }
+
+    @Test fun `normalize folds traditional characters into simplified`() {
+        assertEquals("春风秋雨", LyricsCandidateScorer.normalize("春風秋雨"))
+        assertEquals(
+            LyricsCandidateScorer.normalize("春風秋雨"),
+            LyricsCandidateScorer.normalize("春风秋雨"),
+        )
+    }
+
     private fun candidate(
         source: LyricsSourceId = LyricsSourceId.QqMusic,
         remoteId: String = "1",

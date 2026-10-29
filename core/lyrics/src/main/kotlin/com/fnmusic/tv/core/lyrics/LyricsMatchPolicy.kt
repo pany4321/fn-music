@@ -218,10 +218,19 @@ class LyricsCandidateScorer(
         private val VERSION_DECORATION = Regex("[()\\[\\]{}<>_-]+")
         private val WHITESPACE = Regex("\\s+")
 
-        fun normalize(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKC)
-            .lowercase(Locale.ROOT)
-            .replace('（', '(')
-            .replace('）', ')')
+        /**
+         * 文本归一化：NFKC → 小写 → 繁→简 → 空白折叠。
+         *
+         * 繁简必须进归一化，否则评分对字形敏感：本地标题「春風秋雨」与在线候选「春风秋雨」
+         * 相似度只有 50 分，被入选闸门直接拒掉——把查询转成简体也救不了，因为候选仍以繁体
+         * （或反之）参与比对。放进这里后标题、歌手、专辑三类分数都不再受繁简影响。
+         */
+        fun normalize(value: String): String = TraditionalChinese.toSimplified(
+            Normalizer.normalize(value, Normalizer.Form.NFKC)
+                .lowercase(Locale.ROOT)
+                .replace('（', '(')
+                .replace('）', ')'),
+        )
             .replace(WHITESPACE, " ")
             .trim()
 

@@ -106,12 +106,16 @@ class LyricsMatchCoordinator(
     }
 
     /**
-     * 主关键词搜索 + （需要时）纯标题重试。
+     * 主关键词搜索 + （需要时）纯标题重试 + （需要时）繁→简重试。
      *
      * 重试与主搜索**分开捕获异常**：重试失败只记录失败、保留主候选 —— 此前两者共用一个 try 块，
      * 主搜索成功但重试超时会把整个源标成 NetworkFailure 且候选清零（恰好"主候选全不合格"正是
      * 触发重试的条件，所以丢候选无害，但失败标记会让本可负缓存的"无歌词"变成"网络故障"，
      * 每次播放都全量重探）。
+     *
+     * 繁→简是第三路：本地是繁体标题、在线库以简体收录时，前两路都会因为关键词对不上而空手
+     * （评分侧虽然已做繁简归一化，但搜索侧拿繁体关键词去问，服务端就是搜不到）。只在文本确实
+     * 含繁体字时才发第三次请求，非繁体曲目不受影响。
      */
     private suspend fun searchSource(
         source: LyricsSource,
@@ -126,18 +130,38 @@ class LyricsMatchCoordinator(
         } catch (cause: Throwable) {
             return SearchOutcome(source, emptyList(), cause.toFailureKind())
         }
+        var candidates = primaryCandidates
+        var failure: FailureKind? = null
+
         val shouldRetryWithTitle = primaryKeyword != request.title &&
             source.supportsKeywordVariants &&
-            scorer.score(request, primaryCandidates).isEmpty()
-        if (!shouldRetryWithTitle) return SearchOutcome(source, primaryCandidates)
-        return try {
-            val retryCandidates = search(source, request.title, request, timeoutMs)
-            SearchOutcome(source, (primaryCandidates + retryCandidates).distinctBy { it.source to it.remoteId })
-        } catch (cause: CancellationException) {
-            throw cause
-        } catch (cause: Throwable) {
-            SearchOutcome(source, primaryCandidates, cause.toFailureKind())
+            scorer.score(request, candidates).isEmpty()
+        if (shouldRetryWithTitle) {
+            try {
+                candidates = (candidates + search(source, request.title, request, timeoutMs))
+                    .distinctBy { it.source to it.remoteId }
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (cause: Throwable) {
+                failure = cause.toFailureKind()
+            }
         }
+
+        if (scorer.score(request, candidates).isEmpty()) {
+            val simplifiedRequest = request.simplifiedForSearch()
+            if (simplifiedRequest != null) {
+                try {
+                    val simplifiedKeyword = TraditionalChinese.toSimplified(primaryKeyword)
+                    candidates = (candidates + search(source, simplifiedKeyword, simplifiedRequest, timeoutMs))
+                        .distinctBy { it.source to it.remoteId }
+                } catch (cause: CancellationException) {
+                    throw cause
+                } catch (cause: Throwable) {
+                    failure = failure?.combine(cause.toFailureKind()) ?: cause.toFailureKind()
+                }
+            }
+        }
+        return SearchOutcome(source, candidates, failure)
     }
 
     private suspend fun fetchSource(

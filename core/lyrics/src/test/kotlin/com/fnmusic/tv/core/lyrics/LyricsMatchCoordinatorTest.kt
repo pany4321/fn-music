@@ -417,6 +417,68 @@ class LyricsMatchCoordinatorTest {
         assertEquals(1, source.searchCalls)
     }
 
+    @Test fun `traditional titles retry once with simplified keywords`() = runBlocking {
+        val traditional = LyricsMatchRequest("t", "春風秋雨", listOf("葉倩文"), durationMs = 200_000)
+        val hit = LyricsCandidate(
+            source = LyricsSourceId.Netease,
+            remoteId = "hit",
+            title = "春风秋雨",
+            artists = listOf("叶倩文"),
+            durationMs = 200_000,
+        )
+        val source = FakeSource(
+            LyricsSourceId.Netease,
+            // 在线库只收简体：拿繁体关键词/标题来问就是空手
+            candidates = { query ->
+                val simplifiedAsk = query.keyword.contains("春风秋雨") || query.request.title == "春风秋雨"
+                if (simplifiedAsk) listOf(hit) else emptyList()
+            },
+        )
+
+        val found = LyricsMatchCoordinator(listOf(source), sourceTimeoutMs = 500)
+            .match(traditional) as LyricsMatchResult.Found
+
+        assertEquals("hit", found.lyrics.candidate.remoteId)
+        // 主关键词（繁体）+ 纯标题（繁体）+ 繁→简 = 三次
+        assertEquals(3, source.searchCalls)
+    }
+
+    @Test fun `keyword insensitive sources get the simplified title retry`() = runBlocking {
+        // QQ 桌面搜索只读 request.title：繁→简这一轮必须把标题一起转过去才有意义
+        val traditional = LyricsMatchRequest("t", "春風秋雨", listOf("葉倩文"), durationMs = 200_000)
+        val hit = LyricsCandidate(
+            source = LyricsSourceId.QqMusic,
+            remoteId = "hit",
+            title = "春风秋雨",
+            artists = listOf("叶倩文"),
+            durationMs = 200_000,
+        )
+        val source = FakeSource(
+            LyricsSourceId.QqMusic,
+            overrideSupportsKeywordVariants = false,
+            candidates = { query ->
+                if (query.request.title == "春风秋雨") listOf(hit) else emptyList()
+            },
+        )
+
+        val found = LyricsMatchCoordinator(listOf(source), sourceTimeoutMs = 500)
+            .match(traditional) as LyricsMatchResult.Found
+
+        assertEquals("hit", found.lyrics.candidate.remoteId)
+        // 纯标题重试被跳过（源不支持关键词变体），只多发了繁→简这一轮
+        assertEquals(2, source.searchCalls)
+    }
+
+    @Test fun `non traditional titles never issue the simplified retry`() = runBlocking {
+        val source = FakeSource(LyricsSourceId.Netease, candidates = { emptyList() })
+
+        val result = LyricsMatchCoordinator(listOf(source), sourceTimeoutMs = 500).match(request)
+
+        assertEquals(LyricsMatchResult.NotFound, result)
+        // 主关键词 + 纯标题 = 两次，没有第三次
+        assertEquals(2, source.searchCalls)
+    }
+
     private class FakeSource(
         override val id: LyricsSourceId,
         private val searchDelayMs: Long = 0,

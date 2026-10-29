@@ -279,4 +279,4 @@ private fun CachedSyllable.toSdk(): KaraokeSyllable? =
  * 指纹不含规则版本时，旧规则选出的歌词会在新规则下永久命中（1.8.6→1.9.0 的三次规则变更
  * 都漏了这一步，靠审查才补上）。歌词内容/缓存结构的变更则 bump 顶部的 MATCHED_LYRICS_SCHEMA_VERSION。
  */
-private const val MATCH_PROTOCOL_VERSION = "lyrics-sdk-5"
+private const val MATCH_PROTOCOL_VERSION = "lyrics-sdk-6"
