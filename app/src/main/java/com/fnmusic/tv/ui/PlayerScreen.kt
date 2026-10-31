@@ -1659,8 +1659,11 @@ internal fun PlayerControlOverlay(
     onExitRoam: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 手势/语义读取的最新进度（pointerInput(Unit) 不能直接捕获每帧变化的参数）
+    // 手势/语义读取的最新进度与时长（pointerInput(Unit) 不能直接捕获每帧/每次换曲变化的参数）
     val latestPositionMs by rememberUpdatedState(positionMs)
+    val latestDurationMs by rememberUpdatedState(durationMs)
+    val latestOnSeek by rememberUpdatedState(onSeek)
+    val latestOnInteraction by rememberUpdatedState(onInteraction)
     var progressFocused by remember { mutableStateOf(false) }
     val fraction = playerProgressFraction(positionMs, durationMs)
     Column(
@@ -1714,12 +1717,12 @@ internal fun PlayerControlOverlay(
                 // pointerInput(Unit)：positionMs 每 250ms 变化会让手势协程反复销毁重建，
                 // 触屏车机上还可能吞掉恰好落在重启窗口的点击。经 State 读最新值。
                 .pointerInput(Unit) {
-                    if (durationMs > 0L) {
-                        detectTapGestures { offset ->
-                            val current = latestPositionMs
-                            val targetMs = (durationMs * (offset.x / size.width).coerceIn(0f, 1f)).toLong()
-                            onSeek(targetMs - current)
-                            onInteraction()
+                    detectTapGestures { offset ->
+                        val duration = latestDurationMs
+                        if (duration > 0L) {
+                            val targetMs = (duration * (offset.x / size.width).coerceIn(0f, 1f)).toLong()
+                            latestOnSeek(targetMs - latestPositionMs)
+                            latestOnInteraction()
                         }
                     }
                 }

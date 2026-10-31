@@ -89,6 +89,10 @@ class LyricsCandidateScorer(
      * 「是否存在能过闸的候选」的廉价探测：命中首个合格候选即返回，不算 consensus、不排序。
      * 编排器的重试判空（LyricsMatchCoordinator 的两处"没有合格候选"检查）只需要布尔答案——
      * 此前每源每轮要为它跑最多 3 次完整 O(n²) 评分与排序。
+     *
+     * 注意与完整评分的边界：consensus 只会加分，所以本探测为 true 时完整评分必然过闸；
+     * 反之不成立——压线候选靠 consensus 过闸时本探测为 false，编排器会多发一次重试请求，
+     * 最终仍由完整评分正确放行。这是"省 O(n²)"与"罕见多余重试"之间的有意取舍。
      */
     fun hasEligible(request: LyricsMatchRequest, candidates: List<LyricsCandidate>): Boolean {
         val requestProjection = projectionOf(request)

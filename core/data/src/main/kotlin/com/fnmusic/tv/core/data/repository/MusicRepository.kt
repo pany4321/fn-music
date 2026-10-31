@@ -609,13 +609,22 @@ class MusicRepository internal constructor(
      */
     private fun startFavoriteSnapshotFlightLocked(namespace: String): Deferred<List<Track>> {
         val generation = favoriteSnapshotGeneration.get()
+        // 固定构建起点的 backend：中途切源后 live getter 会指向新后端，放任下去
+        // 同一份快照会混入两个源的曲目（结果虽被代际号丢弃，但混杂 guid 会污染本地时间表）。
+        val flightBackend = backend
         val flight = repositoryScope.async {
-            val tracks = loadFavoriteSnapshot(namespace)
+            val tracks = loadFavoriteSnapshot(namespace, flightBackend)
             favoriteMutationMutex.withLock {
                 if (favoriteSnapshotGeneration.get() == generation) {
                     favoriteListSnapshot = FavoriteListSnapshot(namespace, tracks)
                 }
-                favoriteSnapshotFlight = null
+                // 只清理仍指向本 flight 的指针：切源后新命名空间的 flight 可能已接管指针，
+                // 无条件清空会让下一个调用方再起一轮重复构建。
+                // 同命名空间同时只有一个 flight（指针被它占据期间不会重复启动），
+                // 指针 first 仍是本命名空间 => 指针就是本 flight。
+                if (favoriteSnapshotFlight?.first == namespace) {
+                    favoriteSnapshotFlight = null
+                }
             }
             tracks
         }
@@ -644,7 +653,10 @@ class MusicRepository internal constructor(
     }
 
     /** 全量拉取收藏成员 → 对账回填本地收藏时间 → 按"最新收藏在前"降序排序。 */
-    private suspend fun loadFavoriteSnapshot(namespace: String): List<Track> {
+    private suspend fun loadFavoriteSnapshot(
+        namespace: String,
+        backend: MusicBackend,
+    ): List<Track> {
         val fetched = mutableListOf<Track>()
         var page = 1
         while (true) {
