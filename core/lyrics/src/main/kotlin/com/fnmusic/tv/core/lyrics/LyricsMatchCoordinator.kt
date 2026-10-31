@@ -149,7 +149,11 @@ class LyricsMatchCoordinator(
 
         if (scorer.score(request, candidates).isEmpty()) {
             val simplifiedRequest = request.simplifiedForSearch()
-            if (simplifiedRequest != null) {
+            // 只读标题的源（supportsKeywordVariants=false）只看 request.title：标题没被转换时
+            // （比如只有歌手是繁体），第三路发出的请求与第一路一模一样，纯浪费，必须跳过。
+            if (simplifiedRequest != null &&
+                (source.supportsKeywordVariants || simplifiedRequest.title != request.title)
+            ) {
                 try {
                     val simplifiedKeyword = TraditionalChinese.toSimplified(primaryKeyword)
                     candidates = (candidates + search(source, simplifiedKeyword, simplifiedRequest, timeoutMs))
