@@ -156,6 +156,15 @@ interface AppDao {
     @Query("SELECT COALESCE(SUM(length(payload)), 0) FROM cache_page")
     suspend fun pagePayloadBytes(): Long
 
+    /** 一次查询合计四张可淘汰表的 payload 总量（此前 4 条 SUM 分开跑 4 次全表扫描）。 */
+    @Query(
+        "SELECT (SELECT COALESCE(SUM(length(payload)), 0) FROM cache_page) + " +
+            "(SELECT COALESCE(SUM(length(payload)), 0) FROM cache_lyric) + " +
+            "(SELECT COALESCE(SUM(length(payload)), 0) FROM cache_matched_lyric) + " +
+            "(SELECT COALESCE(SUM(length(payload)), 0) FROM cache_index)",
+    )
+    suspend fun totalPayloadBytes(): Long
+
     @Query("SELECT COALESCE(SUM(length(payload)), 0) FROM cache_lyric")
     suspend fun lyricPayloadBytes(): Long
 

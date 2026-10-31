@@ -51,26 +51,50 @@ class LyricsCandidateScorer(
     private val policy: LyricsMatchPolicy = LyricsMatchPolicy(),
 ) {
     fun score(request: LyricsMatchRequest, candidates: List<LyricsCandidate>): List<ScoredLyricsCandidate> {
-        val eligible = candidates.mapNotNull { scoreOne(request, it) }
+        val requestProjection = projectionOf(request)
+        val eligible = candidates.mapNotNull { candidate ->
+            val projection = projectionOf(candidate)
+            val scored = scoreOne(requestProjection, projection) ?: return@mapNotNull null
+            ScoredWithProjection(scored, projection)
+        }
         if (eligible.isEmpty()) return emptyList()
-        return eligible.map { scored ->
-            val consensus = eligible.asSequence()
-                .filter { other ->
-                    other.candidate.source != scored.candidate.source &&
-                        sameRecording(scored.candidate, other.candidate)
-                }
-                .map { it.candidate.source }
-                .distinct()
-                .count() + 1
-            scored.copy(
-                score = (scored.score + (consensus - 1).coerceAtMost(2) * 1.5).coerceAtMost(100.0),
-                consensusCount = consensus,
-            )
-        }.filter { it.passesGate(policy) }
+        return eligible
+            .map { entry ->
+                val scored = entry.scored
+                val consensus = eligible.asSequence()
+                    .filter { other ->
+                        other.scored.candidate.source != scored.candidate.source &&
+                            sameRecording(entry.projection, other.projection)
+                    }
+                    .map { other -> other.scored.candidate.source }
+                    .distinct()
+                    .count() + 1
+                ScoredWithProjection(
+                    scored = scored.copy(
+                        score = (scored.score + (consensus - 1).coerceAtMost(2) * 1.5).coerceAtMost(100.0),
+                        consensusCount = consensus,
+                    ),
+                    projection = entry.projection,
+                )
+            }
+            .filter { it.scored.passesGate(policy) }
+            .map { it.scored }
             .sortedWith(
                 compareByDescending<ScoredLyricsCandidate> { it.score }
                     .thenBy { policy.sourceOrder.indexOf(it.candidate.source).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE },
             )
+    }
+
+    /**
+     * 「是否存在能过闸的候选」的廉价探测：命中首个合格候选即返回，不算 consensus、不排序。
+     * 编排器的重试判空（LyricsMatchCoordinator 的两处"没有合格候选"检查）只需要布尔答案——
+     * 此前每源每轮要为它跑最多 3 次完整 O(n²) 评分与排序。
+     */
+    fun hasEligible(request: LyricsMatchRequest, candidates: List<LyricsCandidate>): Boolean {
+        val requestProjection = projectionOf(request)
+        return candidates.any { candidate ->
+            scoreOne(requestProjection, projectionOf(candidate))?.passesGate(policy) == true
+        }
     }
 
     /**
@@ -85,6 +109,9 @@ class LyricsCandidateScorer(
      * 试过把兜底再放宽成"时长吻合 + 综合分 ≥70 即可"：60 首真实曲库上**净增 0 首**（41/60 → 41/60），
      * 没有任何原本被拒的候选因此进来 —— 这套曲库的漏配主因是"在线库里没有同一个录音"，不是门槛
      * 太严。零收益却要承担误配风险，故撤回。
+     *
+     * consensus 只会加分不会减分，所以本闸门与 consensus 计算无关（[hasEligible] 的短路探测
+     * 因此与完整评分的闸门结论一致）。
      */
     private fun ScoredLyricsCandidate.passesGate(policy: LyricsMatchPolicy): Boolean {
         if (score >= policy.minimumScore && titleScore >= policy.minimumTitleScore) return true
@@ -92,44 +119,50 @@ class LyricsCandidateScorer(
         return titleScore >= policy.highTitleScore && delta <= policy.strictDurationDeltaMs
     }
 
-    private fun scoreOne(request: LyricsMatchRequest, candidate: LyricsCandidate): ScoredLyricsCandidate? {
-        if (candidate.title.isBlank() || request.title.isBlank()) return null
+    private fun scoreOne(
+        request: NormalizedTrack,
+        candidate: NormalizedTrack,
+    ): ScoredLyricsCandidate? {
+        if (candidate.title.isEmpty() || request.title.isEmpty()) return null
         val durationDelta = knownDurationDelta(request.durationMs, candidate.durationMs)
         if (durationDelta != null && durationDelta > policy.maximumDurationDeltaMs) return null
-        if (hasHardVersionConflict(request.title, candidate.title, candidate.instrumental)) return null
+        if (hasHardVersionConflict(request.flags, candidate.flags, candidate.instrumental)) return null
 
-        val titleScore = titleScore(request.title, candidate.title)
+        val titleScore = normalizedTitleScore(request.title, candidate.title)
         val artistScore = artistScore(request.artists, candidate.artists)
-        val albumScore = request.album?.takeIf(String::isNotBlank)?.let { local ->
-            candidate.album?.takeIf(String::isNotBlank)?.let { remote -> sequenceRatio(normalize(local), normalize(remote)) * 100.0 }
+        val albumScore = request.album?.let { local ->
+            candidate.album?.let { remote -> sequenceRatio(local, remote) * 100.0 }
         }
         val score = when {
-            request.artists.isNotEmpty() && candidate.artists.isNotEmpty() && albumScore != null -> max(
+            request.rawHasArtists && candidate.rawHasArtists && albumScore != null -> max(
                 titleScore * 0.5 + artistScore * 0.5,
                 titleScore * 0.5 + artistScore * 0.35 + albumScore * 0.15,
             )
-            request.artists.isNotEmpty() && candidate.artists.isNotEmpty() ->
+            request.rawHasArtists && candidate.rawHasArtists ->
                 titleScore * 0.5 + artistScore * 0.5
             albumScore != null -> max(titleScore * 0.7 + albumScore * 0.3, titleScore * 0.8)
             else -> titleScore
         }
-        return ScoredLyricsCandidate(candidate, score, titleScore, consensusCount = 1, durationDeltaMs = durationDelta)
+        return ScoredLyricsCandidate(
+            checkNotNull(candidate.candidate) { "scoreOne requires a candidate projection" },
+            score,
+            titleScore,
+            consensusCount = 1,
+            durationDeltaMs = durationDelta,
+        )
     }
 
-    private fun sameRecording(left: LyricsCandidate, right: LyricsCandidate): Boolean {
-        if (titleScore(left.title, right.title) < 92.0) return false
+    private fun sameRecording(left: NormalizedTrack, right: NormalizedTrack): Boolean {
+        if (normalizedTitleScore(left.title, right.title) < 92.0) return false
         if (artistScore(left.artists, right.artists) < 85.0) return false
         return knownDurationDelta(left.durationMs, right.durationMs)?.let { it <= policy.maximumDurationDeltaMs } ?: true
     }
 
-    private fun titleScore(left: String, right: String): Double {
-        val normalizedLeft = normalize(left)
-        val normalizedRight = normalize(right)
-        if (normalizedLeft == normalizedRight) return 100.0
-        val full = sequenceRatio(normalizedLeft, normalizedRight) * 100.0
-        val baseLeft = stripVersionTags(normalizedLeft)
-        val baseRight = stripVersionTags(normalizedRight)
-        val base = sequenceRatio(baseLeft, baseRight) * 95.0
+    /** 入参必须是 [normalize] 之后的文本（投影阶段完成归一化，比对期不再重复调用）。 */
+    private fun normalizedTitleScore(left: String, right: String): Double {
+        if (left == right) return 100.0
+        val full = sequenceRatio(left, right) * 100.0
+        val base = sequenceRatio(stripVersionTags(left), stripVersionTags(right)) * 95.0
         return max(full, base)
     }
 
@@ -142,37 +175,39 @@ class LyricsCandidateScorer(
      * 的漏配原因。改为除以较短一方后，语义变成"较短列表能被较长列表容纳得多好"，主唱一致即得满分。
      */
     private fun artistScore(left: List<String>, right: List<String>): Double {
-        val local = splitArtists(left)
-        val remote = splitArtists(right)
-        if (local.isEmpty() || remote.isEmpty()) return 0.0
-        val shorter = if (local.size <= remote.size) local else remote
-        val longer = if (local.size <= remote.size) remote else local
+        if (left.isEmpty() || right.isEmpty()) return 0.0
+        val shorter = if (left.size <= right.size) left else right
+        val longer = if (left.size <= right.size) right else left
         val used = mutableSetOf<Int>()
         var total = 0.0
         shorter.forEach { artist ->
-            val best = longer.withIndex()
-                .filterNot { it.index in used }
-                .maxByOrNull { sequenceRatio(artist, it.value) }
-            if (best != null) {
-                used += best.index
-                total += sequenceRatio(artist, best.value)
+            var bestIndex = -1
+            var bestScore = -1.0
+            longer.forEachIndexed { index, value ->
+                if (index in used) return@forEachIndexed
+                val ratio = sequenceRatio(artist, value)
+                if (ratio > bestScore) {
+                    bestScore = ratio
+                    bestIndex = index
+                }
+            }
+            if (bestIndex >= 0) {
+                used += bestIndex
+                total += bestScore
             }
         }
         return total / shorter.size * 100.0
     }
 
-    private fun splitArtists(values: List<String>): List<String> = values
-        .flatMap { it.split(ARTIST_SEPARATOR) }
-        .map { normalize(it.replace(FEAT_PREFIX, "")) }
-        .filter(String::isNotBlank)
-        .distinct()
-
-    private fun hasHardVersionConflict(local: String, remote: String, remoteInstrumental: Boolean): Boolean {
-        val localFlags = versionFlags(local)
-        val remoteFlags = versionFlags(remote).toMutableSet().apply {
+    private fun hasHardVersionConflict(
+        localFlags: Set<VersionFlag>,
+        remoteFlags: Set<VersionFlag>,
+        remoteInstrumental: Boolean,
+    ): Boolean {
+        val remote = remoteFlags.toMutableSet().apply {
             if (remoteInstrumental) add(VersionFlag.Instrumental)
         }
-        if (VersionFlag.Instrumental !in localFlags && VersionFlag.Instrumental in remoteFlags) return true
+        if (VersionFlag.Instrumental !in localFlags && VersionFlag.Instrumental in remote) return true
         return listOf(
             VersionFlag.Live,
             VersionFlag.Remix,
@@ -181,12 +216,7 @@ class LyricsCandidateScorer(
             VersionFlag.Edit,
             VersionFlag.Solo,
             VersionFlag.Short,
-        ).any { flag -> (flag in localFlags) != (flag in remoteFlags) }
-    }
-
-    private fun versionFlags(value: String): Set<VersionFlag> {
-        val normalized = normalize(value)
-        return VersionFlag.entries.filterTo(mutableSetOf()) { it.pattern.containsMatchIn(normalized) }
+        ).any { flag -> (flag in localFlags) != (flag in remote) }
     }
 
     private fun stripVersionTags(value: String): String = VersionFlag.entries
@@ -212,11 +242,81 @@ class LyricsCandidateScorer(
         Short(Regex("(?:^|\\W)(?:tv\\s*size|anime\\s*size|radio\\s*edit|short\\s*ver|(?:tv|アニメ)\\s*サイズ)(?:$|\\W)")),
     }
 
+    /**
+     * 归一化投影：标题/歌手/专辑/版本词在**投影阶段各算一次**，比对期（scoreOne、consensus 的
+     * sameRecording）只做纯字符串比较。此前一轮匹配里同一标题串会被 normalize 上万次
+     * （consensus 全对全 O(n²)，每次比对都从 normalize 从头算）。
+     *
+     * 缓存键是数据类 [LyricsCandidate]（按值相等），跨 score()/hasEligible 调用复用——
+     * 编排器对同一批候选的最多 3 次重复评分因此共享投影；容量守卫超出即清空。
+     */
+    private val projectionCache = java.util.concurrent.ConcurrentHashMap<LyricsCandidate, NormalizedTrack>()
+
+    private fun projectionOf(candidate: LyricsCandidate): NormalizedTrack {
+        if (projectionCache.size > PROJECTION_CACHE_LIMIT) projectionCache.clear()
+        return projectionCache.getOrPut(candidate) {
+            val title = normalize(candidate.title)
+            NormalizedTrack(
+                title = title,
+                rawHasArtists = candidate.artists.isNotEmpty(),
+                artists = splitArtists(candidate.artists),
+                album = candidate.album?.takeIf(String::isNotBlank)
+                    ?.let(::normalize)?.takeIf(String::isNotEmpty),
+                flags = versionFlags(title),
+                durationMs = candidate.durationMs,
+                instrumental = candidate.instrumental,
+                candidate = candidate,
+            )
+        }
+    }
+
+    /** 评分结果与其投影的配对（consensus 比对直接用投影，避免重复归一化）。 */
+    private class ScoredWithProjection(
+        val scored: ScoredLyricsCandidate,
+        val projection: NormalizedTrack,
+    )
+
+    private fun projectionOf(request: LyricsMatchRequest): NormalizedTrack {
+        val title = normalize(request.title)
+        return NormalizedTrack(
+            title = title,
+            rawHasArtists = request.artists.isNotEmpty(),
+            artists = splitArtists(request.artists),
+            album = request.album?.takeIf(String::isNotBlank)
+                ?.let(::normalize)?.takeIf(String::isNotEmpty),
+            flags = versionFlags(title),
+            durationMs = request.durationMs,
+            instrumental = false,
+            candidate = null,
+        )
+    }
+
+    private fun versionFlags(normalized: String): Set<VersionFlag> =
+        VersionFlag.entries.filterTo(mutableSetOf()) { it.pattern.containsMatchIn(normalized) }
+
+    private class NormalizedTrack(
+        val title: String,
+        val rawHasArtists: Boolean,
+        val artists: List<String>,
+        val album: String?,
+        val flags: Set<VersionFlag>,
+        val durationMs: Long?,
+        val instrumental: Boolean,
+        val candidate: LyricsCandidate?,
+    )
+
+    private fun splitArtists(values: List<String>): List<String> = values
+        .flatMap { it.split(ARTIST_SEPARATOR) }
+        .map { normalize(it.replace(FEAT_PREFIX, "")) }
+        .filter(String::isNotBlank)
+        .distinct()
+
     companion object {
         private val ARTIST_SEPARATOR = Regex("\\s*(?:/|、|,|，|&|＆|;|；|·|・|\\bfeat\\.?\\b|\\bft\\.?\\b)\\s*", RegexOption.IGNORE_CASE)
         private val FEAT_PREFIX = Regex("^(?:feat\\.?|ft\\.?)\\s*", RegexOption.IGNORE_CASE)
         private val VERSION_DECORATION = Regex("[()\\[\\]{}<>_-]+")
         private val WHITESPACE = Regex("\\s+")
+        private const val PROJECTION_CACHE_LIMIT = 1024
 
         /**
          * 文本归一化：NFKC → 小写 → 繁→简 → 空白折叠。

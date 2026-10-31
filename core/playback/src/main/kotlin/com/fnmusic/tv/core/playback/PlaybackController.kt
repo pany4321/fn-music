@@ -1204,7 +1204,9 @@ class PlaybackController(
                         consecutiveDecodeFailures = 0
                     }
                 }
-                delay(PROGRESS_TICK_MS)
+                // 暂停/空闲时降到 1Hz：进度没在走，4Hz 空转只会阻碍 CPU 深度 idle（待机功耗）。
+                val playing = controller?.isPlaying == true
+                delay(if (playing) PROGRESS_TICK_MS else IDLE_PROGRESS_TICK_MS)
             }
         }
     }
@@ -1267,10 +1269,31 @@ class PlaybackController(
         return transition
     }
 
+    /** 最近一次落盘的快照签名：暂停/无变化时跳过整队列捕获与 JSON 编码。 */
+    @Volatile private var lastCheckpointSignature: String? = null
+
+    private fun checkpointSignature(player: Player): String = buildString {
+        append(player.mediaItemCount).append('|')
+        append(player.currentMediaItemIndex).append('|')
+        append(player.currentPosition / 1_000L).append('|')
+        append(player.playWhenReady).append('|')
+        append(generation).append('|')
+        append(queueKind).append('|')
+        append(playMode).append('|')
+        append(queueSource).append('|')
+        append(shuffleOrderIds.size).append('|')
+        append(currentRoamId).append('|')
+        append(frozenQueueSnapshot?.items?.size ?: -1)
+    }
     private fun checkpointSnapshot(player: Player, force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && now - lastSnapshotAt < SNAPSHOT_INTERVAL_MS) return
         if (pendingShuffle != null) return
+        // 签名去重：暂停/无任何变化时不做整队列捕获与 JSON 编码（最坏 60-90KB/次）。
+        // 位置按秒取整——快照本身最多 5s 粒度，签名更细没有意义。
+        val signature = checkpointSignature(player)
+        if (!force && signature == lastCheckpointSignature) return
+        lastCheckpointSignature = signature
         lastSnapshotAt = now
         val namespace = currentNamespace ?: return
         val revision = ++snapshotRevision
@@ -1288,6 +1311,9 @@ class PlaybackController(
         player: Player,
         playIntentOverride: PlaybackPlayIntent? = null,
     ): PlaybackTransition? {
+        // 注意：这里不做签名去重——enrichCurrentItem 会 replaceMediaItem（元数据变、mediaId 不变），
+        // 仅按 id 的签名探不到这种变化，跳过写会把恢复用的元数据弄丢。结构性写本身低频（每次换曲），
+        // 真正的节流在 checkpointSnapshot（5s 节拍 + 签名去重）。
         lastSnapshotAt = System.currentTimeMillis()
         val namespace = currentNamespace ?: return null
         val revision = ++snapshotRevision
@@ -1415,6 +1441,7 @@ class PlaybackController(
         const val MAX_QUEUE_ITEMS = 250
         const val PROGRESS_TICK_MS = 250L
         const val SNAPSHOT_INTERVAL_MS = 5_000L
+        const val IDLE_PROGRESS_TICK_MS = 1_000L
         const val PREVIOUS_RESTART_THRESHOLD_MS = 3_000L
         val QUEUE_RETRY_DELAYS = longArrayOf(500L, 1_000L, 2_000L)
         const val MAX_CONSECUTIVE_DECODE_SKIPS = 3

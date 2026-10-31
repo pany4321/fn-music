@@ -422,6 +422,7 @@ class LrclibLyricsSource(
 
     /** 检索响应内联的逐行歌词，按 record id 暂存给 [fetch] 用（先进先出，有上限）。 */
     private val inlineLyrics = LinkedHashMap<String, String>()
+    private var inlineTrackBytes = 0
     private val inlineLock = Any()
 
     override suspend fun search(query: LyricsSearchQuery): List<LyricsCandidate> {
@@ -450,8 +451,11 @@ class LrclibLyricsSource(
     }
 
     private fun rememberInline(remoteId: String, syncedLyrics: String) = synchronized(inlineLock) {
-        if (inlineLyrics.size >= MAX_INLINE_ENTRIES) {
-            inlineLyrics.keys.firstOrNull()?.let(inlineLyrics::remove)
+        inlineTrackBytes += syncedLyrics.length
+        // 热门曲的检索响应可达 181KB：按条数（64 条）上限最坏驻留数 MB，改按字节预算淘汰
+        while (inlineTrackBytes > MAX_INLINE_BYTES && inlineLyrics.isNotEmpty()) {
+            val eldest = inlineLyrics.keys.firstOrNull() ?: break
+            inlineTrackBytes -= (inlineLyrics.remove(eldest)?.length ?: 0)
         }
         inlineLyrics[remoteId] = syncedLyrics
     }
@@ -515,7 +519,7 @@ class LrclibLyricsSource(
         const val DEFAULT_COOLDOWN_MS = 60_000L
         const val MIN_COOLDOWN_MS = 1_000L
         const val MAX_COOLDOWN_MS = 10 * 60 * 1_000L
-        const val MAX_INLINE_ENTRIES = 64
+        const val MAX_INLINE_BYTES = 2 * 1024 * 1024
         const val HTTP_TOO_MANY_REQUESTS = 429
     }
 }
@@ -631,17 +635,20 @@ private fun decodeBase64Bytes(value: String): ByteArray = try {
     throw LyricsPayloadException("Invalid base64 lyric payload", cause)
 }
 
+private val HTML_ENTITY = Regex("&#(\\d+);")
+private val MARKUP_TAG = Regex("<[^>]+>")
+
 private fun decodeHtml(value: String): String = value
     .replace("&amp;", "&")
     .replace("&lt;", "<")
     .replace("&gt;", ">")
     .replace("&quot;", "\"")
     .replace("&#39;", "'")
-    .replace(Regex("&#(\\d+);")) { match ->
+    .replace(HTML_ENTITY) { match ->
         match.groupValues[1].toIntOrNull()?.let { codePoint -> String(Character.toChars(codePoint)) }.orEmpty()
     }
 
-private fun stripMarkup(value: String): String = decodeHtml(value.replace(Regex("<[^>]+>"), "")).trim()
+private fun stripMarkup(value: String): String = decodeHtml(MARKUP_TAG.replace(value, "")).trim()
 
 private val QRC_KEY = "!@#)(*$%123ZXC!@!@#)(NHL".toByteArray(Charsets.US_ASCII)
 private val KRC_HEADER = byteArrayOf('k'.code.toByte(), 'r'.code.toByte(), 'c'.code.toByte(), '1'.code.toByte())

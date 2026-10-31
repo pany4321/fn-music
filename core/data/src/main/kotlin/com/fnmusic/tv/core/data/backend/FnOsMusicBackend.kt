@@ -1,5 +1,8 @@
 package com.fnmusic.tv.core.data.backend
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import com.fnmusic.tv.core.data.api.AlbumDto
 import com.fnmusic.tv.core.data.api.ApiDecoder
 import com.fnmusic.tv.core.data.api.ArtistDto
@@ -95,10 +98,11 @@ internal class FnOsMusicBackend(
             exclude = lastRandomTrackPage,
         )
         lastRandomTrackPage = pages.lastOrNull() ?: lastRandomTrackPage
-        val merged = pages.flatMap { page ->
-            session.authenticated { it.allTracks(page = page, size = pageSize) }
-                .list
-                .map(TrackDto::toDomain)
+        // 三页之间无数据依赖：并行取回（此前串行 = 3 × RTT）
+        val merged = coroutineScope {
+            pages.map { page ->
+                async { session.authenticated { it.allTracks(page = page, size = pageSize) } }
+            }.awaitAll().flatMap { it.list.map(TrackDto::toDomain) }
         }
         return merged.shuffled().spreadByKey { it.albumName }.take(pageSize)
     }

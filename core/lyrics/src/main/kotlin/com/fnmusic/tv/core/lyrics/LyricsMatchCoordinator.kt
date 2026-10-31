@@ -135,7 +135,7 @@ class LyricsMatchCoordinator(
 
         val shouldRetryWithTitle = primaryKeyword != request.title &&
             source.supportsKeywordVariants &&
-            scorer.score(request, candidates).isEmpty()
+            !scorer.hasEligible(request, candidates)
         if (shouldRetryWithTitle) {
             try {
                 candidates = (candidates + search(source, request.title, request, timeoutMs))
@@ -147,7 +147,7 @@ class LyricsMatchCoordinator(
             }
         }
 
-        if (scorer.score(request, candidates).isEmpty()) {
+        if (!scorer.hasEligible(request, candidates)) {
             val simplifiedRequest = request.simplifiedForSearch()
             // 只读标题的源（supportsKeywordVariants=false）只看 request.title：标题没被转换时
             // （比如只有歌手是繁体），第三路发出的请求与第一路一模一样，纯浪费，必须跳过。
@@ -179,6 +179,15 @@ class LyricsMatchCoordinator(
         var failure: FailureKind? = null
         val matches = mutableListOf<ProviderMatch>()
         candidates.forEach { scored ->
+            // 完美候选（逐字 + 翻译 + 时长零差）在同源内不可能被后续候选超过
+            // （contentComparator 同源只剩 remoteId 决胜），直接停——最坏路径省掉剩余取词。
+            val perfect = matches.any {
+                it.scored.candidate.source == source.id &&
+                    it.content.wordTimedCoverage > 0.0 &&
+                    it.content.translationCoverage > 0.0 &&
+                    it.durationDeltaMs == 0L
+            }
+            if (perfect) return@forEach
             try {
                 val lyrics = withTimeoutOrNull(timeoutMs) { source.fetch(scored.candidate) }
                     ?: throw LyricsTransportException("${source.id} lyrics timed out")
@@ -186,16 +195,18 @@ class LyricsMatchCoordinator(
                     failure = FailureKind.InvalidResponse
                     return@forEach
                 }
-                val rawContent = LyricsContentQualityEvaluator.evaluate(lyrics)
                 val durationDeltaMs = knownDurationDelta(request.durationMs, scored.candidate.durationMs)
+                val rawContent = LyricsContentQualityEvaluator.evaluate(lyrics)
                 val wordEligible = durationDeltaMs != null &&
                     durationDeltaMs <= policy.maximumWordTimingDeltaMs &&
                     rawContent.wordTimedCoverage > 0.0
+                // wordEligible 时 eligibleLyrics === lyrics：复用首次评估结果，不再整遍重算
                 val eligibleLyrics = if (wordEligible) lyrics else lyrics.withoutWordTiming()
+                val content = if (wordEligible) rawContent else LyricsContentQualityEvaluator.evaluate(eligibleLyrics)
                 matches += ProviderMatch(
                     scored = scored,
                     lyrics = eligibleLyrics,
-                    content = LyricsContentQualityEvaluator.evaluate(eligibleLyrics),
+                    content = content,
                     durationDeltaMs = durationDeltaMs,
                     wordEligible = wordEligible,
                 )

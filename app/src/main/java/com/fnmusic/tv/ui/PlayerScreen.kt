@@ -668,8 +668,9 @@ private fun PlayerBackdrop(targetColor: Color, modifier: Modifier = Modifier) {
         progress.snapTo(0f)
         progress.animateTo(1f, tween(durationMillis = 650, easing = LinearEasing))
     }
-    val animatedColor = androidx.compose.ui.graphics.lerp(fromColor, toColor, progress.value)
     Canvas(modifier) {
+        // animatedColor 的读取移进 draw 块：650ms 过渡期每帧只触发重绘，不再逐帧重组。
+        val animatedColor = androidx.compose.ui.graphics.lerp(fromColor, toColor, progress.value)
         // 渲染端稀释减轻：保留层次感的同时让取到的颜色更多到达屏幕
         // （此前 0.58/0.65 + 25% 黑遮罩，到达屏幕的只剩源色三成，是"背景灰黑"的第二道闸）。
         val centerColor = androidx.compose.ui.graphics.lerp(animatedColor, FnColors.Background, 0.18f)
@@ -704,8 +705,8 @@ private fun PlayerPosterBackdrop(targetColor: Color, modifier: Modifier = Modifi
         progress.snapTo(0f)
         progress.animateTo(1f, tween(durationMillis = 650, easing = LinearEasing))
     }
-    val animatedColor = androidx.compose.ui.graphics.lerp(fromColor, toColor, progress.value)
     Canvas(modifier) {
+        val animatedColor = androidx.compose.ui.graphics.lerp(fromColor, toColor, progress.value)
         drawRect(
             brush = Brush.horizontalGradient(
                 0f to animatedColor,
@@ -754,7 +755,7 @@ private fun PlayerMainContent(
     if (poster) {
         // 过渡带参数：按封面右缘色与面板色的感知距离自适应——色差大给足缓冲（14%），
         // 色差小收窄（6%），避免"低对比显脏、高对比生硬"两个极端。
-        val edgeSampleColor = artworkBitmap?.let { bitmap -> runCatching {
+        val edgeSampleColor = remember(artworkBitmap, placeholderAccent) { artworkBitmap?.let { bitmap -> runCatching {
             // 右缘竖条的均色：取 x=95% 处一列的均值，抗单像素噪声
             val x = (bitmap.width * 0.95f).toInt().coerceIn(0, bitmap.width - 1)
             var r = 0L; var g = 0L; var b = 0L; var n = 0
@@ -768,7 +769,7 @@ private fun PlayerMainContent(
                 green = (g / n) / 255f,
                 blue = (b / n) / 255f,
             )
-        }.getOrNull() } ?: placeholderAccent
+        }.getOrNull() } ?: placeholderAccent }
         val transitionFraction = posterTransitionFraction(edgeSampleColor, posterPanelColor)
         val fadeStart = 0.50f - transitionFraction
         Box(Modifier.fillMaxSize()) {
@@ -979,11 +980,11 @@ private fun PlayerDetails(
             progress = playbackProgress,
             isPlaying = isPlaying,
             identity = lyricIdentity,
-        ) { positionMs ->
+        ) { positionProvider ->
             key(lyricIdentity?.namespace, lyricIdentity?.mediaId, syncedLyrics) {
                 TvLyrics(
                     lyrics = syncedLyrics,
-                    positionMs = positionMs,
+                    positionProvider = positionProvider,
                     staticLyric = staticLyric,
                     loading = lyricsLoading,
                     failed = lyricsFailed,
@@ -1189,7 +1190,7 @@ private fun DiscArtwork(
 @Composable
 internal fun TvLyrics(
     lyrics: SyncedLyrics?,
-    positionMs: Long,
+    positionProvider: () -> Long,
     staticLyric: String?,
     loading: Boolean,
     failed: Boolean,
@@ -1215,8 +1216,11 @@ internal fun TvLyrics(
         when {
             lyrics != null && lyrics.lines.isNotEmpty() -> {
                 val listState = rememberLazyListState()
-                val positionState = rememberUpdatedState(positionMs.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt())
-                val currentPosition = remember { { positionState.value } }
+                // 组合期绝不读取 positionProvider()：帧值只在 KaraokeLyricsView 内部被
+                // lambda 式 currentPosition 惰性读取——否则整段播放期每帧重组本组件。
+                val currentPosition = remember(positionProvider) {
+                    { positionProvider().coerceIn(0L, Int.MAX_VALUE.toLong()).toInt() }
+                }
                 androidx.compose.runtime.CompositionLocalProvider(
                     androidx.compose.material3.LocalTextStyle provides TextStyle(
                         color = FnColors.Text,
@@ -1317,7 +1321,7 @@ private fun SmoothLyricProgress(
     progress: State<PlaybackProgressState>,
     isPlaying: Boolean,
     identity: NowPlayingIdentity?,
-    content: @Composable (positionMs: Long) -> Unit,
+    content: @Composable (positionProvider: () -> Long) -> Unit,
 ) {
     val snapshot = progress.value
     val anchor = remember(identity, snapshot.positionMs, snapshot.durationMs, isPlaying) {
@@ -1328,14 +1332,16 @@ private fun SmoothLyricProgress(
         )
     }
     val currentAnchor by rememberUpdatedState(anchor)
-    var interpolatedPositionMs by remember(identity) { mutableLongStateOf(snapshot.positionMs) }
+    // 帧插值写入独立 State（不随 identity 重建）：provider 惰性读取，
+    // 组合期零读取 → 帧写入不再触发任何重组（此前整段播放期每帧重组 TvLyrics）。
+    val interpolatedState = remember { mutableLongStateOf(snapshot.positionMs) }
 
     LaunchedEffect(identity, isPlaying, snapshot.durationMs) {
         if (!isPlaying) return@LaunchedEffect
         while (isActive) {
             withFrameNanos {
                 val latest = currentAnchor
-                interpolatedPositionMs = interpolatedLyricPosition(
+                interpolatedState.longValue = interpolatedLyricPosition(
                     anchorPositionMs = latest.positionMs,
                     anchorObservedAtMs = latest.observedAtMs,
                     frameObservedAtMs = SystemClock.uptimeMillis(),
@@ -1345,8 +1351,12 @@ private fun SmoothLyricProgress(
             }
         }
     }
-
-    content(if (isPlaying) interpolatedPositionMs else snapshot.positionMs)
+    val isPlayingState = rememberUpdatedState(isPlaying)
+    val snapshotPositionState = rememberUpdatedState(snapshot.positionMs)
+    val positionProvider = remember {
+        { if (isPlayingState.value) interpolatedState.longValue else snapshotPositionState.value }
+    }
+    content(positionProvider)
 }
 
 @Composable
@@ -1649,6 +1659,8 @@ internal fun PlayerControlOverlay(
     onExitRoam: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 手势/语义读取的最新进度（pointerInput(Unit) 不能直接捕获每帧变化的参数）
+    val latestPositionMs by rememberUpdatedState(positionMs)
     var progressFocused by remember { mutableStateOf(false) }
     val fraction = playerProgressFraction(positionMs, durationMs)
     Column(
@@ -1699,11 +1711,14 @@ internal fun PlayerControlOverlay(
                         else -> false
                     }
                 }
-                .pointerInput(positionMs, durationMs) {
+                // pointerInput(Unit)：positionMs 每 250ms 变化会让手势协程反复销毁重建，
+                // 触屏车机上还可能吞掉恰好落在重启窗口的点击。经 State 读最新值。
+                .pointerInput(Unit) {
                     if (durationMs > 0L) {
                         detectTapGestures { offset ->
+                            val current = latestPositionMs
                             val targetMs = (durationMs * (offset.x / size.width).coerceIn(0f, 1f)).toLong()
-                            onSeek(targetMs - positionMs)
+                            onSeek(targetMs - current)
                             onInteraction()
                         }
                     }

@@ -39,6 +39,9 @@ import com.fnmusic.tv.core.lyrics.parseLyrics
 import com.mocharealm.accompanist.lyrics.core.model.SyncedLyrics
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Semaphore
@@ -77,8 +81,12 @@ internal data class FavoriteMutation(
 internal fun FavoriteLibraryState.bindNamespace(namespace: String): FavoriteLibraryState =
     if (this.namespace == namespace) this else FavoriteLibraryState(namespace = namespace)
 
-internal fun FavoriteLibraryState.observe(trackGuid: String, favorite: Boolean): FavoriteLibraryState =
-    if (trackGuid in pending) this else copy(statuses = statuses + (trackGuid to favorite))
+internal fun FavoriteLibraryState.observe(trackGuid: String, favorite: Boolean): FavoriteLibraryState {
+    if (trackGuid in pending) return this
+    // 同曲同值（页面重载时大量出现）：直接复用实例，省一次整 Map 复制
+    if (statuses[trackGuid] == favorite) return this
+    return copy(statuses = statuses + (trackGuid to favorite))
+}
 
 internal fun FavoriteLibraryState.beginMutation(
     trackGuid: String,
@@ -181,7 +189,7 @@ class MusicRepository internal constructor(
     private val preferences: AppPreferences,
     private val localStore: LocalStore,
     metadataCapacityBytes: Int,
-    repositoryScope: CoroutineScope,
+    private val repositoryScope: CoroutineScope,
     onlineLyricsMatcher: suspend (LyricsMatchRequest) -> LyricsMatchResult,
     /** 当前会话的后端（按会话的后端类型解析，同一会话内复用）。 */
     private val backends: SessionBackends = SessionBackends(session),
@@ -221,11 +229,23 @@ class MusicRepository internal constructor(
 
     @Volatile private var favoriteListSnapshot: FavoriteListSnapshot? = null
 
-    /** 全量构建失败后的降级标记：降级路径粘滞，直到下一次收藏动作重试重建。 */
+    /** 全量拉取失败后的降级标记：降级路径粘滞，直到下一次收藏动作重试重建。 */
     @Volatile private var favoriteListDegraded = false
+
+    /** 单飞构建中的快照（namespace → 构建 Deferred），持有 [favoriteMutationMutex] 读写。 */
+    @Volatile private var favoriteSnapshotFlight: Pair<String, Deferred<List<Track>>>? = null
+
+    /** 失效代际号：收藏动作/失效操作 +1，让在途构建的结果过期作废。 */
+    private val favoriteSnapshotGeneration = java.util.concurrent.atomic.AtomicLong()
 
     /** 无封面条目的负缓存（key 含 namespace/variant），5 分钟后允许重试。 */
     private val negativeArtworkUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** 负缓存容量守卫：超限即清掉已过期条目（无界增长在低堆设备上是真实压力）。 */
+    private fun pruneNegativeArtwork(nowMs: Long) {
+        if (negativeArtworkUntil.size < 1024) return
+        negativeArtworkUntil.entries.removeIf { it.value <= nowMs }
+    }
     private val _favoriteState = MutableStateFlow(FavoriteLibraryState())
     val favoriteState: StateFlow<FavoriteLibraryState> = _favoriteState.asStateFlow()
 
@@ -404,18 +424,33 @@ class MusicRepository internal constructor(
 
     suspend fun favoriteTracks(page: Int): Page<Track> {
         val namespace = session.cacheNamespace()
-        // 全量快照的构建与失效都走 favoriteMutationMutex：保证"收藏动作失效快照"不会被
-        // 一个更早启动、尚未完成的重建用旧数据覆盖回去（invalidate 一定排在它后面执行）。
-        favoriteMutationMutex.withLock {
-            val snapshot = favoriteSnapshotLocked(namespace)
-            if (snapshot != null) {
-                val paged = sliceFavoritePage(snapshot, page, FAVORITE_PAGE_SIZE)
-                observeFavoriteTracks(paged, namespace)
-                return paged
+        // 快照构建单飞化：全量拉取是多个串行 RTT，绝不能握着 favoriteMutationMutex 做——
+        // 那会把所有收藏/取消收藏操作阻塞整段构建时间（反之收藏动作也会卡住翻页）。
+        // 构建期间到达的收藏动作按代际号作废本次结果，下一次加载即见新状态。
+        val flight = favoriteMutationMutex.withLock {
+            val cached = favoriteListSnapshot?.takeIf { it.namespace == namespace }?.tracks
+            when {
+                cached != null -> CompletableDeferred(cached)
+                favoriteSnapshotFlight?.first == namespace -> favoriteSnapshotFlight?.second
+                !favoriteListDegraded -> startFavoriteSnapshotFlightLocked(namespace)
+                else -> null
             }
+        } ?: return degradedFavoritePage(page, namespace)
+        val snapshot = awaitFavoriteSnapshot(namespace, flight)
+        if (snapshot != null) {
+            val paged = sliceFavoritePage(snapshot, page, FAVORITE_PAGE_SIZE)
+            observeFavoriteTracks(paged, namespace)
+            return paged
         }
-        // 降级：服务端分页原序。降级粘滞到下次收藏动作，避免同一轮加载里各页 sort
-        // 忽而本地序忽而服务端序触发 UI 的漂移误报（CollectionChanged）。
+        // 走到这里 = 快照构建失败（已置降级标记）：服务端分页原序。降级粘滞到下次收藏动作，
+        // 避免同一轮加载里各页 sort 忽而本地序忽而服务端序触发 UI 的漂移误报（CollectionChanged）。
+        val result = backend.favoriteTracks(page, FAVORITE_PAGE_SIZE).toDomainPage(page, FAVORITE_PAGE_SIZE)
+        observeFavoriteTracks(result, namespace)
+        return result
+    }
+
+    /** 降级路径：绕过本地排序快照，按服务端原序返回一页。 */
+    private suspend fun degradedFavoritePage(page: Int, namespace: String): Page<Track> {
         val result = backend.favoriteTracks(page, FAVORITE_PAGE_SIZE).toDomainPage(page, FAVORITE_PAGE_SIZE)
         observeFavoriteTracks(result, namespace)
         return result
@@ -547,6 +582,7 @@ class MusicRepository internal constructor(
         _favoriteState.value = FavoriteLibraryState()
         favoriteListSnapshot = null
         favoriteListDegraded = false
+        favoriteSnapshotGeneration.incrementAndGet()
     }
 
     /**
@@ -564,22 +600,47 @@ class MusicRepository internal constructor(
         }
         favoriteListSnapshot = null
         favoriteListDegraded = false
+        favoriteSnapshotGeneration.incrementAndGet()
     }
 
-    /** 持有 [favoriteMutationMutex] 调用。返回 null = 走降级路径（构建失败或已降级）。 */
-    private suspend fun favoriteSnapshotLocked(namespace: String): List<Track>? {
-        favoriteListSnapshot?.takeIf { it.namespace == namespace }?.let { return it.tracks }
-        if (favoriteListDegraded) return null
-        return try {
-            loadFavoriteSnapshot(namespace).also {
-                favoriteListSnapshot = FavoriteListSnapshot(namespace, it)
+    /**
+     * 快照单飞构建（持有 [favoriteMutationMutex] 调用）：已过期的构建结果按代际号丢弃，
+     * 不会覆盖失效后写入的新状态；飞行失败置降级标记走服务端原序。
+     */
+    private fun startFavoriteSnapshotFlightLocked(namespace: String): Deferred<List<Track>> {
+        val generation = favoriteSnapshotGeneration.get()
+        val flight = repositoryScope.async {
+            val tracks = loadFavoriteSnapshot(namespace)
+            favoriteMutationMutex.withLock {
+                if (favoriteSnapshotGeneration.get() == generation) {
+                    favoriteListSnapshot = FavoriteListSnapshot(namespace, tracks)
+                }
+                favoriteSnapshotFlight = null
             }
-        } catch (cause: CancellationException) {
-            throw cause
-        } catch (_: Exception) {
-            favoriteListDegraded = true
-            null
+            tracks
         }
+        favoriteSnapshotFlight = namespace to flight
+        return flight
+    }
+
+    private suspend fun awaitFavoriteSnapshot(namespace: String, flight: Deferred<List<Track>>): List<Track>? = try {
+        flight.await()
+    } catch (cause: CancellationException) {
+        // 仅当 flight 本体被取消才清指针（repositoryScope 退出时）；调用方取消时 flight
+        // 仍在 repositoryScope 里继续跑并自行落位，不该让后续调用方再起一轮重复构建。
+        if (flight.isCancelled) {
+            favoriteMutationMutex.withLock {
+                if (favoriteSnapshotFlight?.second === flight) favoriteSnapshotFlight = null
+            }
+        }
+        throw cause
+    } catch (_: Exception) {
+        favoriteMutationMutex.withLock {
+            if (favoriteSnapshotFlight?.second === flight) favoriteSnapshotFlight = null
+            favoriteListDegraded = true
+            favoriteSnapshotGeneration.incrementAndGet()
+        }
+        null
     }
 
     /** 全量拉取收藏成员 → 对账回填本地收藏时间 → 按"最新收藏在前"降序排序。 */
@@ -704,6 +765,7 @@ class MusicRepository internal constructor(
         }
         if (bytes == null) {
             negativeArtworkUntil["$namespace|$coverId|$variant"] = now() + NEGATIVE_ARTWORK_TTL_MS
+        pruneNegativeArtwork(now())
         } else {
             negativeArtworkUntil.remove("$namespace|$coverId|$variant")
         }
@@ -725,6 +787,7 @@ class MusicRepository internal constructor(
         _playlistCovers.value = emptyMap()
         favoriteListSnapshot = null
         favoriteListDegraded = false
+        favoriteSnapshotGeneration.incrementAndGet()
     }
 
     suspend fun clearLocalNamespace(includeEssential: Boolean) {
@@ -828,7 +891,8 @@ class MusicRepository internal constructor(
                 cached.payload
             }
         }
-        return if (resolved) decoded else backend.decodeLyrics(payload)
+        val finalDecoded = if (resolved) decoded else withContext(Dispatchers.Default) { backend.decodeLyrics(payload) }
+        return finalDecoded
     }
 
     /**
@@ -884,7 +948,10 @@ class MusicRepository internal constructor(
                 cached.payload
             }
         }
-        return (decoded ?: backend.decodePage(source, payload)).toDomainPage(page, pageSize)
+        // 内存命中时 decoded 为空：解码切到 Default——调用方（retainedScope）在 Main，
+        // 一页 50 条的 JSON 解析不能占用主线程。
+        val finalDecoded = decoded ?: withContext(Dispatchers.Default) { backend.decodePage(source, payload) }
+        return finalDecoded.toDomainPage(page, pageSize)
     }
 
     /** 目录索引：与 [cachedPage] 同一套缓存语义（内存 + Room），只是不分页。 */
@@ -919,7 +986,8 @@ class MusicRepository internal constructor(
                 cached.payload
             }
         }
-        return decoded ?: backend.decodeIndex(source, payload)
+        val finalDecoded = decoded ?: withContext(Dispatchers.Default) { backend.decodeIndex(source, payload) }
+        return finalDecoded
     }
 
     private suspend fun <T> currentResource(block: suspend () -> T?): CurrentResourceResult<T> = try {

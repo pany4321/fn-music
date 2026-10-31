@@ -69,8 +69,11 @@ internal fun catalogPageStartIndex(page: Int, pageSize: Int): Int {
     return (page.coerceAtLeast(1) - 1) * pageSize
 }
 
-internal fun <T> catalogPageEntries(entries: List<T>, page: Int, pageSize: Int): List<T> =
-    entries.drop(catalogPageStartIndex(page, pageSize)).take(pageSize)
+internal fun <T> catalogPageEntries(entries: List<T>, page: Int, pageSize: Int): List<T> {
+    // subList 视图：此前 drop() 在每次重组时都复制"已载全部前缀"，连翻几十页后每次拷贝上千元素
+    val start = catalogPageStartIndex(page, pageSize)
+    return if (start >= entries.size) emptyList() else entries.subList(start, minOf(start + pageSize, entries.size))
+}
 
 internal fun shouldPrefetchCatalogContinuation(
     currentPage: Int,

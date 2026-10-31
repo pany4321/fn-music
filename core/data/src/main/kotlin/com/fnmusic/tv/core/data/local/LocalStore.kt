@@ -47,8 +47,26 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
         dao.updateSettings(namespace, style, budget, onlineLyricsMatchingEnabled, now())
     }
 
+    // touch 节流：命中缓存不再每次都写 accessedAt（读多写少的键 5 分钟内只写一次）。
+    // accessedAt 只服务于 LRU 淘汰顺序，5 分钟粒度对淘汰决策无损。
+    private val recentTouches = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val TOUCH_THROTTLE_MS = 5 * 60 * 1_000L
+
+    private suspend fun touchThrottled(key: String, touch: suspend () -> Unit) {
+        val nowMs = now()
+        val last = recentTouches[key]
+        if (last != null && nowMs - last < TOUCH_THROTTLE_MS) return
+        recentTouches[key] = nowMs
+        if (recentTouches.size > 2048) {
+            recentTouches.entries.removeIf { nowMs - it.value > TOUCH_THROTTLE_MS }
+        }
+        touch()
+    }
+
     suspend fun page(namespace: String, sourceKey: String, page: Int): CachedPageEntity? =
-        dao.page(namespace, sourceKey, page)?.also { dao.touchPage(namespace, sourceKey, page, now()) }
+        dao.page(namespace, sourceKey, page)?.also {
+            touchThrottled("$namespace|$sourceKey|$page") { dao.touchPage(namespace, sourceKey, page, now()) }
+        }
 
     suspend fun savePage(entity: CachedPageEntity) {
         dao.upsertPage(entity)
@@ -64,7 +82,9 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
     }
 
     suspend fun matchedLyric(namespace: String, trackGuid: String): CachedMatchedLyricEntity? =
-        dao.matchedLyric(namespace, trackGuid)?.also { dao.touchMatchedLyric(namespace, trackGuid, now()) }
+        dao.matchedLyric(namespace, trackGuid)?.also {
+            touchThrottled("$namespace|ml|$trackGuid") { dao.touchMatchedLyric(namespace, trackGuid, now()) }
+        }
 
     suspend fun saveMatchedLyric(entity: CachedMatchedLyricEntity) {
         dao.upsertMatchedLyric(entity)
@@ -72,7 +92,9 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
     }
 
     suspend fun index(namespace: String, key: String): CachedIndexEntity? =
-        dao.index(namespace, key)?.also { dao.touchIndex(namespace, key, now()) }
+        dao.index(namespace, key)?.also {
+            touchThrottled("$namespace|ix|$key") { dao.touchIndex(namespace, key, now()) }
+        }
 
     suspend fun saveIndex(entity: CachedIndexEntity) {
         dao.upsertIndex(entity)
@@ -150,11 +172,13 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
         var payloadBytes = totalPayloadBytes()
         var physicalBytes = physicalBytes()
         var removedSinceReclaim = false
+        // 淘汰批放大 4 倍：此前每 32 行就重跑一次全表 SUM 审计（近乎全库顺序读）
         while (payloadBytes > AppDatabase.EVICTABLE_PAYLOAD_TARGET_BYTES) {
-            val removed = dao.evictOldestPages(EVICTION_BATCH) +
-                dao.evictOldestLyrics(EVICTION_BATCH) +
-                dao.evictOldestMatchedLyrics(EVICTION_BATCH) +
-                dao.evictOldestIndexes(EVICTION_BATCH)
+            val batch = EVICTION_BATCH * 4
+            val removed = dao.evictOldestPages(batch) +
+                dao.evictOldestLyrics(batch) +
+                dao.evictOldestMatchedLyrics(batch) +
+                dao.evictOldestIndexes(batch)
             if (removed == 0) break
             removedSinceReclaim = true
             payloadBytes = totalPayloadBytes()
@@ -186,8 +210,7 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
         writesSinceBudgetAudit = 0
     }
 
-    private suspend fun totalPayloadBytes(): Long =
-        dao.pagePayloadBytes() + dao.lyricPayloadBytes() + dao.matchedLyricPayloadBytes() + dao.indexPayloadBytes()
+    private suspend fun totalPayloadBytes(): Long = dao.totalPayloadBytes()
 
     private fun checkpoint() {
         database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
@@ -204,6 +227,6 @@ class LocalStore(context: Context, val database: AppDatabase = AppDatabase.creat
     private companion object {
         const val EVICTION_BATCH = 32
         const val MAX_UNVERIFIED_PHYSICAL_GROWTH_BYTES = 4L * 1024L * 1024L
-        const val MAX_WRITES_WITHOUT_BUDGET_AUDIT = 32
+        const val MAX_WRITES_WITHOUT_BUDGET_AUDIT = 128
     }
 }

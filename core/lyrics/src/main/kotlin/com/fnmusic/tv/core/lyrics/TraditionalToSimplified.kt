@@ -18,19 +18,30 @@ package com.fnmusic.tv.core.lyrics
 internal object TraditionalChinese {
 
     /** 表规模。测试用它守住表完整性（2965 对 = OpenCC 单字 BMP 全集）。 */
-    internal val entryCount: Int get() = mapping.size
+    internal val entryCount: Int get() = mapping.count { it != EMPTY_SENTINEL }
+
+    private const val EMPTY_SENTINEL = '\u0000'
 
     /** 文本是否含繁体字（决定编排器要不要多发一轮繁→简检索）。 */
-    fun hasTraditional(text: String): Boolean = text.any { it in mapping }
+    fun hasTraditional(text: String): Boolean = text.any { mapping[it.code] != EMPTY_SENTINEL }
 
-    /** 逐字符把繁体转成简体；非繁体字符原样保留。 */
+    /**
+     * 逐字符把繁体转成简体；非繁体字符原样保留。
+     *
+     * 直查表按码点索引（`CharArray(65536)`）：normalize 是评分热路径，单轮被调上万次，
+     * HashMap<Char, Char> 每次查找都装箱一个 Character，换成 CharArray 后 O(1) 且零分配。
+     */
     fun toSimplified(text: String): String {
         if (text.isEmpty()) return text
         var changed = false
         val out = StringBuilder(text.length)
         for (c in text) {
-            val simplified = mapping[c]
-            if (simplified != null) {
+            if (c.code > 0xFFFF) { // 非 BMP（代理对）：不映射，原样保留
+                out.append(c)
+                continue
+            }
+            val simplified = mapping[c.code]
+            if (simplified != EMPTY_SENTINEL) {
                 out.append(simplified)
                 changed = true
             } else {
@@ -40,9 +51,14 @@ internal object TraditionalChinese {
         return if (changed) out.toString() else text
     }
 
-    private val mapping: Map<Char, Char> by lazy {
+    /** 下标 = 码点；EMPTY_SENTINEL = 非繁体字符。 */
+    private val mapping: CharArray by lazy {
         require(TRADITIONAL_CHARS.length == SIMPLIFIED_CHARS.length)
-        TRADITIONAL_CHARS.zip(SIMPLIFIED_CHARS).toMap()
+        require(EMPTY_SENTINEL !in TRADITIONAL_CHARS)
+        CharArray(0x1_0000).also { table ->
+            TRADITIONAL_CHARS.forEachIndexed { index, trad -> table[trad.code] = SIMPLIFIED_CHARS[index] }
+            table[EMPTY_SENTINEL.code] = EMPTY_SENTINEL
+        }
     }
 
     private val TRADITIONAL_CHARS =

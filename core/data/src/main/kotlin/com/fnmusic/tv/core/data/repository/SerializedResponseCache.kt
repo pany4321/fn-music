@@ -139,6 +139,9 @@ internal class SerializedResponseCache(
 
     private suspend fun accept(key: ResponseCacheKey, flight: Flight, payload: String) {
         currentCoroutineContext().ensureActive()
+        // persist 必须留在 acceptanceMutex 内：invalidate* 也要进这把锁，保证"失效先于
+        // 在途落盘完成"——否则换源/删歌单后，并发中的旧页会把 Room 缓存写回去（复活旧数据）。
+        // 落盘本身的成本已由 LocalStore 侧消化（单查询合计审计 + touch 节流 + 批量淘汰）。
         acceptanceMutex.withLock {
             currentCoroutineContext().ensureActive()
             val alreadyAccepted = mutex.withLock {

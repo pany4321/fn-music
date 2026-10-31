@@ -217,9 +217,10 @@ private fun decodeXml(value: String): String = value
     .replace("&lt;", "<")
     .replace("&gt;", ">")
     .replace("&amp;", "&")
-    .replace(Regex("&#(\\d+);")) { match ->
+    .replace(HTML_ENTITY) { match ->
         match.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) }.orEmpty()
     }
 
+private val HTML_ENTITY = Regex("&#(\\d+);")
 private val JAPANESE_ANNOTATION = Regex("""[（(][\u3040-\u30ff\u31f0-\u31ff\uff66-\uff9fー・･\s]+[）)]""")
 private const val MAX_SIDECAR_DELTA_MS = 1_500

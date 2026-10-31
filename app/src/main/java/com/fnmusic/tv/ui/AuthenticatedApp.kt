@@ -3477,7 +3477,8 @@ private fun TrackCollection(
             load(1)
         }
     }
-    val playableTracks = tracks.filter(::isTrackPlayable)
+    // remember(tracks)：此前每次焦点移动（body 读 focusedKey）都对全表 filter+分配
+    val playableTracks = remember(tracks) { tracks.filter(::isTrackPlayable) }
     val primaryActionEnabled = when (primaryAction) {
         TrackCollectionPrimaryAction.PlayAll -> playableTracks.isNotEmpty()
         is TrackCollectionPrimaryAction.StartRoam -> true

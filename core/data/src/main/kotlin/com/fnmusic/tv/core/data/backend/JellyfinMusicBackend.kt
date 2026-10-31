@@ -1,5 +1,8 @@
 package com.fnmusic.tv.core.data.backend
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import com.fnmusic.tv.core.data.api.ApiDecoder
 import com.fnmusic.tv.core.data.repository.SessionRepository
 import com.fnmusic.tv.core.model.Album
@@ -61,6 +64,11 @@ internal class JellyfinMusicBackend(
      * 判定依据实测：`PlaybackInfo` 只给能力位与容器，URL 由客户端拼。
      */
     override suspend fun streamPlan(track: Track): StreamPlan {
+        // 容器已在直连白名单（与 batchStreamPlan 同一判定，audioFormat 就是 MediaSources[0].Container）
+        // 时不必回源 item：省一次 /Items 往返——prepare 链路上此前 trackMetadata + streamPlan 各取一次。
+        track.audioFormat?.lowercase()?.let { container ->
+            if (container in DIRECT_PLAYABLE_CONTAINERS) return directPlan(track)
+        }
         val item = runCatching { api.item(track.guid.value, userId) }.getOrNull() ?: return directPlan(track)
         val source = item.MediaSources.firstOrNull()
         val container = (source?.Container ?: item.Container)?.lowercase()
@@ -447,56 +455,67 @@ internal class JellyfinMusicBackend(
      *   （元数据齐全的库生效；实测本库音轨缺歌手元数据时为 0，保留以不亏）。
      * 三源按 guid 去重、本地按名称排序后切窗——搜索 UI 只取第一页，无跨页漂移问题。
      */
-    private suspend fun searchMergedItems(query: String, page: Int, size: Int): JellyfinItemsDto {
-        val direct = runSearchItems(query, page, size, AUDIO)
-        val albumItems = runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ALBUM)
+    private suspend fun searchMergedItems(query: String, page: Int, size: Int): JellyfinItemsDto = coroutineScope {
+        // 三路探测互相独立：此前纯串行时一次搜索 = 2~6 个 RTT 相加，遥控器逐字搜索体感极差。
+        val directDeferred = async { runSearchItems(query, page, size, AUDIO) }
+        val albumDeferred = async { runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ALBUM) }
+        val artistDeferred = async { runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ARTIST) }
+        val direct = directDeferred.await()
+        val albumItems = albumDeferred.await()
         val albumIds = albumItems.Items.take(RELATED_SEARCH_LIMIT).map { it.Id }
-        val artistItems = runSearchItems(query, 1, RELATED_SEARCH_LIMIT, MUSIC_ARTIST)
+        val artistItems = artistDeferred.await()
         val artistIds = artistItems.Items.take(RELATED_SEARCH_LIMIT).map { it.Id }
 
+        // extras 依赖探测结果，作为第二级并行发出。
         val extras = buildList {
             if (albumIds.isNotEmpty()) {
                 add(
-                    call {
-                        api.items(
-                            userId = userId,
-                            includeItemTypes = AUDIO,
-                            albumIds = albumIds.joinToString(","),
-                            sortBy = SORT_NAME,
-                            startIndex = 0,
-                            limit = offsetOf(page, size) + size,
-                        )
+                    async {
+                        call {
+                            api.items(
+                                userId = userId,
+                                includeItemTypes = AUDIO,
+                                albumIds = albumIds.joinToString(","),
+                                sortBy = SORT_NAME,
+                                startIndex = 0,
+                                limit = offsetOf(page, size) + size,
+                            )
+                        }
                     },
                 )
             }
             if (artistIds.isNotEmpty()) {
                 add(
-                    call {
-                        api.items(
-                            userId = userId,
-                            includeItemTypes = AUDIO,
-                            artistIds = artistIds.joinToString(","),
-                            sortBy = SORT_NAME,
-                            startIndex = 0,
-                            limit = offsetOf(page, size) + size,
-                        )
+                    async {
+                        call {
+                            api.items(
+                                userId = userId,
+                                includeItemTypes = AUDIO,
+                                artistIds = artistIds.joinToString(","),
+                                sortBy = SORT_NAME,
+                                startIndex = 0,
+                                limit = offsetOf(page, size) + size,
+                            )
+                        }
                     },
                 )
                 add(
-                    call {
-                        api.items(
-                            userId = userId,
-                            includeItemTypes = AUDIO,
-                            albumArtistIds = artistIds.joinToString(","),
-                            sortBy = SORT_NAME,
-                            startIndex = 0,
-                            limit = offsetOf(page, size) + size,
-                        )
+                    async {
+                        call {
+                            api.items(
+                                userId = userId,
+                                includeItemTypes = AUDIO,
+                                albumArtistIds = artistIds.joinToString(","),
+                                sortBy = SORT_NAME,
+                                startIndex = 0,
+                                limit = offsetOf(page, size) + size,
+                            )
+                        }
                     },
                 )
             }
         }
-        return mergePages(listOf(direct) + extras, page, size)
+        mergePages(listOf(direct) + extras.awaitAll(), page, size)
     }
 
     /**
