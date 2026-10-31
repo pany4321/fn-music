@@ -148,6 +148,24 @@ internal class FnOsMusicBackend(
         return decoded as DecodedPage<T>
     }
 
+    /** [decodePage] 的"已解出 DTO"变体：跳过字符串解析，映射逐字一致（结果可互换）。 */
+    override fun <T> decodeCarriedPage(source: CatalogPageSource<T>, raw: RawPage): DecodedPage<T> {
+        val decoded: DecodedPage<*> = when (source) {
+            is CatalogPageSource.PlaylistTracks -> decodeCarriedSorted<TrackDto, Track>(raw, TrackDto::toDomain)
+            CatalogPageSource.Artists -> decodeCarriedSorted<ArtistDto, Artist>(raw, ArtistDto::toDomain)
+            is CatalogPageSource.ArtistTracks -> decodeCarriedSorted<TrackDto, Track>(raw, TrackDto::toDomain)
+            is CatalogPageSource.ArtistAlbums -> decodeCarriedSorted<AlbumDto, Album>(raw, AlbumDto::toDomain)
+            CatalogPageSource.Albums -> decodeCarriedSorted<AlbumDto, Album>(raw, AlbumDto::toDomain)
+            is CatalogPageSource.AlbumTracks -> decodeCarriedSorted<TrackDto, Track>(raw, TrackDto::toDomain)
+            CatalogPageSource.AllTracks -> decodeCarriedSorted<TrackDto, Track>(raw, TrackDto::toDomain)
+            CatalogPageSource.RecentlyAdded -> decodeCarriedSorted<TrackDto, Track>(raw, TrackDto::toDomain)
+            is CatalogPageSource.GenreTracks -> decodeCarriedSorted<TrackDto, Track>(raw, TrackDto::toDomain)
+        }
+        // 每个来源只有一种领域类型（见 CatalogPageSource 的定义），所以这里的转换是安全的。
+        @Suppress("UNCHECKED_CAST")
+        return decoded as DecodedPage<T>
+    }
+
     override suspend fun catalogIndex(source: CatalogIndexSource<*>): RawIndex =
         session.authenticated { api ->
             when (source) {
@@ -304,8 +322,16 @@ private inline fun <reified Dto> SortedPageListDto<Dto>.toRawPage(page: Int, pag
         pageSize = pageSize,
         total = total,
         sort = sort,
+        decoded = this,
     )
 
+private fun <Dto, Domain> decodeCarriedSorted(
+    raw: RawPage,
+    transform: (Dto) -> Domain,
+): DecodedPage<Domain> {
+    val page = raw.decoded as SortedPageListDto<Dto>
+    return DecodedPage(page.list.map(transform), page.total, page.sort)
+}
 private inline fun <reified Dto, Domain> decodeSortedPage(
     rawJson: String,
     transform: (Dto) -> Domain,

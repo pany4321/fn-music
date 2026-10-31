@@ -345,7 +345,13 @@ class TrimMusicApi(
         /** 官方客户端事件枚举：TrackPlay = "track_play"。 */
         private const val EVENT_TYPE_TRACK_PLAY = "track_play"
 
-        fun client(): OkHttpClient = OkHttpClient.Builder()
+        // 进程内共享同一实例：连接池与 Dispatcher 全局复用——连接/恢复重试/换源此前
+        // 每次都新建 client，旧实例的空闲连接要等 GC/5 分钟超时才释放。所有调用方
+        // 配置完全相同，共享无行为差异；需要覆盖超时的调用方用 newBuilder() 派生（继承池）。
+        @Volatile
+        private var sharedClient: OkHttpClient? = null
+
+        fun client(): OkHttpClient = sharedClient ?: OkHttpClient.Builder()
             .followRedirects(false)
             .followSslRedirects(false)
             // 不再对 HTTP/1.1 强制 `Connection: close`（上游遗留、无文档动机）：它杀死了
@@ -356,6 +362,7 @@ class TrimMusicApi(
             .callTimeout(20, TimeUnit.SECONDS)
             .hostnameVerifier(NasHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier()))
             .build()
+            .also { sharedClient = it }
     }
 }
 

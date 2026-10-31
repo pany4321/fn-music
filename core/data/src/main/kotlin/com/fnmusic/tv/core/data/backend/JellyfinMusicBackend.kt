@@ -108,11 +108,31 @@ internal class JellyfinMusicBackend(
             pageSize = size,
             total = response.TotalRecordCount,
             sort = sortKeyOf(source),
+            decoded = response,
         )
     }
 
     override fun <T> decodePage(source: CatalogPageSource<T>, rawJson: String): DecodedPage<T> {
         val response = ApiDecoder.json.decodeFromString<JellyfinItemsDto>(rawJson)
+        val decoded: DecodedPage<*> = when (source) {
+            is CatalogPageSource.PlaylistTracks -> response.decoded("playlist") { it.toTrack() }
+            CatalogPageSource.Artists -> response.decoded("sortName,asc") { it.toArtist() }
+            is CatalogPageSource.ArtistTracks -> response.decoded("dateCreated,desc") { it.toTrack() }
+            is CatalogPageSource.ArtistAlbums -> response.decoded("dateCreated,desc") { it.toAlbum() }
+            CatalogPageSource.Albums -> response.decoded("sortName,asc") { it.toAlbum() }
+            is CatalogPageSource.AlbumTracks -> response.decoded("trackNo,asc") { it.toTrack() }
+            CatalogPageSource.AllTracks -> response.decoded("dateCreated,desc") { it.toTrack() }
+            CatalogPageSource.RecentlyAdded -> response.decoded("dateCreated,desc") { it.toTrack() }
+            is CatalogPageSource.GenreTracks -> response.decoded("sortName,asc") { it.toTrack() }
+        }
+        // 每个来源只有一种领域类型（见 CatalogPageSource 的定义），所以这里的转换是安全的。
+        @Suppress("UNCHECKED_CAST")
+        return decoded as DecodedPage<T>
+    }
+
+    /** [decodePage] 的"已解出 DTO"变体：跳过字符串解析，映射逐字一致（结果可互换）。 */
+    override fun <T> decodeCarriedPage(source: CatalogPageSource<T>, raw: RawPage): DecodedPage<T> {
+        val response = raw.decoded as JellyfinItemsDto
         val decoded: DecodedPage<*> = when (source) {
             is CatalogPageSource.PlaylistTracks -> response.decoded("playlist") { it.toTrack() }
             CatalogPageSource.Artists -> response.decoded("sortName,asc") { it.toArtist() }

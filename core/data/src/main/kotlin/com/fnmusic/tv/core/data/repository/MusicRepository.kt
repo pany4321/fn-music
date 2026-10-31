@@ -944,7 +944,9 @@ class MusicRepository internal constructor(
         ) {
             try {
                 val raw = backend.catalogPage(source, page, pageSize)
-                decoded = backend.decodePage(source, raw.rawJson)
+                // fetch 路径直接复用网络层已解出的 DTO（decodeCarriedPage），
+                // 省"DTO 编码回字符串 → 再解析"的往返；缓存命中路径仍走 decodePage。
+                decoded = backend.decodeCarriedPage(source, raw)
                 raw.rawJson
             } catch (cause: CancellationException) {
                 throw cause

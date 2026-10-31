@@ -44,6 +44,12 @@ data class RawPage(
     val pageSize: Int,
     val total: Int?,
     val sort: String,
+    /**
+     * catalogPage 在网络层已解出的响应 DTO：fetch 路径经 [MusicBackend.decodeCarriedPage]
+     * 直接复用，省"DTO 编码回字符串 → 再解析"的往返（一页 50 条在弱核上是一次可感知的解析）。
+     * 缓存命中路径只有字符串，仍走 decodePage。
+     */
+    val decoded: Any? = null,
 )
 
 /** 后端产出的索引文档（不参与分页，一次取回）：同样是可缓存的原始体。 */
@@ -200,6 +206,14 @@ interface MusicBackend {
 
     /** 把原始页解码成领域条目；[source] 与领域类型是一一对应的（实现在此前提下做一次安全转换）。 */
     fun <T> decodePage(source: CatalogPageSource<T>, rawJson: String): DecodedPage<T>
+
+    /**
+     * [catalogPage] 已解出的响应 DTO（[RawPage.decoded]）→ DecodedPage：fetch 路径直接复用。
+     * 默认回落 [decodePage]（无视携带对象），行为与缓存命中路径完全一致；
+     * 两个后端都覆写为直接映射——映射函数与 [decodePage] 逐字一致，结果可互换。
+     */
+    fun <T> decodeCarriedPage(source: CatalogPageSource<T>, raw: RawPage): DecodedPage<T> =
+        decodePage(source, raw.rawJson)
 
     // ---- 目录：索引 ----
 

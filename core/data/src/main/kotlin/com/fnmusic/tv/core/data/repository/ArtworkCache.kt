@@ -61,9 +61,10 @@ internal class ArtworkCache(
     private val namespaceGenerations = mutableMapOf<String, Long>()
     private var globalGeneration = 0L
     private var memoryBytes = 0
-    private var trackedDiskBytes: Long? = null
+    @Volatile private var trackedDiskBytes: Long? = null
     private var fullDiskScans = 0
     private val lastTouchAt = HashMap<String, Long>()
+    private val diskBytesLock = Any()
 
     suspend fun get(
         namespace: String,
@@ -181,18 +182,19 @@ internal class ArtworkCache(
         return download().takeIf(isValid)?.let { Candidate(it, needsDiskWrite = true) }
     }
 
-    private suspend fun readDisk(key: Key): ByteArray? = diskMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val file = fileFor(key)
-            if (!file.isFile) return@withContext null
-            val bytes = runCatching { file.readBytes() }.getOrNull()
-            if (bytes == null || !isValid(bytes)) {
-                val removedBytes = file.length()
-                if (file.delete()) adjustTrackedDiskBytes(-removedBytes)
-                null
-            } else {
-                bytes
-            }
+    private suspend fun readDisk(key: Key): ByteArray? = withContext(Dispatchers.IO) {
+        // 读不串行于全局写锁：不同 key 的读/写互不相干，同 key 由 flight 去重保证单协程。
+        // 一屏 20+ 封面并发时，磁盘读不再排在写/触摸/审计后面（此前被 diskMutex 全部串行化）。
+        // 唯一共享可变状态 trackedDiskBytes 经 synchronized(diskBytesLock) 调整保证可见性。
+        val file = fileFor(key)
+        if (!file.isFile) return@withContext null
+        val bytes = runCatching { file.readBytes() }.getOrNull()
+        if (bytes == null || !isValid(bytes)) {
+            val removedBytes = file.length()
+            if (file.delete()) adjustTrackedDiskBytes(-removedBytes)
+            null
+        } else {
+            bytes
         }
     }
 
@@ -316,6 +318,10 @@ internal class ArtworkCache(
             val last = lastTouchAt[path]
             if (last != null && now - last < TOUCH_THROTTLE_MS) return
             lastTouchAt[path] = now
+            // 容量守卫：超限清掉已过节流窗口的条目（无界增长在低堆设备上是真实压力）
+            if (lastTouchAt.size > 4096) {
+                lastTouchAt.entries.removeIf { now - it.value > TOUCH_THROTTLE_MS }
+            }
         }
         diskMutex.withLock {
             withContext(Dispatchers.IO) { if (file.isFile) file.setLastModified(clock()) }
@@ -409,7 +415,9 @@ internal class ArtworkCache(
     }
 
     private fun adjustTrackedDiskBytes(delta: Long) {
-        trackedDiskBytes = trackedDiskBytes?.let { (it + delta).coerceAtLeast(0L) }
+        synchronized(diskBytesLock) {
+            trackedDiskBytes = trackedDiskBytes?.let { (it + delta).coerceAtLeast(0L) }
+        }
     }
 
     private fun purgeLegacyFiles() {
