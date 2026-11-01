@@ -541,7 +541,13 @@ internal fun LoginScreen(
             }
             val serverInvalid = !fnIdInput && !validServer && server.isNotBlank()
             val statusMessage = error?.let {
-                if (loginAttempted && it == AppError.Unauthenticated) "账号或密码错误" else errorMessage(it)
+                when {
+                    loginAttempted && it == AppError.Unauthenticated -> "账号或密码错误"
+                    // 连接被拒（TLS 失败/端口转发到明文端口）时给出可操作提示：
+                    // 12.x 升级后反代端口常见"HTTPS 没配好但明文通"，取消勾选即可连上。
+                    it == AppError.NetworkUnavailable -> "无法连接服务器：请检查地址与端口，或尝试切换 HTTPS 勾选"
+                    else -> errorMessage(it)
+                }
             } ?: when {
                 serverInvalid -> "服务器地址格式不正确，请检查是否混入全角符号"
                 fnIdInput -> "FNID 将自动选择可用连接"

@@ -1,4 +1,35 @@
-# Jellyfin 音乐接口契约（实测）
+# # Jellyfin 12.x 兼容性（2026-10-31 实测，服务器 10.8 → 12.1.0）
+
+## App 侧协议兼容性结论：已兼容，无需协议改动
+
+- 认证方案 `Authorization: MediaBrowser Client=..., Device=..., DeviceId=..., Version=...` 在 12.x
+  **仍是受支持 scheme**（12.0 禁用的是 legacy `X-Emby-Authorization` 与 `?ApiKey=` 查询参数，
+  `EnableLegacyAuthorization=false` 为默认）——本 App 从未使用这两者。
+- 12.0 移除 `/emby/`、`/mediabrowser/` 路由——本 App 从未使用。
+- `GET /QuickConnect/Initiate` 移除（改 POST）；Quick Connect 在目标服务器上禁用（POST → 400）。
+- `GetAlbumArtists`（/Artists/AlbumArtists）标记 obsolete 但仍可用。
+- `GetItems` 行为变化：带 Filters 时自动递归、同查询结果可能与 10.11 不同——**升级后需回归测试**
+  收藏/全部歌曲等 /Items 查询的结果集。
+- 版本号方案从 10.12 改为 12.0.0：App 内无服务端版本号解析逻辑（仅展示），不受影响。
+
+## 实测发现的两个服务器侧问题（App 无法修复，需在 NAS 侧处理）
+
+1. **新反代端口 2296 的 TLS 不通**：从本地与云端（干净网络）都 ECONNRESET 于 TLS 握手，
+   高度疑似端口转发到了明文 8096 而非 8920，或该端口证书/反代配置损坏。
+   **App 侧临时绕过**：登录页取消勾选 HTTPS（该端口大概率在跑明文 HTTP）。
+2. **升级迁移疑似失败**：`GET /Users/Public` 返回空列表；AuthenticateByName 对正确密码、
+   错误密码、不存在的用户返回**完全相同**的 401（AuthenticationException → "Error processing
+   request."，12.x 对所有凭据失败统一此响应）。12.0 已知迁移失败模式：用户名大小写不敏感化
+   会让数据库迁移直接失败。**需在服务器 Dashboard → 用户里确认 pan 是否还在，必要时重建**，
+   并查看服务器日志里 "Error processing request: {真实原因}"。
+
+## 头值字符集陷阱（实测经 nginx 反代）
+
+Authorization 头值含非 ASCII（如 Client="音乐坞"）时，部分 nginx 配置直接空 400 拒绝
+（请求不到 Jellyfin）。App 默认 Client="MusicDock"（ASCII）天然安全；**新增头字段时保持
+ASCII**，不要把显示名直接放进头值。
+
+Jellyfin 音乐接口契约（实测）
 
 本文件记录**实测**得到的 Jellyfin 音乐接口形态，作为 `JellyfinBackend` 适配器的实现依据。
 测试环境：Jellyfin **10.10.7**（局域网自建，账号凭据只保存在 `.trellis/local/`，不入库）。
