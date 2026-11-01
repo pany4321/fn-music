@@ -209,15 +209,25 @@ class SessionRepository internal constructor(
      * 登录页用：识别地址对应哪种后端。命中 Jellyfin 的 `/System/Info/Public` 即 Jellyfin，
      * 否则（含 FNID、探测失败）按飞牛处理——飞牛是兜底分支，不需要额外探测。
      */
-    suspend fun probeServer(serverInput: String, useHttps: Boolean): ServerProbe {
+    suspend fun probeServer(serverInput: String, useHttps: Boolean): ServerProbe? {
         val input = serverInput.trim()
         if (input.isEmpty() || ConnectionResolver.isFnId(input)) return ServerProbe(ServerKind.FnOs)
-        // 同一地址只探一次：登录页的"类型提示"与登录流程会各问一次，没必要发两遍请求。
+        // 只缓存**正向**的 Jellyfin 识别；"探测失败 → 猜是飞牛"的结果绝不缓存——
+        // 一次网络抖动（探测 3s 超时）就会把错误提示钉死整个会话。
         val cacheKey = "$useHttps|$input"
         probeCache[cacheKey]?.let { return it }
-        val identity = runCatching { jellyfinConnector.probe(input, useHttps) }.getOrNull()
-            ?: return ServerProbe(ServerKind.FnOs).also { probeCache[cacheKey] = it }
-        return ServerProbe(ServerKind.Jellyfin, identity).also { probeCache[cacheKey] = it }
+        val identity = try {
+            jellyfinConnector.probe(input, useHttps)
+        } catch (cause: AppException) {
+            // 网络层失败（超时/连不上）：类型无法判断，返回 null 让 UI 不提示
+            return null
+        }
+        return if (identity == null) {
+            // 可达但不是 Jellyfin：这才是"其实地址填的是飞牛"的正向证据
+            ServerProbe(ServerKind.FnOs)
+        } else {
+            ServerProbe(ServerKind.Jellyfin, identity).also { probeCache[cacheKey] = it }
+        }
     }
 
     suspend fun login(
@@ -233,6 +243,7 @@ class SessionRepository internal constructor(
         try {
             loadRememberedCredentials()
             val probe = kind?.let { ServerProbe(it) } ?: probeServer(serverInput, useHttps)
+                ?: throw AppException(AppError.NetworkUnavailable)
             // 明文只在这一次登录里用得到：飞牛会用它的 SHA-256（记住密码后可免密重登），
             // Jellyfin 服务端只认明文，所以那边不留哈希（免密续期只能靠令牌）。
             val plaintext = password.concatToString()

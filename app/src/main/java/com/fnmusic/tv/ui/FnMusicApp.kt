@@ -268,7 +268,7 @@ internal fun LoginScreen(
         SourceTestResult.Failed(AppError.Unknown("source_test_unavailable"), 0)
     },
     /** 提交前识别这台服务器是哪类后端（命中 Jellyfin 的 Public Info 即 Jellyfin）。 */
-    onProbe: suspend (String, Boolean) -> ServerProbe = { _, _ -> ServerProbe(ServerKind.FnOs) },
+    onProbe: suspend (String, Boolean) -> ServerProbe? = { _, _ -> null },
     /** 应用内“切换账号”时提供返回入口；为 null 表示登录页是顶层界面。 */
     onBack: (() -> Unit)? = null,
 ) {

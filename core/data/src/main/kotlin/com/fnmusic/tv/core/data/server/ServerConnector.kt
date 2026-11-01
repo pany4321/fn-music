@@ -11,6 +11,7 @@ import com.fnmusic.tv.core.model.ServerIdentity
 import com.fnmusic.tv.core.model.ServerKind
 import com.fnmusic.tv.core.model.User
 import com.fnmusic.tv.core.model.UserGuid
+import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import okhttp3.HttpUrl
@@ -258,9 +259,26 @@ internal class JellyfinConnector(
             .readTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
+        var reachedServer = false
         for (origin in probeOrigins(input, useHttps)) {
-            val identity = runCatching { publicIdentity(origin, client) }.getOrNull()
-            if (identity != null) return identity
+            try {
+                publicIdentity(origin, client)?.let { return it }
+                // 拿到了 HTTP 响应但不是 Jellyfin（缺 Id/Version）：可达但非目标
+                reachedServer = true
+            } catch (cause: CancellationException) {
+                throw cause
+            } catch (cause: AppException) {
+                // HTTP 层失败（404 等）：服务器可达但不是 Jellyfin——与网络失败区分
+                reachedServer = true
+            } catch (cause: IOException) {
+                // 网络层失败（超时/连接被拒/TLS）：换下一个 origin 继续试
+            }
+        }
+        if (!reachedServer) {
+            // 所有 origin 都在网络层失败：无法判断服务器类型，
+            // 抛出而非返回 null——调用方据此区分"不是 Jellyfin"与"够不着"，
+            // 后者绝不能反推成"这是飞牛"（误判提示的真实来源）。
+            throw AppException(AppError.NetworkUnavailable)
         }
         return null
     }

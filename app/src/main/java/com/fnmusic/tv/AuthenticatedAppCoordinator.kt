@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
 
 internal interface AuthenticatedAppActions {
     /** 登录页用：识别地址对应哪种后端（Jellyfin 命中 Public Info；其余按飞牛）。 */
-    suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe
+    suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe?
     /** 当前正在使用的音乐源档案 id（"我的"/设置里的源列表用它标记"当前"）。 */
     fun activeSourceId(): String?
     /** 测试一个已保存的音乐源是否可用（连接 + 凭据校验，且不改动当前会话）。 */
@@ -124,7 +124,7 @@ internal class AuthenticatedAppCoordinator(
         launchSessionRestore()
     }
 
-    override suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe =
+    override suspend fun probeServer(input: String, useHttps: Boolean): ServerProbe? =
         sessionRepository.probeServer(input, useHttps)
 
     override fun activeSourceId(): String? = sessionRepository.activeProfileId
